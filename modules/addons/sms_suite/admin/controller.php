@@ -103,6 +103,10 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_credit_packages($vars, $lang);
             break;
 
+        case 'billing_rates':
+            sms_suite_admin_billing_rates($vars, $lang);
+            break;
+
         case 'sender_id_pool':
             sms_suite_admin_sender_id_pool($vars, $lang);
             break;
@@ -130,6 +134,7 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'sender_id_pool' => ['icon' => 'fa-id-card', 'label' => 'Sender IDs'],
         'sender_id_requests' => ['icon' => 'fa-inbox', 'label' => 'ID Requests'],
         'credit_packages' => ['icon' => 'fa-credit-card', 'label' => 'SMS Packages'],
+        'billing_rates' => ['icon' => 'fa-dollar', 'label' => 'Billing Rates'],
         'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
         'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
         'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
@@ -1561,16 +1566,31 @@ function sms_suite_admin_client_settings($vars, $lang)
         }
     }
 
-    // Handle add balance
+    // Handle add balance (wallet)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_balance'])) {
         $amount = (float)$_POST['amount'];
         if ($amount > 0) {
             require_once __DIR__ . '/../lib/Billing/BillingService.php';
-            $result = \SMSSuite\Billing\BillingService::addBalance($clientId, $amount, 'Admin credit');
+            $result = \SMSSuite\Billing\BillingService::topUp($clientId, $amount, 'Admin credit');
             if ($result['success']) {
-                $success = 'Balance added: $' . number_format($amount, 2);
+                $success = 'Wallet balance added: $' . number_format($amount, 2);
             } else {
-                $error = $result['error'];
+                $error = $result['error'] ?? 'Failed to add balance';
+            }
+        }
+    }
+
+    // Handle add credits (plan mode)
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_credits'])) {
+        $credits = (int)$_POST['credits'];
+        if ($credits > 0) {
+            require_once __DIR__ . '/../lib/Billing/BillingService.php';
+            $adminId = $_SESSION['adminid'] ?? 1;
+            $result = \SMSSuite\Billing\BillingService::addCreditsToClient($clientId, $credits, $adminId, 'Admin credit');
+            if ($result['success']) {
+                $success = 'Credits added: ' . number_format($credits) . ' (New balance: ' . number_format($result['new_balance']) . ')';
+            } else {
+                $error = $result['error'] ?? 'Failed to add credits';
             }
         }
     }
@@ -1588,6 +1608,13 @@ function sms_suite_admin_client_settings($vars, $lang)
     // Get wallet balance
     $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
     $balance = $wallet->balance ?? 0;
+
+    // Get credit balance
+    require_once __DIR__ . '/../lib/Billing/BillingService.php';
+    $creditBalance = \SMSSuite\Billing\BillingService::getClientCreditBalance($clientId);
+
+    // Get client sender IDs
+    $clientSenderIds = \SMSSuite\Billing\BillingService::getClientSenderIdsAdmin($clientId);
 
     // Get stats
     $stats = Capsule::table('mod_sms_messages')
@@ -1702,6 +1729,7 @@ function sms_suite_admin_client_settings($vars, $lang)
     echo '<div class="panel-body">';
     echo '<table class="table table-condensed">';
     echo '<tr><td>Wallet Balance</td><td><strong>$' . number_format($balance, 2) . '</strong></td></tr>';
+    echo '<tr><td>SMS Credits</td><td><strong>' . number_format($creditBalance) . '</strong></td></tr>';
     echo '<tr><td>Total Messages</td><td>' . ($stats->total ?? 0) . '</td></tr>';
     echo '<tr><td>Delivered</td><td>' . ($stats->delivered ?? 0) . '</td></tr>';
     echo '<tr><td>Total Segments</td><td>' . ($stats->segments ?? 0) . '</td></tr>';
@@ -1712,19 +1740,56 @@ function sms_suite_admin_client_settings($vars, $lang)
     echo '</div>';
     echo '</div>';
 
-    // Add balance form
+    // Add balance form (Wallet)
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h4 class="panel-title">Add Balance</h4></div>';
+    echo '<div class="panel-heading"><h4 class="panel-title"><i class="fa fa-wallet"></i> Add Wallet Balance</h4></div>';
     echo '<div class="panel-body">';
     echo '<form method="post" class="form-inline">';
     echo '<input type="hidden" name="add_balance" value="1">';
     echo '<div class="form-group">';
-    echo '<input type="number" name="amount" class="form-control" step="0.01" min="0.01" placeholder="Amount" style="width: 100px;">';
+    echo '<div class="input-group">';
+    echo '<span class="input-group-addon">$</span>';
+    echo '<input type="number" name="amount" class="form-control" step="0.01" min="0.01" placeholder="0.00" style="width: 80px;">';
+    echo '</div>';
     echo '</div> ';
     echo '<button type="submit" class="btn btn-success"><i class="fa fa-plus"></i> Add</button>';
     echo '</form>';
     echo '</div>';
     echo '</div>';
+
+    // Add credits form (Plan mode)
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading"><h4 class="panel-title"><i class="fa fa-ticket"></i> Add SMS Credits</h4></div>';
+    echo '<div class="panel-body">';
+    echo '<form method="post" class="form-inline">';
+    echo '<input type="hidden" name="add_credits" value="1">';
+    echo '<div class="form-group">';
+    echo '<input type="number" name="credits" class="form-control" min="1" placeholder="Credits" style="width: 80px;">';
+    echo '</div> ';
+    echo '<button type="submit" class="btn btn-info"><i class="fa fa-plus"></i> Add</button>';
+    echo '</form>';
+    echo '<p class="help-block" style="margin-top:5px;">For Plan/Credits billing mode</p>';
+    echo '</div>';
+    echo '</div>';
+
+    // Client Sender IDs
+    if (!empty($clientSenderIds)) {
+        echo '<div class="panel panel-default">';
+        echo '<div class="panel-heading"><h4 class="panel-title"><i class="fa fa-id-card"></i> Assigned Sender IDs</h4></div>';
+        echo '<div class="panel-body">';
+        echo '<table class="table table-condensed">';
+        foreach ($clientSenderIds as $csid) {
+            $default = $csid->is_default ? ' <span class="label label-primary">Default</span>' : '';
+            $statusLabel = $csid->status === 'active' ? '<span class="label label-success">Active</span>' : '<span class="label label-default">' . ucfirst($csid->status) . '</span>';
+            echo '<tr>';
+            echo '<td><strong>' . htmlspecialchars($csid->sender_id) . '</strong>' . $default . '</td>';
+            echo '<td>' . $statusLabel . '</td>';
+            echo '</tr>';
+        }
+        echo '</table>';
+        echo '</div>';
+        echo '</div>';
+    }
 
     echo '</div>'; // col-md-4
     echo '</div>'; // row
@@ -2053,6 +2118,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
                 'description' => SecurityHelper::sanitize($_POST['description']),
                 'credits' => (int)$_POST['credits'],
                 'price' => (float)$_POST['price'],
+                'currency_id' => (int)($_POST['currency_id'] ?? 0) ?: null,
                 'bonus_credits' => (int)($_POST['bonus_credits'] ?? 0),
                 'validity_days' => (int)($_POST['validity_days'] ?? 0),
                 'is_featured' => isset($_POST['is_featured']),
@@ -2071,6 +2137,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
                 'description' => SecurityHelper::sanitize($_POST['description']),
                 'credits' => (int)$_POST['credits'],
                 'price' => (float)$_POST['price'],
+                'currency_id' => (int)($_POST['currency_id'] ?? 0) ?: null,
                 'bonus_credits' => (int)($_POST['bonus_credits'] ?? 0),
                 'validity_days' => (int)($_POST['validity_days'] ?? 0),
                 'is_featured' => isset($_POST['is_featured']),
@@ -2099,6 +2166,16 @@ function sms_suite_admin_credit_packages($vars, $lang)
 
     // Get currencies for dropdown
     $currencies = Capsule::table('tblcurrencies')->get();
+    $currencyMap = [];
+    foreach ($currencies as $curr) {
+        $currencyMap[$curr->id] = $curr;
+    }
+
+    // Build currency options HTML
+    $currencyOptions = '<option value="">Default (Client Currency)</option>';
+    foreach ($currencies as $curr) {
+        $currencyOptions .= '<option value="' . $curr->id . '">' . htmlspecialchars($curr->code) . ' - ' . htmlspecialchars($curr->prefix ?: $curr->suffix) . '</option>';
+    }
 
     echo '<div class="panel panel-default">
         <div class="panel-heading">
@@ -2118,8 +2195,8 @@ function sms_suite_admin_credit_packages($vars, $lang)
                         <th>Credits</th>
                         <th>Bonus</th>
                         <th>Price</th>
+                        <th>Currency</th>
                         <th>Validity</th>
-                        <th>Featured</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -2130,17 +2207,26 @@ function sms_suite_admin_credit_packages($vars, $lang)
         echo '<tr><td colspan="8" class="text-center text-muted">No packages created yet.</td></tr>';
     } else {
         foreach ($packages as $pkg) {
-            $featured = $pkg->is_featured ? '<span class="label label-warning">Featured</span>' : '';
+            $featured = $pkg->is_featured ? ' <span class="label label-warning">Featured</span>' : '';
             $status = $pkg->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>';
             $validity = $pkg->validity_days > 0 ? $pkg->validity_days . ' days' : 'Never expires';
 
+            // Get currency symbol
+            $currSymbol = '$';
+            $currCode = 'Default';
+            if ($pkg->currency_id && isset($currencyMap[$pkg->currency_id])) {
+                $curr = $currencyMap[$pkg->currency_id];
+                $currSymbol = $curr->prefix ?: $curr->suffix;
+                $currCode = $curr->code;
+            }
+
             echo '<tr>
-                <td><strong>' . htmlspecialchars($pkg->name) . '</strong><br><small class="text-muted">' . htmlspecialchars($pkg->description ?? '') . '</small></td>
+                <td><strong>' . htmlspecialchars($pkg->name) . '</strong>' . $featured . '<br><small class="text-muted">' . htmlspecialchars($pkg->description ?? '') . '</small></td>
                 <td>' . number_format($pkg->credits) . '</td>
                 <td>' . ($pkg->bonus_credits > 0 ? '+' . number_format($pkg->bonus_credits) : '-') . '</td>
-                <td>$' . number_format($pkg->price, 2) . '</td>
+                <td>' . htmlspecialchars($currSymbol) . number_format($pkg->price, 2) . '</td>
+                <td><small>' . $currCode . '</small></td>
                 <td>' . $validity . '</td>
-                <td>' . $featured . '</td>
                 <td>' . $status . '</td>
                 <td>
                     <button class="btn btn-xs btn-primary" onclick=\'editPackage(' . json_encode($pkg) . ')\'>
@@ -2192,16 +2278,21 @@ function sms_suite_admin_credit_packages($vars, $lang)
                             </div>
                         </div>
                         <div class="row">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <div class="form-group">
                                     <label>Price <span class="text-danger">*</span></label>
-                                    <div class="input-group">
-                                        <span class="input-group-addon">$</span>
-                                        <input type="number" name="price" class="form-control" required step="0.01" min="0" placeholder="9.99">
-                                    </div>
+                                    <input type="number" name="price" class="form-control" required step="0.01" min="0" placeholder="9.99">
                                 </div>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Currency</label>
+                                    <select name="currency_id" class="form-control">
+                                        ' . $currencyOptions . '
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
                                 <div class="form-group">
                                     <label>Validity (Days)</label>
                                     <input type="number" name="validity_days" class="form-control" value="0" min="0">
@@ -2268,16 +2359,21 @@ function sms_suite_admin_credit_packages($vars, $lang)
                             </div>
                         </div>
                         <div class="row">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <div class="form-group">
                                     <label>Price <span class="text-danger">*</span></label>
-                                    <div class="input-group">
-                                        <span class="input-group-addon">$</span>
-                                        <input type="number" name="price" id="edit_pkg_price" class="form-control" required step="0.01" min="0">
-                                    </div>
+                                    <input type="number" name="price" id="edit_pkg_price" class="form-control" required step="0.01" min="0">
                                 </div>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Currency</label>
+                                    <select name="currency_id" id="edit_pkg_currency" class="form-control">
+                                        ' . $currencyOptions . '
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
                                 <div class="form-group">
                                     <label>Validity (Days)</label>
                                     <input type="number" name="validity_days" id="edit_pkg_validity" class="form-control" min="0">
@@ -2311,6 +2407,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
         document.getElementById("edit_pkg_credits").value = pkg.credits;
         document.getElementById("edit_pkg_bonus").value = pkg.bonus_credits || 0;
         document.getElementById("edit_pkg_price").value = pkg.price;
+        document.getElementById("edit_pkg_currency").value = pkg.currency_id || "";
         document.getElementById("edit_pkg_validity").value = pkg.validity_days || 0;
         document.getElementById("edit_pkg_sort").value = pkg.sort_order || 0;
         document.getElementById("edit_pkg_featured").checked = pkg.is_featured == 1;
@@ -2942,4 +3039,323 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
         jQuery("#rejectModal").modal("show");
     }
     </script>';
+}
+
+// ============================================================
+// Billing Rates Configuration
+// ============================================================
+
+/**
+ * Billing Rates Configuration Page
+ */
+function sms_suite_admin_billing_rates($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $action = $_POST['form_action'] ?? '';
+
+        if ($action === 'save_rates') {
+            // Save billing rates to module settings
+            $settings = [
+                'default_billing_mode' => $_POST['default_billing_mode'] ?? 'per_segment',
+                'default_sms_rate' => (float)($_POST['default_sms_rate'] ?? 0.05),
+                'default_whatsapp_rate' => (float)($_POST['default_whatsapp_rate'] ?? 0.08),
+                'default_segment_rate' => (float)($_POST['default_segment_rate'] ?? 0.03),
+                'credit_per_sms' => (int)($_POST['credit_per_sms'] ?? 1),
+                'credit_per_segment' => (int)($_POST['credit_per_segment'] ?? 1),
+            ];
+
+            foreach ($settings as $key => $value) {
+                Capsule::table('tbladdonmodules')
+                    ->updateOrInsert(
+                        ['module' => 'sms_suite', 'setting' => $key],
+                        ['value' => $value]
+                    );
+            }
+
+            echo '<div class="alert alert-success">Billing rates saved successfully.</div>';
+        } elseif ($action === 'save_country_rate') {
+            // Save country-specific rate
+            $gatewayId = (int)$_POST['gateway_id'];
+            $countryCode = strtoupper(trim($_POST['country_code']));
+            $countryName = SecurityHelper::sanitize($_POST['country_name']);
+
+            Capsule::table('mod_sms_gateway_countries')
+                ->updateOrInsert(
+                    ['gateway_id' => $gatewayId, 'country_code' => $countryCode],
+                    [
+                        'country_name' => $countryName,
+                        'sms_rate' => (float)$_POST['sms_rate'],
+                        'whatsapp_rate' => (float)$_POST['whatsapp_rate'],
+                        'status' => isset($_POST['status']) ? 1 : 0,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]
+                );
+
+            echo '<div class="alert alert-success">Country rate saved.</div>';
+        } elseif ($action === 'delete_country_rate') {
+            Capsule::table('mod_sms_gateway_countries')
+                ->where('id', (int)$_POST['rate_id'])
+                ->delete();
+
+            echo '<div class="alert alert-success">Country rate deleted.</div>';
+        }
+    }
+
+    // Get current settings
+    $moduleSettings = Capsule::table('tbladdonmodules')
+        ->where('module', 'sms_suite')
+        ->pluck('value', 'setting');
+
+    $defaultBillingMode = $moduleSettings['default_billing_mode'] ?? 'per_segment';
+    $defaultSmsRate = $moduleSettings['default_sms_rate'] ?? '0.05';
+    $defaultWhatsappRate = $moduleSettings['default_whatsapp_rate'] ?? '0.08';
+    $defaultSegmentRate = $moduleSettings['default_segment_rate'] ?? '0.03';
+    $creditPerSms = $moduleSettings['credit_per_sms'] ?? '1';
+    $creditPerSegment = $moduleSettings['credit_per_segment'] ?? '1';
+
+    // Get gateways
+    $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->get();
+
+    // Get country rates
+    $countryRates = Capsule::table('mod_sms_gateway_countries as gc')
+        ->leftJoin('mod_sms_gateways as g', 'gc.gateway_id', '=', 'g.id')
+        ->select(['gc.*', 'g.name as gateway_name'])
+        ->orderBy('g.name')
+        ->orderBy('gc.country_name')
+        ->get();
+
+    echo '<div class="row">';
+
+    // Default Billing Settings
+    echo '<div class="col-md-6">
+        <div class="panel panel-default">
+            <div class="panel-heading">
+                <h3 class="panel-title"><i class="fa fa-cogs"></i> Default Billing Settings</h3>
+            </div>
+            <div class="panel-body">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="save_rates">
+
+                    <div class="form-group">
+                        <label>Default Billing Mode</label>
+                        <select name="default_billing_mode" class="form-control">
+                            <option value="per_message"' . ($defaultBillingMode === 'per_message' ? ' selected' : '') . '>Per Message (flat rate per SMS)</option>
+                            <option value="per_segment"' . ($defaultBillingMode === 'per_segment' ? ' selected' : '') . '>Per Segment (rate x segments)</option>
+                            <option value="wallet"' . ($defaultBillingMode === 'wallet' ? ' selected' : '') . '>Wallet (prepaid balance)</option>
+                            <option value="plan"' . ($defaultBillingMode === 'plan' ? ' selected' : '') . '>Plan/Credits (deduct credits)</option>
+                        </select>
+                        <p class="help-block">
+                            <strong>Per Message:</strong> Fixed rate per SMS regardless of length<br>
+                            <strong>Per Segment:</strong> Rate multiplied by number of segments (160 chars = 1 segment)<br>
+                            <strong>Wallet:</strong> Deduct from prepaid balance (uses segment rate)<br>
+                            <strong>Plan/Credits:</strong> Deduct credits from purchased packages
+                        </p>
+                    </div>
+
+                    <hr>
+                    <h5>Currency Rates (for Wallet mode)</h5>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Default SMS Rate</label>
+                                <div class="input-group">
+                                    <span class="input-group-addon">$</span>
+                                    <input type="number" name="default_sms_rate" class="form-control" step="0.0001" value="' . htmlspecialchars($defaultSmsRate) . '">
+                                </div>
+                                <p class="help-block">Per message (flat rate mode)</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Default Segment Rate</label>
+                                <div class="input-group">
+                                    <span class="input-group-addon">$</span>
+                                    <input type="number" name="default_segment_rate" class="form-control" step="0.0001" value="' . htmlspecialchars($defaultSegmentRate) . '">
+                                </div>
+                                <p class="help-block">Per segment (segment mode)</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Default WhatsApp Rate</label>
+                        <div class="input-group">
+                            <span class="input-group-addon">$</span>
+                            <input type="number" name="default_whatsapp_rate" class="form-control" step="0.0001" value="' . htmlspecialchars($defaultWhatsappRate) . '">
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h5>Credit Settings (for Plan mode)</h5>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Credits per SMS</label>
+                                <input type="number" name="credit_per_sms" class="form-control" min="1" value="' . htmlspecialchars($creditPerSms) . '">
+                                <p class="help-block">Flat rate mode</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Credits per Segment</label>
+                                <input type="number" name="credit_per_segment" class="form-control" min="1" value="' . htmlspecialchars($creditPerSegment) . '">
+                                <p class="help-block">Segment mode</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Save Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Billing Mode Explanation
+    echo '<div class="col-md-6">
+        <div class="panel panel-info">
+            <div class="panel-heading">
+                <h3 class="panel-title"><i class="fa fa-info-circle"></i> Billing Modes Explained</h3>
+            </div>
+            <div class="panel-body">
+                <h5><i class="fa fa-envelope"></i> Per Message</h5>
+                <p>Client is charged a flat rate per SMS, regardless of message length. A 300-character message costs the same as a 50-character message.</p>
+
+                <h5><i class="fa fa-puzzle-piece"></i> Per Segment</h5>
+                <p>Messages are split into segments (160 chars GSM / 70 chars Unicode). Client is charged per segment. A 300-character message = 2 segments = 2x rate.</p>
+
+                <h5><i class="fa fa-wallet"></i> Wallet</h5>
+                <p>Client pre-pays into a wallet balance. Each message deducts from their balance based on segment rate. They can top-up via invoice.</p>
+
+                <h5><i class="fa fa-ticket"></i> Plan/Credits</h5>
+                <p>Client purchases credit packages. Each message deducts credits. No currency involved - pure credit-based billing.</p>
+
+                <hr>
+                <div class="alert alert-warning">
+                    <i class="fa fa-user"></i> <strong>Per-Client Override:</strong> You can override the billing mode for individual clients in their SMS Suite settings (Client Profile > SMS Panel > Settings).
+                </div>
+            </div>
+        </div>
+    </div>';
+
+    echo '</div>'; // End row
+
+    // Country-Specific Rates
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                <i class="fa fa-globe"></i> Country-Specific Rates
+                <button class="btn btn-success btn-sm pull-right" data-toggle="modal" data-target="#addCountryRateModal">
+                    <i class="fa fa-plus"></i> Add Country Rate
+                </button>
+            </h3>
+        </div>
+        <div class="panel-body">
+            <p class="text-muted">Set different rates per country per gateway. These override the default rates.</p>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Gateway</th>
+                        <th>Country</th>
+                        <th>Code</th>
+                        <th>SMS Rate</th>
+                        <th>WhatsApp Rate</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+    if ($countryRates->isEmpty()) {
+        echo '<tr><td colspan="7" class="text-center text-muted">No country-specific rates configured. Default rates will be used.</td></tr>';
+    } else {
+        foreach ($countryRates as $rate) {
+            $status = $rate->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>';
+            echo '<tr>
+                <td>' . htmlspecialchars($rate->gateway_name ?? 'Unknown') . '</td>
+                <td>' . htmlspecialchars($rate->country_name) . '</td>
+                <td><code>' . htmlspecialchars($rate->country_code) . '</code></td>
+                <td>$' . number_format($rate->sms_rate, 4) . '</td>
+                <td>$' . number_format($rate->whatsapp_rate, 4) . '</td>
+                <td>' . $status . '</td>
+                <td>
+                    <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this rate?\');">
+                        <input type="hidden" name="form_action" value="delete_country_rate">
+                        <input type="hidden" name="rate_id" value="' . $rate->id . '">
+                        <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>';
+        }
+    }
+
+    echo '</tbody></table></div></div>';
+
+    // Gateway options for modal
+    $gatewayOptions = '';
+    foreach ($gateways as $gw) {
+        $gatewayOptions .= '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . '</option>';
+    }
+
+    // Add Country Rate Modal
+    echo '<div class="modal fade" id="addCountryRateModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="save_country_rate">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-plus"></i> Add Country Rate</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Gateway <span class="text-danger">*</span></label>
+                            <select name="gateway_id" class="form-control" required>
+                                ' . $gatewayOptions . '
+                            </select>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Country Code <span class="text-danger">*</span></label>
+                                    <input type="text" name="country_code" class="form-control" required maxlength="5" placeholder="US">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Country Name</label>
+                                    <input type="text" name="country_name" class="form-control" placeholder="United States">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>SMS Rate</label>
+                            <div class="input-group">
+                                <span class="input-group-addon">$</span>
+                                <input type="number" name="sms_rate" class="form-control" step="0.0001" value="0.05">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>WhatsApp Rate</label>
+                            <div class="input-group">
+                                <span class="input-group-addon">$</span>
+                                <input type="number" name="whatsapp_rate" class="form-control" step="0.0001" value="0.08">
+                            </div>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="status" value="1" checked> Active</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">Save Rate</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
 }
