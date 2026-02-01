@@ -83,6 +83,22 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_send($vars, $lang);
             break;
 
+        case 'client_settings':
+            sms_suite_admin_client_settings($vars, $lang);
+            break;
+
+        case 'client_messages':
+            sms_suite_admin_client_messages($vars, $lang);
+            break;
+
+        case 'send_to_client':
+            sms_suite_admin_send_to_client($vars, $lang);
+            break;
+
+        case 'notifications':
+            sms_suite_admin_notifications($vars, $lang);
+            break;
+
         case 'dashboard':
         default:
             sms_suite_admin_dashboard($vars, $lang);
@@ -103,6 +119,7 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
         'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
         'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
+        'notifications' => ['icon' => 'fa-bell', 'label' => 'Notifications'],
         'automation' => ['icon' => 'fa-magic', 'label' => $lang['menu_automation']],
         'reports' => ['icon' => 'fa-bar-chart', 'label' => $lang['menu_reports']],
         'clients' => ['icon' => 'fa-users', 'label' => 'Clients'],
@@ -1467,4 +1484,534 @@ function sms_suite_status_class($status)
     ];
 
     return isset($map[$status]) ? $map[$status] : 'default';
+}
+
+/**
+ * Client SMS Settings page - Manage individual client's sender ID and gateway
+ */
+function sms_suite_admin_client_settings($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $clientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+
+    if (!$clientId) {
+        echo '<div class="alert alert-danger">Client ID required.</div>';
+        return;
+    }
+
+    // Get client
+    $client = Capsule::table('tblclients')->where('id', $clientId)->first();
+    if (!$client) {
+        echo '<div class="alert alert-danger">Client not found.</div>';
+        return;
+    }
+
+    // Get or create settings
+    $settings = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
+    if (!$settings) {
+        Capsule::table('mod_sms_settings')->insert([
+            'client_id' => $clientId,
+            'billing_mode' => 'per_segment',
+            'api_enabled' => true,
+            'accept_sms' => true,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $settings = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
+    }
+
+    // Handle form submission
+    $success = null;
+    $error = null;
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_client_settings'])) {
+        try {
+            Capsule::table('mod_sms_settings')
+                ->where('client_id', $clientId)
+                ->update([
+                    'assigned_sender_id' => $_POST['assigned_sender_id'] ?: null,
+                    'assigned_gateway_id' => !empty($_POST['assigned_gateway_id']) ? (int)$_POST['assigned_gateway_id'] : null,
+                    'billing_mode' => $_POST['billing_mode'] ?? 'per_segment',
+                    'monthly_limit' => !empty($_POST['monthly_limit']) ? (int)$_POST['monthly_limit'] : null,
+                    'api_enabled' => isset($_POST['api_enabled']) ? 1 : 0,
+                    'accept_sms' => isset($_POST['accept_sms']) ? 1 : 0,
+                    'accept_marketing_sms' => isset($_POST['accept_marketing_sms']) ? 1 : 0,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            $success = 'Client SMS settings updated successfully.';
+            $settings = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
+
+        } catch (Exception $e) {
+            $error = 'Failed to update settings: ' . $e->getMessage();
+        }
+    }
+
+    // Handle add balance
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_balance'])) {
+        $amount = (float)$_POST['amount'];
+        if ($amount > 0) {
+            require_once __DIR__ . '/../lib/Billing/BillingService.php';
+            $result = \SMSSuite\Billing\BillingService::addBalance($clientId, $amount, 'Admin credit');
+            if ($result['success']) {
+                $success = 'Balance added: $' . number_format($amount, 2);
+            } else {
+                $error = $result['error'];
+            }
+        }
+    }
+
+    // Get gateways and sender IDs
+    $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
+    $senderIds = Capsule::table('mod_sms_sender_ids')
+        ->where(function($q) use ($clientId) {
+            $q->whereNull('client_id')->orWhere('client_id', $clientId);
+        })
+        ->where('status', 'active')
+        ->orderBy('sender_id')
+        ->get();
+
+    // Get wallet balance
+    $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
+    $balance = $wallet->balance ?? 0;
+
+    // Get stats
+    $stats = Capsule::table('mod_sms_messages')
+        ->where('client_id', $clientId)
+        ->selectRaw('COUNT(*) as total, SUM(CASE WHEN status = "delivered" THEN 1 ELSE 0 END) as delivered, SUM(segments) as segments')
+        ->first();
+
+    $clientName = $client->companyname ?: ($client->firstname . ' ' . $client->lastname);
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title">SMS Settings for: ' . htmlspecialchars($clientName) . ' (ID: ' . $clientId . ')</h3>';
+    echo '</div>';
+    echo '<div class="panel-body">';
+
+    if ($success) {
+        echo '<div class="alert alert-success">' . htmlspecialchars($success) . '</div>';
+    }
+    if ($error) {
+        echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
+    }
+
+    echo '<div class="row">';
+
+    // Left column - Settings form
+    echo '<div class="col-md-8">';
+    echo '<form method="post">';
+    echo '<input type="hidden" name="save_client_settings" value="1">';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-6">';
+    echo '<div class="form-group">';
+    echo '<label>Assigned Sender ID</label>';
+    echo '<select name="assigned_sender_id" class="form-control">';
+    echo '<option value="">-- Use Default --</option>';
+    foreach ($senderIds as $sid) {
+        $selected = ($settings->assigned_sender_id === $sid->sender_id) ? 'selected' : '';
+        $label = $sid->sender_id . ($sid->client_id ? ' (Client)' : ' (Global)');
+        echo '<option value="' . htmlspecialchars($sid->sender_id) . '" ' . $selected . '>' . htmlspecialchars($label) . '</option>';
+    }
+    echo '</select>';
+    echo '<p class="help-block">The sender ID used for this client\'s outgoing messages</p>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="col-md-6">';
+    echo '<div class="form-group">';
+    echo '<label>Assigned Gateway</label>';
+    echo '<select name="assigned_gateway_id" class="form-control">';
+    echo '<option value="">-- Use Default --</option>';
+    foreach ($gateways as $gw) {
+        $selected = (isset($settings->assigned_gateway_id) && $settings->assigned_gateway_id == $gw->id) ? 'selected' : '';
+        echo '<option value="' . $gw->id . '" ' . $selected . '>' . htmlspecialchars($gw->name) . ' (' . $gw->type . ')</option>';
+    }
+    echo '</select>';
+    echo '<p class="help-block">The SMS gateway for this client</p>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-6">';
+    echo '<div class="form-group">';
+    echo '<label>Billing Mode</label>';
+    echo '<select name="billing_mode" class="form-control">';
+    $modes = ['per_segment' => 'Per Segment', 'per_message' => 'Per Message', 'wallet' => 'Wallet', 'plan' => 'Plan/Bundle'];
+    foreach ($modes as $val => $label) {
+        $selected = ($settings->billing_mode === $val) ? 'selected' : '';
+        echo '<option value="' . $val . '" ' . $selected . '>' . $label . '</option>';
+    }
+    echo '</select>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="col-md-6">';
+    echo '<div class="form-group">';
+    echo '<label>Monthly SMS Limit</label>';
+    echo '<input type="number" name="monthly_limit" class="form-control" value="' . ($settings->monthly_limit ?? '') . '" placeholder="Unlimited">';
+    echo '<p class="help-block">Leave empty for unlimited</p>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-4">';
+    echo '<div class="checkbox"><label>';
+    echo '<input type="checkbox" name="api_enabled" ' . ($settings->api_enabled ? 'checked' : '') . '> API Access Enabled';
+    echo '</label></div>';
+    echo '</div>';
+    echo '<div class="col-md-4">';
+    echo '<div class="checkbox"><label>';
+    echo '<input type="checkbox" name="accept_sms" ' . ($settings->accept_sms ? 'checked' : '') . '> SMS Notifications Enabled';
+    echo '</label></div>';
+    echo '</div>';
+    echo '<div class="col-md-4">';
+    echo '<div class="checkbox"><label>';
+    echo '<input type="checkbox" name="accept_marketing_sms" ' . (isset($settings->accept_marketing_sms) && $settings->accept_marketing_sms ? 'checked' : '') . '> Marketing SMS Enabled';
+    echo '</label></div>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<hr>';
+    echo '<button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Save Settings</button> ';
+    echo '<a href="clientssummary.php?userid=' . $clientId . '" class="btn btn-default">Back to Client</a>';
+    echo '</form>';
+    echo '</div>';
+
+    // Right column - Stats and quick actions
+    echo '<div class="col-md-4">';
+    echo '<div class="panel panel-info">';
+    echo '<div class="panel-heading"><h4 class="panel-title">Account Summary</h4></div>';
+    echo '<div class="panel-body">';
+    echo '<table class="table table-condensed">';
+    echo '<tr><td>Wallet Balance</td><td><strong>$' . number_format($balance, 2) . '</strong></td></tr>';
+    echo '<tr><td>Total Messages</td><td>' . ($stats->total ?? 0) . '</td></tr>';
+    echo '<tr><td>Delivered</td><td>' . ($stats->delivered ?? 0) . '</td></tr>';
+    echo '<tr><td>Total Segments</td><td>' . ($stats->segments ?? 0) . '</td></tr>';
+    if (isset($settings->monthly_limit) && $settings->monthly_limit) {
+        echo '<tr><td>Monthly Used</td><td>' . ($settings->monthly_used ?? 0) . ' / ' . $settings->monthly_limit . '</td></tr>';
+    }
+    echo '</table>';
+    echo '</div>';
+    echo '</div>';
+
+    // Add balance form
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading"><h4 class="panel-title">Add Balance</h4></div>';
+    echo '<div class="panel-body">';
+    echo '<form method="post" class="form-inline">';
+    echo '<input type="hidden" name="add_balance" value="1">';
+    echo '<div class="form-group">';
+    echo '<input type="number" name="amount" class="form-control" step="0.01" min="0.01" placeholder="Amount" style="width: 100px;">';
+    echo '</div> ';
+    echo '<button type="submit" class="btn btn-success"><i class="fa fa-plus"></i> Add</button>';
+    echo '</form>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '</div>'; // col-md-4
+    echo '</div>'; // row
+
+    echo '</div>';
+    echo '</div>';
+}
+
+/**
+ * Client Messages History page
+ */
+function sms_suite_admin_client_messages($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $clientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+
+    if (!$clientId) {
+        echo '<div class="alert alert-danger">Client ID required.</div>';
+        return;
+    }
+
+    $client = Capsule::table('tblclients')->where('id', $clientId)->first();
+    if (!$client) {
+        echo '<div class="alert alert-danger">Client not found.</div>';
+        return;
+    }
+
+    $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+    $limit = 50;
+    $offset = ($page - 1) * $limit;
+
+    $query = Capsule::table('mod_sms_messages')->where('client_id', $clientId);
+
+    if (!empty($_GET['status'])) {
+        $query->where('status', $_GET['status']);
+    }
+
+    $total = $query->count();
+    $messages = $query->orderBy('created_at', 'desc')->limit($limit)->offset($offset)->get();
+
+    $clientName = $client->companyname ?: ($client->firstname . ' ' . $client->lastname);
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title">Message History: ' . htmlspecialchars($clientName) . '</h3>';
+    echo '</div>';
+    echo '<div class="panel-body">';
+
+    // Filter
+    echo '<form method="get" class="form-inline" style="margin-bottom: 15px;">';
+    echo '<input type="hidden" name="module" value="sms_suite">';
+    echo '<input type="hidden" name="action" value="client_messages">';
+    echo '<input type="hidden" name="client_id" value="' . $clientId . '">';
+    echo '<select name="status" class="form-control">';
+    echo '<option value="">All Statuses</option>';
+    foreach (['queued', 'sending', 'sent', 'delivered', 'failed', 'rejected'] as $s) {
+        $selected = (isset($_GET['status']) && $_GET['status'] === $s) ? 'selected' : '';
+        echo '<option value="' . $s . '" ' . $selected . '>' . ucfirst($s) . '</option>';
+    }
+    echo '</select> ';
+    echo '<button type="submit" class="btn btn-default">Filter</button>';
+    echo '</form>';
+
+    if (count($messages) > 0) {
+        echo '<table class="table table-striped table-condensed">';
+        echo '<thead><tr><th>Date</th><th>To</th><th>Message</th><th>Segments</th><th>Status</th><th>Cost</th></tr></thead>';
+        echo '<tbody>';
+        foreach ($messages as $msg) {
+            $statusClass = sms_suite_status_class($msg->status);
+            echo '<tr>';
+            echo '<td style="white-space: nowrap;">' . date('M j, g:i A', strtotime($msg->created_at)) . '</td>';
+            echo '<td>' . htmlspecialchars($msg->to_number) . '</td>';
+            echo '<td>' . htmlspecialchars(substr($msg->message, 0, 50)) . (strlen($msg->message) > 50 ? '...' : '') . '</td>';
+            echo '<td>' . $msg->segments . '</td>';
+            echo '<td><span class="label label-' . $statusClass . '">' . ucfirst($msg->status) . '</span></td>';
+            echo '<td>$' . number_format($msg->cost, 4) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody>';
+        echo '</table>';
+
+        // Pagination
+        $totalPages = ceil($total / $limit);
+        if ($totalPages > 1) {
+            echo '<nav><ul class="pagination">';
+            for ($i = 1; $i <= $totalPages; $i++) {
+                $active = ($i === $page) ? 'active' : '';
+                echo '<li class="' . $active . '"><a href="' . $modulelink . '&action=client_messages&client_id=' . $clientId . '&page=' . $i . '">' . $i . '</a></li>';
+            }
+            echo '</ul></nav>';
+        }
+    } else {
+        echo '<div class="alert alert-info">No messages found.</div>';
+    }
+
+    echo '<hr>';
+    echo '<a href="clientssummary.php?userid=' . $clientId . '" class="btn btn-default">Back to Client</a>';
+    echo '</div>';
+    echo '</div>';
+}
+
+/**
+ * Send SMS to specific client (from client profile)
+ */
+function sms_suite_admin_send_to_client($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $clientId = isset($_POST['client_id']) ? (int)$_POST['client_id'] : 0;
+    $phone = isset($_POST['phone']) ? trim($_POST['phone']) : '';
+    $message = isset($_POST['message']) ? trim($_POST['message']) : '';
+
+    if (!$clientId || empty($message)) {
+        echo '<div class="alert alert-danger">Client ID and message are required.</div>';
+        return;
+    }
+
+    $client = Capsule::table('tblclients')->where('id', $clientId)->first();
+    if (!$client) {
+        echo '<div class="alert alert-danger">Client not found.</div>';
+        return;
+    }
+
+    // Get phone if not provided
+    if (empty($phone)) {
+        require_once __DIR__ . '/../lib/Core/NotificationService.php';
+        $phone = \SMSSuite\Core\NotificationService::getClientPhone($client);
+    }
+
+    if (empty($phone)) {
+        echo '<div class="alert alert-danger">Client has no phone number on file.</div>';
+        echo '<a href="clientssummary.php?userid=' . $clientId . '" class="btn btn-default">Back to Client</a>';
+        return;
+    }
+
+    // Get client settings for sender ID and gateway
+    $settings = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
+    $senderId = $settings->assigned_sender_id ?? null;
+    $gatewayId = $settings->assigned_gateway_id ?? null;
+
+    // Send the message
+    require_once __DIR__ . '/../lib/Core/MessageService.php';
+
+    $result = \SMSSuite\Core\MessageService::sendDirect($phone, $message, [
+        'sender_id' => $senderId,
+        'gateway_id' => $gatewayId,
+    ]);
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading"><h3 class="panel-title">Send SMS to Client</h3></div>';
+    echo '<div class="panel-body">';
+
+    if ($result['success']) {
+        echo '<div class="alert alert-success">';
+        echo '<strong>Success!</strong> Message sent to ' . htmlspecialchars($phone) . '.';
+        echo '</div>';
+    } else {
+        echo '<div class="alert alert-danger">';
+        echo '<strong>Failed!</strong> ' . htmlspecialchars($result['error'] ?? 'Unknown error');
+        echo '</div>';
+    }
+
+    $clientName = $client->companyname ?: ($client->firstname . ' ' . $client->lastname);
+    echo '<p><strong>Client:</strong> ' . htmlspecialchars($clientName) . '</p>';
+    echo '<p><strong>Phone:</strong> ' . htmlspecialchars($phone) . '</p>';
+    echo '<p><strong>Message:</strong> ' . htmlspecialchars($message) . '</p>';
+
+    echo '<hr>';
+    echo '<a href="clientssummary.php?userid=' . $clientId . '" class="btn btn-primary">Back to Client Profile</a>';
+    echo '</div>';
+    echo '</div>';
+}
+
+/**
+ * SMS Notification Templates Management
+ */
+function sms_suite_admin_notifications($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $success = null;
+    $error = null;
+
+    // Handle save
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_template'])) {
+        $templateId = (int)$_POST['template_id'];
+        $message = trim($_POST['message'] ?? '');
+        $status = isset($_POST['status']) ? 'active' : 'inactive';
+
+        try {
+            Capsule::table('mod_sms_notification_templates')
+                ->where('id', $templateId)
+                ->update([
+                    'message' => $message,
+                    'status' => $status,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            $success = 'Template updated successfully.';
+        } catch (Exception $e) {
+            $error = $e->getMessage();
+        }
+    }
+
+    // Create defaults if not exist
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_defaults'])) {
+        require_once __DIR__ . '/../lib/Core/NotificationService.php';
+        $created = \SMSSuite\Core\NotificationService::createDefaultTemplates();
+        $success = $created . ' default templates created.';
+    }
+
+    // Get templates grouped by category
+    $templates = Capsule::table('mod_sms_notification_templates')
+        ->orderBy('category')
+        ->orderBy('name')
+        ->get();
+
+    $categories = [];
+    foreach ($templates as $t) {
+        $categories[$t->category][] = $t;
+    }
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title">SMS Notification Templates';
+    echo '<form method="post" style="display: inline; float: right;">';
+    echo '<input type="hidden" name="create_defaults" value="1">';
+    echo '<button type="submit" class="btn btn-xs btn-default">Create Default Templates</button>';
+    echo '</form>';
+    echo '</h3>';
+    echo '</div>';
+    echo '<div class="panel-body">';
+
+    if ($success) {
+        echo '<div class="alert alert-success">' . htmlspecialchars($success) . '</div>';
+    }
+    if ($error) {
+        echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
+    }
+
+    if (empty($templates)) {
+        echo '<div class="alert alert-info">No templates found. Click "Create Default Templates" to get started.</div>';
+    } else {
+        echo '<p class="text-muted">These templates send SMS notifications alongside WHMCS emails. Enable or disable each notification type as needed.</p>';
+
+        foreach ($categories as $category => $catTemplates) {
+            echo '<h4 style="margin-top: 20px; text-transform: capitalize;">' . htmlspecialchars($category) . ' Notifications</h4>';
+            echo '<table class="table table-striped table-condensed">';
+            echo '<thead><tr><th>Type</th><th>Template Message</th><th>Status</th><th>Actions</th></tr></thead>';
+            echo '<tbody>';
+            foreach ($catTemplates as $t) {
+                $statusClass = $t->status === 'active' ? 'success' : 'default';
+                echo '<tr>';
+                echo '<td style="width: 180px;"><strong>' . htmlspecialchars($t->name) . '</strong><br><small class="text-muted">' . $t->notification_type . '</small></td>';
+                echo '<td>' . htmlspecialchars(substr($t->message, 0, 100)) . (strlen($t->message) > 100 ? '...' : '') . '</td>';
+                echo '<td><span class="label label-' . $statusClass . '">' . ucfirst($t->status) . '</span></td>';
+                echo '<td><button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', \'' . addslashes($t->name) . '\', \'' . addslashes($t->message) . '\', \'' . $t->status . '\')">Edit</button></td>';
+                echo '</tr>';
+            }
+            echo '</tbody>';
+            echo '</table>';
+        }
+    }
+
+    echo '</div>';
+    echo '</div>';
+
+    // Edit modal
+    echo '
+    <div class="modal fade" id="editModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="save_template" value="1">
+                    <input type="hidden" name="template_id" id="edit_template_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title" id="edit_modal_title">Edit Template</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Message Template</label>
+                            <textarea name="message" id="edit_message" class="form-control" rows="4" required></textarea>
+                            <p class="help-block">Use merge tags like {first_name}, {invoice_number}, {total}, etc.</p>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="status" id="edit_status" value="1"> Active</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+    function editTemplate(id, name, message, status) {
+        document.getElementById("edit_template_id").value = id;
+        document.getElementById("edit_modal_title").textContent = "Edit: " + name;
+        document.getElementById("edit_message").value = message;
+        document.getElementById("edit_status").checked = (status === "active");
+        jQuery("#editModal").modal("show");
+    }
+    </script>';
 }

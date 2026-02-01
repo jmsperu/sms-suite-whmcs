@@ -381,6 +381,27 @@ function sms_suite_create_tables()
                 $table->text('enabled_notifications')->nullable()->after('accept_marketing_sms');
             });
         }
+        // Client-specific sender ID and gateway assignment
+        if (!$schema->hasColumn('mod_sms_settings', 'assigned_sender_id')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->string('assigned_sender_id', 50)->nullable()->after('default_sender_id');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_settings', 'assigned_gateway_id')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->unsignedInteger('assigned_gateway_id')->nullable()->after('default_gateway_id');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_settings', 'monthly_limit')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->unsignedInteger('monthly_limit')->nullable()->after('assigned_gateway_id');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_settings', 'monthly_used')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->unsignedInteger('monthly_used')->default(0)->after('monthly_limit');
+            });
+        }
     }
 
     // Gateways

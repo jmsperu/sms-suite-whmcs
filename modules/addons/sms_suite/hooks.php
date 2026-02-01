@@ -159,6 +159,100 @@ HTML;
 });
 
 /**
+ * Client Summary Page - SMS Panel Widget
+ * Adds an SMS panel to the client profile in admin area
+ */
+add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
+    try {
+        $clientId = $vars['userid'];
+
+        // Get client details
+        $client = Capsule::table('tblclients')->where('id', $clientId)->first();
+        if (!$client) return '';
+
+        // Get client SMS settings
+        $settings = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
+
+        // Get phone number
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+        $phone = \SMSSuite\Core\NotificationService::getClientPhone($client);
+
+        // Get message stats
+        $messageStats = Capsule::table('mod_sms_messages')
+            ->where('client_id', $clientId)
+            ->selectRaw('COUNT(*) as total, SUM(CASE WHEN status = "delivered" THEN 1 ELSE 0 END) as delivered')
+            ->first();
+
+        // Get wallet balance
+        $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
+        $balance = $wallet->balance ?? 0;
+
+        // Get assigned sender ID and gateway
+        $assignedSenderId = $settings->assigned_sender_id ?? 'Not assigned';
+        $assignedGatewayId = $settings->assigned_gateway_id ?? null;
+        $gatewayName = 'Default';
+        if ($assignedGatewayId) {
+            $gateway = Capsule::table('mod_sms_gateways')->where('id', $assignedGatewayId)->first();
+            $gatewayName = $gateway->name ?? 'Unknown';
+        }
+
+        // Verification status
+        $verification = Capsule::table('mod_sms_client_verification')->where('client_id', $clientId)->first();
+        $isVerified = $verification && $verification->phone_verified;
+        $verificationBadge = $isVerified
+            ? '<span class="label label-success">Verified</span>'
+            : '<span class="label label-warning">Not Verified</span>';
+
+        // Build the widget HTML
+        $html = '
+        <div class="panel panel-default" id="sms-suite-client-panel">
+            <div class="panel-heading">
+                <h3 class="panel-title">
+                    <i class="fas fa-sms"></i> SMS Suite
+                    <a href="addonmodules.php?module=sms_suite&action=client_settings&client_id=' . $clientId . '" class="btn btn-xs btn-default pull-right">
+                        <i class="fas fa-cog"></i> Settings
+                    </a>
+                </h3>
+            </div>
+            <div class="panel-body">
+                <div class="row">
+                    <div class="col-sm-6">
+                        <strong>Phone:</strong> ' . htmlspecialchars($phone ?: 'Not set') . ' ' . $verificationBadge . '<br>
+                        <strong>Balance:</strong> $' . number_format($balance, 2) . '<br>
+                        <strong>Messages Sent:</strong> ' . ($messageStats->total ?? 0) . ' (' . ($messageStats->delivered ?? 0) . ' delivered)
+                    </div>
+                    <div class="col-sm-6">
+                        <strong>Sender ID:</strong> ' . htmlspecialchars($assignedSenderId) . '<br>
+                        <strong>Gateway:</strong> ' . htmlspecialchars($gatewayName) . '<br>
+                        <strong>SMS Notifications:</strong> ' . ($settings && $settings->accept_sms ? '<span class="label label-success">Enabled</span>' : '<span class="label label-default">Disabled</span>') . '
+                    </div>
+                </div>
+                <hr style="margin: 10px 0;">
+                <form method="post" action="addonmodules.php?module=sms_suite&action=send_to_client" class="form-inline">
+                    <input type="hidden" name="client_id" value="' . $clientId . '">
+                    <input type="hidden" name="phone" value="' . htmlspecialchars($phone) . '">
+                    <div class="form-group" style="width: 60%;">
+                        <input type="text" name="message" class="form-control" style="width: 100%;" placeholder="Type your SMS message..." required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" ' . (empty($phone) ? 'disabled title="No phone number"' : '') . '>
+                        <i class="fas fa-paper-plane"></i> Send SMS
+                    </button>
+                    <a href="addonmodules.php?module=sms_suite&action=client_messages&client_id=' . $clientId . '" class="btn btn-default">
+                        <i class="fas fa-history"></i> History
+                    </a>
+                </form>
+            </div>
+        </div>';
+
+        return $html;
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (AdminAreaClientSummaryPage): ' . $e->getMessage());
+        return '';
+    }
+});
+
+/**
  * Client Area Footer Output - Add any required JS/CSS
  */
 add_hook('ClientAreaFooterOutput', 1, function ($vars) {
