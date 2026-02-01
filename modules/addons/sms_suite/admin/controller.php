@@ -56,6 +56,14 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_campaign_view($vars, $lang);
             break;
 
+        case 'contacts':
+            sms_suite_admin_contacts($vars, $lang);
+            break;
+
+        case 'contact_groups':
+            sms_suite_admin_contact_groups($vars, $lang);
+            break;
+
         case 'messages':
             sms_suite_admin_messages($vars, $lang);
             break;
@@ -162,6 +170,8 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'credit_packages' => ['icon' => 'fa-credit-card', 'label' => 'SMS Packages'],
         'billing_rates' => ['icon' => 'fa-dollar', 'label' => 'Billing Rates'],
         'network_prefixes' => ['icon' => 'fa-globe', 'label' => 'Network Prefixes'],
+        'contacts' => ['icon' => 'fa-address-book', 'label' => 'Contacts'],
+        'contact_groups' => ['icon' => 'fa-users', 'label' => 'Contact Groups'],
         'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
         'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
         'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
@@ -1380,8 +1390,9 @@ function sms_suite_admin_campaign_edit($vars, $lang)
         $campaign = Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->first();
     }
 
-    // Get contact groups
+    // Get admin contact groups (client_id = 0)
     $groups = Capsule::table('mod_sms_contact_groups')
+        ->where('client_id', 0)
         ->where('status', 1)
         ->orderBy('name')
         ->get();
@@ -6765,4 +6776,576 @@ function sms_suite_get_kenya_prefixes(): array
         // Homeland Media
         ['prefix' => '767', 'operator' => 'Homeland Media', 'operator_code' => 'homeland', 'mnc' => ''],
     ];
+}
+
+/**
+ * Admin Contact Groups Management
+ */
+function sms_suite_admin_contact_groups($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $message = '';
+    $messageType = '';
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        // Create group
+        if (isset($_POST['create_group'])) {
+            $name = trim($_POST['group_name'] ?? '');
+            $description = trim($_POST['description'] ?? '');
+
+            if (empty($name)) {
+                $message = 'Group name is required.';
+                $messageType = 'danger';
+            } else {
+                Capsule::table('mod_sms_contact_groups')->insert([
+                    'client_id' => 0, // Admin group
+                    'name' => $name,
+                    'description' => $description,
+                    'status' => 1,
+                    'contact_count' => 0,
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+                $message = 'Contact group created successfully.';
+                $messageType = 'success';
+            }
+        }
+
+        // Update group
+        if (isset($_POST['update_group'])) {
+            $groupId = (int)$_POST['group_id'];
+            $name = trim($_POST['group_name'] ?? '');
+            $description = trim($_POST['description'] ?? '');
+
+            if (empty($name)) {
+                $message = 'Group name is required.';
+                $messageType = 'danger';
+            } else {
+                Capsule::table('mod_sms_contact_groups')
+                    ->where('id', $groupId)
+                    ->where('client_id', 0)
+                    ->update([
+                        'name' => $name,
+                        'description' => $description,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                $message = 'Contact group updated.';
+                $messageType = 'success';
+            }
+        }
+
+        // Delete group
+        if (isset($_POST['delete_group'])) {
+            $groupId = (int)$_POST['group_id'];
+            $contactCount = Capsule::table('mod_sms_contacts')
+                ->where('group_id', $groupId)
+                ->where('client_id', 0)
+                ->count();
+
+            if ($contactCount > 0) {
+                $message = "Cannot delete group with {$contactCount} contacts. Remove contacts first.";
+                $messageType = 'danger';
+            } else {
+                Capsule::table('mod_sms_contact_groups')
+                    ->where('id', $groupId)
+                    ->where('client_id', 0)
+                    ->delete();
+                $message = 'Contact group deleted.';
+                $messageType = 'success';
+            }
+        }
+    }
+
+    // Get admin groups (client_id = 0)
+    $groups = Capsule::table('mod_sms_contact_groups')
+        ->where('client_id', 0)
+        ->orderBy('name')
+        ->get();
+
+    // Update contact counts
+    foreach ($groups as $group) {
+        $count = Capsule::table('mod_sms_contacts')
+            ->where('group_id', $group->id)
+            ->count();
+        if ($count != $group->contact_count) {
+            Capsule::table('mod_sms_contact_groups')
+                ->where('id', $group->id)
+                ->update(['contact_count' => $count]);
+            $group->contact_count = $count;
+        }
+    }
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<div class="row">';
+    echo '<div class="col-sm-6"><h3 class="panel-title"><i class="fa fa-users"></i> Contact Groups (Admin)</h3></div>';
+    echo '<div class="col-sm-6 text-right">';
+    echo '<button class="btn btn-success btn-sm" data-toggle="modal" data-target="#createGroupModal"><i class="fa fa-plus"></i> Create Group</button>';
+    echo '</div></div></div>';
+    echo '<div class="panel-body">';
+
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    echo '<p class="text-muted">These are admin-level contact groups for your internal SMS campaigns.</p>';
+
+    if (count($groups) > 0) {
+        echo '<table class="table table-striped">';
+        echo '<thead><tr><th>Group Name</th><th>Description</th><th>Contacts</th><th>Created</th><th>Actions</th></tr></thead>';
+        echo '<tbody>';
+        foreach ($groups as $group) {
+            echo '<tr>';
+            echo '<td><strong>' . htmlspecialchars($group->name) . '</strong></td>';
+            echo '<td>' . htmlspecialchars($group->description ?: '-') . '</td>';
+            echo '<td><span class="badge">' . number_format($group->contact_count) . '</span>';
+            if ($group->contact_count > 0) {
+                echo ' <a href="' . $modulelink . '&action=contacts&group_id=' . $group->id . '" class="btn btn-xs btn-link">View</a>';
+            }
+            echo '</td>';
+            echo '<td>' . date('Y-m-d', strtotime($group->created_at)) . '</td>';
+            echo '<td>';
+            echo '<button class="btn btn-xs btn-primary" onclick="editGroup(' . $group->id . ', \'' . addslashes($group->name) . '\', \'' . addslashes($group->description ?? '') . '\')"><i class="fa fa-edit"></i></button> ';
+            echo '<button class="btn btn-xs btn-danger" onclick="deleteGroup(' . $group->id . ', \'' . addslashes($group->name) . '\', ' . $group->contact_count . ')"><i class="fa fa-trash"></i></button>';
+            echo '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<div class="text-center text-muted" style="padding: 40px;">';
+        echo '<i class="fa fa-folder-open fa-3x"></i>';
+        echo '<p style="margin-top: 15px;">No contact groups yet. Create your first group to organize contacts for campaigns.</p>';
+        echo '</div>';
+    }
+
+    echo '</div></div>';
+
+    // Create Group Modal
+    echo '
+    <div class="modal fade" id="createGroupModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-folder-plus"></i> Create Contact Group</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Group Name <span class="text-danger">*</span></label>
+                            <input type="text" name="group_name" class="form-control" required placeholder="e.g., Newsletter Subscribers">
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea name="description" class="form-control" rows="3" placeholder="Optional description..."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" name="create_group" value="1" class="btn btn-success">Create Group</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Edit Group Modal
+    echo '
+    <div class="modal fade" id="editGroupModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="group_id" id="edit_group_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-edit"></i> Edit Contact Group</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Group Name <span class="text-danger">*</span></label>
+                            <input type="text" name="group_name" id="edit_group_name" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea name="description" id="edit_description" class="form-control" rows="3"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" name="update_group" value="1" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Delete Group Modal
+    echo '
+    <div class="modal fade" id="deleteGroupModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="group_id" id="delete_group_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-trash"></i> Delete Group</h4>
+                    </div>
+                    <div class="modal-body">
+                        <p>Are you sure you want to delete "<strong id="delete_group_name"></strong>"?</p>
+                        <p id="delete_warning" class="text-danger" style="display:none;"></p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" name="delete_group" value="1" class="btn btn-danger" id="delete_btn">Delete Group</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // JavaScript
+    echo '
+    <script>
+    function editGroup(id, name, description) {
+        document.getElementById("edit_group_id").value = id;
+        document.getElementById("edit_group_name").value = name;
+        document.getElementById("edit_description").value = description || "";
+        $("#editGroupModal").modal("show");
+    }
+
+    function deleteGroup(id, name, contactCount) {
+        document.getElementById("delete_group_id").value = id;
+        document.getElementById("delete_group_name").textContent = name;
+
+        var warning = document.getElementById("delete_warning");
+        var btn = document.getElementById("delete_btn");
+
+        if (contactCount > 0) {
+            warning.textContent = "This group has " + contactCount + " contact(s). Remove them first.";
+            warning.style.display = "block";
+            btn.disabled = true;
+        } else {
+            warning.style.display = "none";
+            btn.disabled = false;
+        }
+
+        $("#deleteGroupModal").modal("show");
+    }
+    </script>';
+}
+
+/**
+ * Admin Contacts Management
+ */
+function sms_suite_admin_contacts($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $message = '';
+    $messageType = '';
+    $groupId = isset($_GET['group_id']) ? (int)$_GET['group_id'] : 0;
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        // Add contact
+        if (isset($_POST['add_contact'])) {
+            $phone = preg_replace('/[^0-9+]/', '', $_POST['phone'] ?? '');
+            $firstName = trim($_POST['first_name'] ?? '');
+            $lastName = trim($_POST['last_name'] ?? '');
+            $email = trim($_POST['email'] ?? '');
+            $contactGroupId = (int)($_POST['group_id'] ?? 0);
+
+            if (empty($phone)) {
+                $message = 'Phone number is required.';
+                $messageType = 'danger';
+            } else {
+                // Check duplicate
+                $exists = Capsule::table('mod_sms_contacts')
+                    ->where('client_id', 0)
+                    ->where('phone', $phone)
+                    ->exists();
+
+                if ($exists) {
+                    $message = 'Contact with this phone number already exists.';
+                    $messageType = 'warning';
+                } else {
+                    Capsule::table('mod_sms_contacts')->insert([
+                        'client_id' => 0,
+                        'group_id' => $contactGroupId ?: null,
+                        'phone' => $phone,
+                        'first_name' => $firstName,
+                        'last_name' => $lastName,
+                        'email' => $email,
+                        'status' => 'subscribed',
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $message = 'Contact added successfully.';
+                    $messageType = 'success';
+
+                    // Update group count
+                    if ($contactGroupId) {
+                        $count = Capsule::table('mod_sms_contacts')->where('group_id', $contactGroupId)->count();
+                        Capsule::table('mod_sms_contact_groups')->where('id', $contactGroupId)->update(['contact_count' => $count]);
+                    }
+                }
+            }
+        }
+
+        // Delete contact
+        if (isset($_POST['delete_contact'])) {
+            $contactId = (int)$_POST['contact_id'];
+            $contact = Capsule::table('mod_sms_contacts')->where('id', $contactId)->where('client_id', 0)->first();
+            if ($contact) {
+                Capsule::table('mod_sms_contacts')->where('id', $contactId)->delete();
+                $message = 'Contact deleted.';
+                $messageType = 'success';
+
+                // Update group count
+                if ($contact->group_id) {
+                    $count = Capsule::table('mod_sms_contacts')->where('group_id', $contact->group_id)->count();
+                    Capsule::table('mod_sms_contact_groups')->where('id', $contact->group_id)->update(['contact_count' => $count]);
+                }
+            }
+        }
+
+        // Bulk import
+        if (isset($_POST['import_contacts']) && isset($_FILES['csv_file'])) {
+            $importGroupId = (int)($_POST['import_group_id'] ?? 0);
+            $file = $_FILES['csv_file'];
+
+            if ($file['error'] === UPLOAD_ERR_OK) {
+                $handle = fopen($file['tmp_name'], 'r');
+                $imported = 0;
+                $skipped = 0;
+                $row = 0;
+
+                while (($data = fgetcsv($handle)) !== false) {
+                    $row++;
+                    if ($row === 1 && (stripos($data[0], 'phone') !== false || stripos($data[0], 'number') !== false)) {
+                        continue; // Skip header
+                    }
+
+                    $phone = preg_replace('/[^0-9+]/', '', $data[0] ?? '');
+                    if (empty($phone)) {
+                        $skipped++;
+                        continue;
+                    }
+
+                    $exists = Capsule::table('mod_sms_contacts')
+                        ->where('client_id', 0)
+                        ->where('phone', $phone)
+                        ->exists();
+
+                    if ($exists) {
+                        $skipped++;
+                        continue;
+                    }
+
+                    Capsule::table('mod_sms_contacts')->insert([
+                        'client_id' => 0,
+                        'group_id' => $importGroupId ?: null,
+                        'phone' => $phone,
+                        'first_name' => trim($data[1] ?? ''),
+                        'last_name' => trim($data[2] ?? ''),
+                        'email' => trim($data[3] ?? ''),
+                        'status' => 'subscribed',
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $imported++;
+                }
+                fclose($handle);
+
+                // Update group count
+                if ($importGroupId) {
+                    $count = Capsule::table('mod_sms_contacts')->where('group_id', $importGroupId)->count();
+                    Capsule::table('mod_sms_contact_groups')->where('id', $importGroupId)->update(['contact_count' => $count]);
+                }
+
+                $message = "Imported {$imported} contacts. Skipped {$skipped} (duplicates or invalid).";
+                $messageType = 'success';
+            } else {
+                $message = 'Failed to upload file.';
+                $messageType = 'danger';
+            }
+        }
+    }
+
+    // Get admin groups
+    $groups = Capsule::table('mod_sms_contact_groups')
+        ->where('client_id', 0)
+        ->orderBy('name')
+        ->get();
+
+    // Get contacts
+    $query = Capsule::table('mod_sms_contacts')
+        ->where('client_id', 0);
+
+    if ($groupId > 0) {
+        $query->where('group_id', $groupId);
+    }
+
+    $contacts = $query->orderBy('created_at', 'desc')->limit(500)->get();
+    $totalContacts = Capsule::table('mod_sms_contacts')->where('client_id', 0)->count();
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<div class="row">';
+    echo '<div class="col-sm-4"><h3 class="panel-title"><i class="fa fa-address-book"></i> Contacts (Admin)</h3></div>';
+    echo '<div class="col-sm-8 text-right">';
+    echo '<button class="btn btn-success btn-sm" data-toggle="modal" data-target="#addContactModal"><i class="fa fa-plus"></i> Add Contact</button> ';
+    echo '<button class="btn btn-default btn-sm" data-toggle="modal" data-target="#importModal"><i class="fa fa-upload"></i> Import CSV</button>';
+    echo '</div></div></div>';
+    echo '<div class="panel-body">';
+
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    // Filter by group
+    echo '<form method="get" class="form-inline" style="margin-bottom: 15px;">';
+    echo '<input type="hidden" name="module" value="sms_suite">';
+    echo '<input type="hidden" name="action" value="contacts">';
+    echo '<div class="form-group">';
+    echo '<label>Filter by Group: </label> ';
+    echo '<select name="group_id" class="form-control" onchange="this.form.submit()">';
+    echo '<option value="">All Groups (' . $totalContacts . ' contacts)</option>';
+    foreach ($groups as $group) {
+        $sel = ($groupId == $group->id) ? 'selected' : '';
+        echo '<option value="' . $group->id . '" ' . $sel . '>' . htmlspecialchars($group->name) . ' (' . $group->contact_count . ')</option>';
+    }
+    echo '</select>';
+    echo '</div></form>';
+
+    if (count($contacts) > 0) {
+        echo '<table class="table table-striped table-condensed">';
+        echo '<thead><tr><th>Phone</th><th>Name</th><th>Email</th><th>Group</th><th>Status</th><th>Actions</th></tr></thead>';
+        echo '<tbody>';
+        foreach ($contacts as $contact) {
+            $groupName = '-';
+            if ($contact->group_id) {
+                foreach ($groups as $g) {
+                    if ($g->id == $contact->group_id) {
+                        $groupName = $g->name;
+                        break;
+                    }
+                }
+            }
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars($contact->phone) . '</td>';
+            echo '<td>' . htmlspecialchars(trim($contact->first_name . ' ' . $contact->last_name) ?: '-') . '</td>';
+            echo '<td>' . htmlspecialchars($contact->email ?: '-') . '</td>';
+            echo '<td>' . htmlspecialchars($groupName) . '</td>';
+            echo '<td><span class="label label-' . ($contact->status === 'subscribed' ? 'success' : 'default') . '">' . ucfirst($contact->status) . '</span></td>';
+            echo '<td>';
+            echo '<form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this contact?\');">';
+            echo '<input type="hidden" name="contact_id" value="' . $contact->id . '">';
+            echo '<button type="submit" name="delete_contact" value="1" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>';
+            echo '</form>';
+            echo '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+
+        if (count($contacts) >= 500) {
+            echo '<p class="text-muted">Showing first 500 contacts. Use group filter to narrow results.</p>';
+        }
+    } else {
+        echo '<div class="text-center text-muted" style="padding: 40px;">';
+        echo '<i class="fa fa-address-book fa-3x"></i>';
+        echo '<p style="margin-top: 15px;">No contacts yet. Add contacts manually or import from CSV.</p>';
+        echo '</div>';
+    }
+
+    echo '</div></div>';
+
+    // Add Contact Modal
+    echo '
+    <div class="modal fade" id="addContactModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-user-plus"></i> Add Contact</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Phone Number <span class="text-danger">*</span></label>
+                            <input type="tel" name="phone" class="form-control" required placeholder="+254712345678">
+                        </div>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <div class="form-group">
+                                    <label>First Name</label>
+                                    <input type="text" name="first_name" class="form-control">
+                                </div>
+                            </div>
+                            <div class="col-sm-6">
+                                <div class="form-group">
+                                    <label>Last Name</label>
+                                    <input type="text" name="last_name" class="form-control">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" name="email" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>Group</label>
+                            <select name="group_id" class="form-control">
+                                <option value="">No Group</option>';
+    foreach ($groups as $group) {
+        echo '<option value="' . $group->id . '">' . htmlspecialchars($group->name) . '</option>';
+    }
+    echo '
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" name="add_contact" value="1" class="btn btn-success">Add Contact</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Import Modal
+    echo '
+    <div class="modal fade" id="importModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post" enctype="multipart/form-data">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-upload"></i> Import Contacts from CSV</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>CSV File <span class="text-danger">*</span></label>
+                            <input type="file" name="csv_file" class="form-control" accept=".csv,.txt" required>
+                            <small class="help-block">Format: phone, first_name, last_name, email (one per line)</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Import to Group</label>
+                            <select name="import_group_id" class="form-control">
+                                <option value="">No Group</option>';
+    foreach ($groups as $group) {
+        echo '<option value="' . $group->id . '">' . htmlspecialchars($group->name) . '</option>';
+    }
+    echo '
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" name="import_contacts" value="1" class="btn btn-primary">Import</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
 }
