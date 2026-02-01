@@ -1192,6 +1192,165 @@ function sms_suite_create_tables()
         });
     }
 
+    // ============ SMS Credit Packages and Billing Tables ============
+
+    // Admin-managed Sender IDs (global pool available for assignment)
+    if (!$schema->hasTable('mod_sms_sender_id_pool')) {
+        $schema->create('mod_sms_sender_id_pool', function ($table) {
+            $table->increments('id');
+            $table->string('sender_id', 50);
+            $table->string('type', 20)->default('alphanumeric'); // alphanumeric, numeric, shortcode
+            $table->text('description')->nullable();
+            $table->unsignedInteger('gateway_id'); // Mapped gateway
+            $table->text('country_codes')->nullable(); // JSON array of allowed country codes
+            $table->decimal('price_setup', 10, 2)->default(0); // One-time setup fee
+            $table->decimal('price_monthly', 10, 2)->default(0); // Monthly recurring
+            $table->decimal('price_yearly', 10, 2)->default(0); // Yearly recurring
+            $table->boolean('requires_approval')->default(true); // Needs telco approval
+            $table->boolean('is_shared')->default(false); // Can be used by multiple clients
+            $table->string('status', 20)->default('active'); // active, inactive, reserved
+            $table->timestamps();
+            $table->index('gateway_id');
+            $table->index('status');
+            $table->unique(['sender_id', 'gateway_id']);
+        });
+    }
+
+    // SMS Credit Packages (products for sale)
+    if (!$schema->hasTable('mod_sms_credit_packages')) {
+        $schema->create('mod_sms_credit_packages', function ($table) {
+            $table->increments('id');
+            $table->string('name', 100);
+            $table->text('description')->nullable();
+            $table->integer('credits'); // Number of SMS credits
+            $table->decimal('price', 10, 2);
+            $table->unsignedInteger('currency_id')->nullable();
+            $table->decimal('bonus_credits', 10, 0)->default(0); // Bonus credits included
+            $table->integer('validity_days')->default(0); // 0 = never expires
+            $table->boolean('is_featured')->default(false);
+            $table->integer('sort_order')->default(0);
+            $table->boolean('status')->default(true);
+            $table->timestamps();
+            $table->index('status');
+        });
+    }
+
+    // Client SMS Credit Purchases (linked to WHMCS invoices)
+    if (!$schema->hasTable('mod_sms_credit_purchases')) {
+        $schema->create('mod_sms_credit_purchases', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->unsignedInteger('package_id')->nullable();
+            $table->unsignedInteger('invoice_id');
+            $table->integer('credits_purchased');
+            $table->integer('bonus_credits')->default(0);
+            $table->decimal('amount', 10, 2);
+            $table->string('status', 20)->default('pending'); // pending, paid, cancelled, refunded
+            $table->dateTime('expires_at')->nullable();
+            $table->dateTime('credited_at')->nullable(); // When credits were added to balance
+            $table->timestamps();
+            $table->index(['client_id', 'status']);
+            $table->index('invoice_id');
+        });
+    }
+
+    // Client Sender ID Requests
+    if (!$schema->hasTable('mod_sms_sender_id_requests')) {
+        $schema->create('mod_sms_sender_id_requests', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->string('sender_id', 50); // Requested sender ID
+            $table->string('type', 20)->default('alphanumeric');
+            $table->unsignedInteger('pool_id')->nullable(); // If selecting from pool
+            $table->unsignedInteger('gateway_id')->nullable(); // Preferred gateway
+            $table->text('business_name')->nullable();
+            $table->text('use_case')->nullable(); // How they'll use it
+            $table->text('documents')->nullable(); // JSON array of uploaded document paths
+            $table->string('billing_cycle', 20)->default('monthly'); // monthly, yearly, onetime
+            $table->decimal('setup_fee', 10, 2)->default(0);
+            $table->decimal('recurring_fee', 10, 2)->default(0);
+            $table->unsignedInteger('invoice_id')->nullable();
+            $table->string('status', 20)->default('pending'); // pending, approved, rejected, active, expired
+            $table->text('admin_notes')->nullable();
+            $table->unsignedInteger('approved_by')->nullable(); // Admin ID
+            $table->dateTime('approved_at')->nullable();
+            $table->dateTime('expires_at')->nullable();
+            $table->timestamps();
+            $table->index(['client_id', 'status']);
+            $table->index('invoice_id');
+        });
+    }
+
+    // Client Sender ID Allocations (active sender IDs assigned to clients)
+    if (!$schema->hasTable('mod_sms_client_sender_ids')) {
+        $schema->create('mod_sms_client_sender_ids', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->unsignedInteger('pool_id')->nullable(); // Reference to pool
+            $table->unsignedInteger('request_id')->nullable(); // Reference to request
+            $table->string('sender_id', 50);
+            $table->unsignedInteger('gateway_id');
+            $table->boolean('is_default')->default(false);
+            $table->string('status', 20)->default('active'); // active, suspended, expired
+            $table->dateTime('expires_at')->nullable();
+            $table->unsignedInteger('last_invoice_id')->nullable();
+            $table->timestamps();
+            $table->index(['client_id', 'status']);
+            $table->unique(['client_id', 'sender_id', 'gateway_id']);
+        });
+    }
+
+    // Client SMS Credit Balance (separate from wallet for credit-based billing)
+    if (!$schema->hasTable('mod_sms_credit_balance')) {
+        $schema->create('mod_sms_credit_balance', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id')->unique();
+            $table->integer('balance')->default(0); // Current credit balance
+            $table->integer('total_purchased')->default(0);
+            $table->integer('total_used')->default(0);
+            $table->integer('total_expired')->default(0);
+            $table->timestamps();
+            $table->index('client_id');
+        });
+    }
+
+    // Credit Transaction Log
+    if (!$schema->hasTable('mod_sms_credit_transactions')) {
+        $schema->create('mod_sms_credit_transactions', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->string('type', 20); // purchase, usage, refund, expired, adjustment, bonus
+            $table->integer('credits'); // Positive for additions, negative for deductions
+            $table->integer('balance_before');
+            $table->integer('balance_after');
+            $table->string('reference_type', 50)->nullable(); // invoice, message, campaign, admin
+            $table->unsignedInteger('reference_id')->nullable();
+            $table->string('description', 255)->nullable();
+            $table->unsignedInteger('admin_id')->nullable(); // For admin adjustments
+            $table->timestamp('created_at')->useCurrent();
+            $table->index(['client_id', 'created_at']);
+            $table->index('type');
+        });
+    }
+
+    // Sender ID Billing History
+    if (!$schema->hasTable('mod_sms_sender_id_billing')) {
+        $schema->create('mod_sms_sender_id_billing', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->unsignedInteger('client_sender_id'); // FK to mod_sms_client_sender_ids
+            $table->unsignedInteger('invoice_id');
+            $table->string('billing_type', 20); // setup, renewal
+            $table->decimal('amount', 10, 2);
+            $table->string('status', 20)->default('pending'); // pending, paid, cancelled
+            $table->date('period_start')->nullable();
+            $table->date('period_end')->nullable();
+            $table->timestamps();
+            $table->index(['client_id', 'status']);
+            $table->index('invoice_id');
+        });
+    }
+
     // Add message_type and from_number columns to messages if not exists
     if ($schema->hasTable('mod_sms_messages')) {
         if (!$schema->hasColumn('mod_sms_messages', 'message_type')) {
@@ -1311,6 +1470,15 @@ function sms_suite_create_tables()
 function sms_suite_drop_tables()
 {
     $tables = [
+        // Billing and Credit tables
+        'mod_sms_sender_id_billing',
+        'mod_sms_credit_transactions',
+        'mod_sms_credit_balance',
+        'mod_sms_client_sender_ids',
+        'mod_sms_sender_id_requests',
+        'mod_sms_credit_purchases',
+        'mod_sms_credit_packages',
+        'mod_sms_sender_id_pool',
         // Verification and Notification tables
         'mod_sms_verification_logs',
         'mod_sms_verification_templates',

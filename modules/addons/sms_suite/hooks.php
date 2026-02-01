@@ -45,33 +45,73 @@ add_hook('ClientAreaPrimarySidebar', 1, function ($sidebar) {
 });
 
 /**
- * Invoice Paid Hook - Handle sender ID payments and wallet top-ups
+ * Invoice Paid Hook - Handle SMS credits, sender ID payments, and wallet top-ups
  */
 add_hook('InvoicePaid', 1, function ($vars) {
     try {
         $invoiceId = $vars['invoiceid'];
 
-        // Check for sender ID payments
-        $senderIdRequest = Capsule::table('mod_sms_sender_ids')
+        require_once __DIR__ . '/lib/Billing/BillingService.php';
+
+        // 1. Check for SMS Credit Package purchase
+        $creditPurchase = Capsule::table('mod_sms_credit_purchases')
             ->where('invoice_id', $invoiceId)
             ->where('status', 'pending')
             ->first();
 
-        if ($senderIdRequest) {
-            // Load sender ID service and approve
-            require_once __DIR__ . '/lib/Core/SenderIdService.php';
-            \SMSSuite\Core\SenderIdService::approve($senderIdRequest->id);
-            logActivity('SMS Suite: Sender ID approved after payment - ID ' . $senderIdRequest->id);
+        if ($creditPurchase) {
+            $result = \SMSSuite\Billing\BillingService::processCreditPurchasePayment($invoiceId);
+            if ($result['success']) {
+                logActivity('SMS Suite: SMS Credits added for invoice ' . $invoiceId . ' - ' . $result['credits_added'] . ' credits');
+            }
         }
 
-        // Check for wallet top-up
+        // 2. Check for Sender ID request payment (new system)
+        $senderIdRequest = Capsule::table('mod_sms_sender_id_requests')
+            ->where('invoice_id', $invoiceId)
+            ->where('status', 'approved')
+            ->first();
+
+        if ($senderIdRequest) {
+            $result = \SMSSuite\Billing\BillingService::processSenderIdPayment($invoiceId);
+            if ($result['success']) {
+                logActivity('SMS Suite: Sender ID activated after payment - Request ID ' . $senderIdRequest->id);
+            }
+        }
+
+        // 3. Check for Sender ID renewal payment
+        $senderIdRenewal = Capsule::table('mod_sms_sender_id_billing')
+            ->where('invoice_id', $invoiceId)
+            ->where('billing_type', 'renewal')
+            ->where('status', 'pending')
+            ->first();
+
+        if ($senderIdRenewal) {
+            $result = \SMSSuite\Billing\BillingService::processSenderIdRenewalPayment($invoiceId);
+            if ($result['success']) {
+                logActivity('SMS Suite: Sender ID renewed - New expiry: ' . $result['new_expiry']);
+            }
+        }
+
+        // 4. Legacy: Check for old sender ID payments (mod_sms_sender_ids table)
+        $legacySenderIdRequest = Capsule::table('mod_sms_sender_ids')
+            ->where('invoice_id', $invoiceId)
+            ->where('status', 'pending')
+            ->first();
+
+        if ($legacySenderIdRequest) {
+            require_once __DIR__ . '/lib/Core/SenderIdService.php';
+            \SMSSuite\Core\SenderIdService::approve($legacySenderIdRequest->id);
+            logActivity('SMS Suite: Sender ID approved after payment - ID ' . $legacySenderIdRequest->id);
+        }
+
+        // 5. Check for wallet top-up
         $pendingTopup = Capsule::table('mod_sms_pending_topups')
             ->where('invoice_id', $invoiceId)
             ->where('status', 'pending')
             ->first();
 
         if ($pendingTopup) {
-            require_once __DIR__ . '/lib/Billing/BillingService.php';
             \SMSSuite\Billing\BillingService::handleInvoicePaid($invoiceId);
             logActivity('SMS Suite: Wallet top-up processed for invoice ' . $invoiceId);
         }

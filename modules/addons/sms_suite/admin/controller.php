@@ -99,6 +99,18 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_notifications($vars, $lang);
             break;
 
+        case 'credit_packages':
+            sms_suite_admin_credit_packages($vars, $lang);
+            break;
+
+        case 'sender_id_pool':
+            sms_suite_admin_sender_id_pool($vars, $lang);
+            break;
+
+        case 'sender_id_requests':
+            sms_suite_admin_sender_id_requests($vars, $lang);
+            break;
+
         case 'dashboard':
         default:
             sms_suite_admin_dashboard($vars, $lang);
@@ -115,7 +127,9 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'dashboard' => ['icon' => 'fa-dashboard', 'label' => $lang['menu_dashboard']],
         'send' => ['icon' => 'fa-paper-plane', 'label' => $lang['menu_send_sms']],
         'gateways' => ['icon' => 'fa-server', 'label' => $lang['menu_gateways']],
-        'sender_ids' => ['icon' => 'fa-id-card', 'label' => $lang['menu_sender_ids']],
+        'sender_id_pool' => ['icon' => 'fa-id-card', 'label' => 'Sender IDs'],
+        'sender_id_requests' => ['icon' => 'fa-inbox', 'label' => 'ID Requests'],
+        'credit_packages' => ['icon' => 'fa-credit-card', 'label' => 'SMS Packages'],
         'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
         'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
         'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
@@ -2012,6 +2026,920 @@ function sms_suite_admin_notifications($vars, $lang)
         document.getElementById("edit_message").value = message;
         document.getElementById("edit_status").checked = (status === "active");
         jQuery("#editModal").modal("show");
+    }
+    </script>';
+}
+
+// ============================================================
+// SMS Credit Packages Management
+// ============================================================
+
+/**
+ * Credit Packages Management Page
+ */
+function sms_suite_admin_credit_packages($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    require_once __DIR__ . '/../lib/Billing/BillingService.php';
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $action = $_POST['form_action'] ?? '';
+
+        if ($action === 'create') {
+            $result = \SMSSuite\Billing\BillingService::createCreditPackage([
+                'name' => SecurityHelper::sanitize($_POST['name']),
+                'description' => SecurityHelper::sanitize($_POST['description']),
+                'credits' => (int)$_POST['credits'],
+                'price' => (float)$_POST['price'],
+                'bonus_credits' => (int)($_POST['bonus_credits'] ?? 0),
+                'validity_days' => (int)($_POST['validity_days'] ?? 0),
+                'is_featured' => isset($_POST['is_featured']),
+                'sort_order' => (int)($_POST['sort_order'] ?? 0),
+                'status' => isset($_POST['status']),
+            ]);
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Package created successfully.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        } elseif ($action === 'update') {
+            $result = \SMSSuite\Billing\BillingService::updateCreditPackage((int)$_POST['package_id'], [
+                'name' => SecurityHelper::sanitize($_POST['name']),
+                'description' => SecurityHelper::sanitize($_POST['description']),
+                'credits' => (int)$_POST['credits'],
+                'price' => (float)$_POST['price'],
+                'bonus_credits' => (int)($_POST['bonus_credits'] ?? 0),
+                'validity_days' => (int)($_POST['validity_days'] ?? 0),
+                'is_featured' => isset($_POST['is_featured']),
+                'sort_order' => (int)($_POST['sort_order'] ?? 0),
+                'status' => isset($_POST['status']),
+            ]);
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Package updated successfully.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        } elseif ($action === 'delete') {
+            $result = \SMSSuite\Billing\BillingService::deleteCreditPackage((int)$_POST['package_id']);
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Package deleted successfully.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        }
+    }
+
+    // Get all packages
+    $packages = \SMSSuite\Billing\BillingService::getCreditPackages(false);
+
+    // Get currencies for dropdown
+    $currencies = Capsule::table('tblcurrencies')->get();
+
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                <i class="fa fa-credit-card"></i> SMS Credit Packages
+                <button class="btn btn-success btn-sm pull-right" data-toggle="modal" data-target="#createPackageModal">
+                    <i class="fa fa-plus"></i> Add Package
+                </button>
+            </h3>
+        </div>
+        <div class="panel-body">
+            <p class="text-muted">Define SMS credit packages that clients can purchase. Credits are added to client balance after invoice payment.</p>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Credits</th>
+                        <th>Bonus</th>
+                        <th>Price</th>
+                        <th>Validity</th>
+                        <th>Featured</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+    if (empty($packages)) {
+        echo '<tr><td colspan="8" class="text-center text-muted">No packages created yet.</td></tr>';
+    } else {
+        foreach ($packages as $pkg) {
+            $featured = $pkg->is_featured ? '<span class="label label-warning">Featured</span>' : '';
+            $status = $pkg->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>';
+            $validity = $pkg->validity_days > 0 ? $pkg->validity_days . ' days' : 'Never expires';
+
+            echo '<tr>
+                <td><strong>' . htmlspecialchars($pkg->name) . '</strong><br><small class="text-muted">' . htmlspecialchars($pkg->description ?? '') . '</small></td>
+                <td>' . number_format($pkg->credits) . '</td>
+                <td>' . ($pkg->bonus_credits > 0 ? '+' . number_format($pkg->bonus_credits) : '-') . '</td>
+                <td>$' . number_format($pkg->price, 2) . '</td>
+                <td>' . $validity . '</td>
+                <td>' . $featured . '</td>
+                <td>' . $status . '</td>
+                <td>
+                    <button class="btn btn-xs btn-primary" onclick=\'editPackage(' . json_encode($pkg) . ')\'>
+                        <i class="fa fa-edit"></i>
+                    </button>
+                    <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this package?\');">
+                        <input type="hidden" name="form_action" value="delete">
+                        <input type="hidden" name="package_id" value="' . $pkg->id . '">
+                        <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>';
+        }
+    }
+
+    echo '</tbody></table></div></div>';
+
+    // Create Package Modal
+    echo '<div class="modal fade" id="createPackageModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="create">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-plus"></i> Create Credit Package</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Package Name <span class="text-danger">*</span></label>
+                            <input type="text" name="name" class="form-control" required placeholder="e.g., Starter Pack">
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea name="description" class="form-control" rows="2" placeholder="Brief description..."></textarea>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>SMS Credits <span class="text-danger">*</span></label>
+                                    <input type="number" name="credits" class="form-control" required min="1" placeholder="e.g., 100">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Bonus Credits</label>
+                                    <input type="number" name="bonus_credits" class="form-control" value="0" min="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Price <span class="text-danger">*</span></label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price" class="form-control" required step="0.01" min="0" placeholder="9.99">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Validity (Days)</label>
+                                    <input type="number" name="validity_days" class="form-control" value="0" min="0">
+                                    <p class="help-block">0 = never expires</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Sort Order</label>
+                                    <input type="number" name="sort_order" class="form-control" value="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="is_featured" value="1"> Featured Package</label>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="status" value="1" checked> Active</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">Create Package</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Edit Package Modal
+    echo '<div class="modal fade" id="editPackageModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="update">
+                    <input type="hidden" name="package_id" id="edit_pkg_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-edit"></i> Edit Credit Package</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Package Name <span class="text-danger">*</span></label>
+                            <input type="text" name="name" id="edit_pkg_name" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea name="description" id="edit_pkg_desc" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>SMS Credits <span class="text-danger">*</span></label>
+                                    <input type="number" name="credits" id="edit_pkg_credits" class="form-control" required min="1">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Bonus Credits</label>
+                                    <input type="number" name="bonus_credits" id="edit_pkg_bonus" class="form-control" min="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Price <span class="text-danger">*</span></label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price" id="edit_pkg_price" class="form-control" required step="0.01" min="0">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Validity (Days)</label>
+                                    <input type="number" name="validity_days" id="edit_pkg_validity" class="form-control" min="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Sort Order</label>
+                            <input type="number" name="sort_order" id="edit_pkg_sort" class="form-control">
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="is_featured" id="edit_pkg_featured" value="1"> Featured Package</label>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="status" id="edit_pkg_status" value="1"> Active</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+    function editPackage(pkg) {
+        document.getElementById("edit_pkg_id").value = pkg.id;
+        document.getElementById("edit_pkg_name").value = pkg.name;
+        document.getElementById("edit_pkg_desc").value = pkg.description || "";
+        document.getElementById("edit_pkg_credits").value = pkg.credits;
+        document.getElementById("edit_pkg_bonus").value = pkg.bonus_credits || 0;
+        document.getElementById("edit_pkg_price").value = pkg.price;
+        document.getElementById("edit_pkg_validity").value = pkg.validity_days || 0;
+        document.getElementById("edit_pkg_sort").value = pkg.sort_order || 0;
+        document.getElementById("edit_pkg_featured").checked = pkg.is_featured == 1;
+        document.getElementById("edit_pkg_status").checked = pkg.status == 1;
+        jQuery("#editPackageModal").modal("show");
+    }
+    </script>';
+}
+
+// ============================================================
+// Sender ID Pool Management
+// ============================================================
+
+/**
+ * Sender ID Pool Management Page
+ */
+function sms_suite_admin_sender_id_pool($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    require_once __DIR__ . '/../lib/Billing/BillingService.php';
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $action = $_POST['form_action'] ?? '';
+
+        if ($action === 'create') {
+            $result = \SMSSuite\Billing\BillingService::addSenderIdToPool([
+                'sender_id' => SecurityHelper::sanitize($_POST['sender_id']),
+                'type' => $_POST['type'] ?? 'alphanumeric',
+                'description' => SecurityHelper::sanitize($_POST['description']),
+                'gateway_id' => (int)$_POST['gateway_id'],
+                'country_codes' => !empty($_POST['country_codes']) ? explode(',', $_POST['country_codes']) : null,
+                'price_setup' => (float)($_POST['price_setup'] ?? 0),
+                'price_monthly' => (float)($_POST['price_monthly'] ?? 0),
+                'price_yearly' => (float)($_POST['price_yearly'] ?? 0),
+                'requires_approval' => isset($_POST['requires_approval']),
+                'is_shared' => isset($_POST['is_shared']),
+                'status' => $_POST['status'] ?? 'active',
+            ]);
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Sender ID added to pool successfully.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        } elseif ($action === 'update') {
+            $result = \SMSSuite\Billing\BillingService::updateSenderIdPool((int)$_POST['pool_id'], [
+                'sender_id' => SecurityHelper::sanitize($_POST['sender_id']),
+                'type' => $_POST['type'] ?? 'alphanumeric',
+                'description' => SecurityHelper::sanitize($_POST['description']),
+                'gateway_id' => (int)$_POST['gateway_id'],
+                'country_codes' => !empty($_POST['country_codes']) ? explode(',', $_POST['country_codes']) : null,
+                'price_setup' => (float)($_POST['price_setup'] ?? 0),
+                'price_monthly' => (float)($_POST['price_monthly'] ?? 0),
+                'price_yearly' => (float)($_POST['price_yearly'] ?? 0),
+                'requires_approval' => isset($_POST['requires_approval']),
+                'is_shared' => isset($_POST['is_shared']),
+                'status' => $_POST['status'] ?? 'active',
+            ]);
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Sender ID updated successfully.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        } elseif ($action === 'delete') {
+            $result = \SMSSuite\Billing\BillingService::deleteSenderIdFromPool((int)$_POST['pool_id']);
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Sender ID removed from pool.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        }
+    }
+
+    // Get all sender IDs in pool
+    $pool = \SMSSuite\Billing\BillingService::getSenderIdPool();
+
+    // Get gateways for dropdown
+    $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->get();
+
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                <i class="fa fa-id-card"></i> Sender ID Pool
+                <button class="btn btn-success btn-sm pull-right" data-toggle="modal" data-target="#createSenderIdModal">
+                    <i class="fa fa-plus"></i> Add Sender ID
+                </button>
+            </h3>
+        </div>
+        <div class="panel-body">
+            <p class="text-muted">Manage available Sender IDs that can be assigned to clients. Each Sender ID is mapped to a specific gateway.</p>
+
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Sender ID</th>
+                        <th>Type</th>
+                        <th>Gateway</th>
+                        <th>Setup Fee</th>
+                        <th>Monthly</th>
+                        <th>Yearly</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+    if (empty($pool)) {
+        echo '<tr><td colspan="8" class="text-center text-muted">No sender IDs in pool. Add sender IDs that clients can request or be assigned.</td></tr>';
+    } else {
+        foreach ($pool as $item) {
+            $statusLabel = match($item->status) {
+                'active' => '<span class="label label-success">Active</span>',
+                'inactive' => '<span class="label label-default">Inactive</span>',
+                'reserved' => '<span class="label label-warning">Reserved</span>',
+                default => '<span class="label label-default">' . ucfirst($item->status) . '</span>',
+            };
+
+            echo '<tr>
+                <td>
+                    <strong>' . htmlspecialchars($item->sender_id) . '</strong>
+                    ' . ($item->is_shared ? '<span class="label label-info" title="Can be used by multiple clients">Shared</span>' : '') . '
+                    <br><small class="text-muted">' . htmlspecialchars($item->description ?? '') . '</small>
+                </td>
+                <td>' . ucfirst($item->type) . '</td>
+                <td>' . htmlspecialchars($item->gateway_name ?? 'Unknown') . '</td>
+                <td>$' . number_format($item->price_setup, 2) . '</td>
+                <td>$' . number_format($item->price_monthly, 2) . '</td>
+                <td>$' . number_format($item->price_yearly, 2) . '</td>
+                <td>' . $statusLabel . '</td>
+                <td>
+                    <button class="btn btn-xs btn-primary" onclick=\'editPoolItem(' . json_encode($item) . ')\'>
+                        <i class="fa fa-edit"></i>
+                    </button>
+                    <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this Sender ID from pool?\');">
+                        <input type="hidden" name="form_action" value="delete">
+                        <input type="hidden" name="pool_id" value="' . $item->id . '">
+                        <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>';
+        }
+    }
+
+    echo '</tbody></table></div></div>';
+
+    // Gateway options for dropdowns
+    $gatewayOptions = '';
+    foreach ($gateways as $gw) {
+        $gatewayOptions .= '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . '</option>';
+    }
+
+    // Create Sender ID Modal
+    echo '<div class="modal fade" id="createSenderIdModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="create">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-plus"></i> Add Sender ID to Pool</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="form-group">
+                                    <label>Sender ID <span class="text-danger">*</span></label>
+                                    <input type="text" name="sender_id" class="form-control" required maxlength="11" placeholder="e.g., MYCOMPANY">
+                                    <p class="help-block">Max 11 characters for alphanumeric</p>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Type</label>
+                                    <select name="type" class="form-control">
+                                        <option value="alphanumeric">Alphanumeric</option>
+                                        <option value="numeric">Numeric</option>
+                                        <option value="shortcode">Shortcode</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea name="description" class="form-control" rows="2" placeholder="Internal notes..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Gateway <span class="text-danger">*</span></label>
+                            <select name="gateway_id" class="form-control" required>
+                                <option value="">-- Select Gateway --</option>
+                                ' . $gatewayOptions . '
+                            </select>
+                            <p class="help-block">Messages using this Sender ID will be sent through this gateway</p>
+                        </div>
+                        <div class="form-group">
+                            <label>Country Codes</label>
+                            <input type="text" name="country_codes" class="form-control" placeholder="e.g., US,GB,CA">
+                            <p class="help-block">Comma-separated list of allowed countries (leave empty for all)</p>
+                        </div>
+                        <hr>
+                        <h5>Pricing</h5>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Setup Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price_setup" class="form-control" step="0.01" value="0">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Monthly Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price_monthly" class="form-control" step="0.01" value="0">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Yearly Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price_yearly" class="form-control" step="0.01" value="0">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="requires_approval" value="1" checked> Requires Telco Approval</label>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="is_shared" value="1"> Shared (can be used by multiple clients)</label>
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select name="status" class="form-control">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                                <option value="reserved">Reserved</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">Add to Pool</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Edit Sender ID Modal
+    echo '<div class="modal fade" id="editPoolModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="update">
+                    <input type="hidden" name="pool_id" id="edit_pool_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-edit"></i> Edit Sender ID</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="form-group">
+                                    <label>Sender ID <span class="text-danger">*</span></label>
+                                    <input type="text" name="sender_id" id="edit_pool_sender_id" class="form-control" required maxlength="11">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Type</label>
+                                    <select name="type" id="edit_pool_type" class="form-control">
+                                        <option value="alphanumeric">Alphanumeric</option>
+                                        <option value="numeric">Numeric</option>
+                                        <option value="shortcode">Shortcode</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea name="description" id="edit_pool_desc" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Gateway <span class="text-danger">*</span></label>
+                            <select name="gateway_id" id="edit_pool_gateway" class="form-control" required>
+                                ' . $gatewayOptions . '
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Country Codes</label>
+                            <input type="text" name="country_codes" id="edit_pool_countries" class="form-control">
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Setup Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price_setup" id="edit_pool_setup" class="form-control" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Monthly Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price_monthly" id="edit_pool_monthly" class="form-control" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Yearly Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="price_yearly" id="edit_pool_yearly" class="form-control" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="requires_approval" id="edit_pool_approval" value="1"> Requires Telco Approval</label>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="is_shared" id="edit_pool_shared" value="1"> Shared</label>
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select name="status" id="edit_pool_status" class="form-control">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                                <option value="reserved">Reserved</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+    function editPoolItem(item) {
+        document.getElementById("edit_pool_id").value = item.id;
+        document.getElementById("edit_pool_sender_id").value = item.sender_id;
+        document.getElementById("edit_pool_type").value = item.type;
+        document.getElementById("edit_pool_desc").value = item.description || "";
+        document.getElementById("edit_pool_gateway").value = item.gateway_id;
+        document.getElementById("edit_pool_countries").value = item.country_codes ? JSON.parse(item.country_codes).join(",") : "";
+        document.getElementById("edit_pool_setup").value = item.price_setup || 0;
+        document.getElementById("edit_pool_monthly").value = item.price_monthly || 0;
+        document.getElementById("edit_pool_yearly").value = item.price_yearly || 0;
+        document.getElementById("edit_pool_approval").checked = item.requires_approval == 1;
+        document.getElementById("edit_pool_shared").checked = item.is_shared == 1;
+        document.getElementById("edit_pool_status").value = item.status;
+        jQuery("#editPoolModal").modal("show");
+    }
+    </script>';
+}
+
+// ============================================================
+// Sender ID Requests Management
+// ============================================================
+
+/**
+ * Sender ID Requests Management Page
+ */
+function sms_suite_admin_sender_id_requests($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    require_once __DIR__ . '/../lib/Billing/BillingService.php';
+
+    // Get current admin ID
+    $adminId = $_SESSION['adminid'] ?? 1;
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $action = $_POST['form_action'] ?? '';
+        $requestId = (int)($_POST['request_id'] ?? 0);
+
+        if ($action === 'approve' && $requestId) {
+            $result = \SMSSuite\Billing\BillingService::approveSenderIdRequest($requestId, $adminId, [
+                'gateway_id' => (int)($_POST['gateway_id'] ?? 0),
+                'setup_fee' => (float)($_POST['setup_fee'] ?? 0),
+                'recurring_fee' => (float)($_POST['recurring_fee'] ?? 0),
+                'admin_notes' => SecurityHelper::sanitize($_POST['admin_notes'] ?? ''),
+            ]);
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">' . htmlspecialchars($result['message']) . '</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        } elseif ($action === 'reject' && $requestId) {
+            $result = \SMSSuite\Billing\BillingService::rejectSenderIdRequest(
+                $requestId,
+                $adminId,
+                SecurityHelper::sanitize($_POST['reject_reason'] ?? '')
+            );
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Request rejected.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
+        }
+    }
+
+    // Get filter
+    $statusFilter = $_GET['status'] ?? '';
+
+    // Get requests
+    $requests = \SMSSuite\Billing\BillingService::getSenderIdRequests($statusFilter ? ['status' => $statusFilter] : []);
+
+    // Get gateways for dropdown
+    $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->get();
+
+    // Count pending
+    $pendingCount = Capsule::table('mod_sms_sender_id_requests')->where('status', 'pending')->count();
+
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                <i class="fa fa-inbox"></i> Sender ID Requests
+                ' . ($pendingCount > 0 ? '<span class="badge badge-warning">' . $pendingCount . ' pending</span>' : '') . '
+            </h3>
+        </div>
+        <div class="panel-body">
+            <div class="row" style="margin-bottom: 15px;">
+                <div class="col-md-6">
+                    <div class="btn-group">
+                        <a href="' . $modulelink . '&action=sender_id_requests" class="btn btn-' . (empty($statusFilter) ? 'primary' : 'default') . '">All</a>
+                        <a href="' . $modulelink . '&action=sender_id_requests&status=pending" class="btn btn-' . ($statusFilter === 'pending' ? 'primary' : 'default') . '">Pending</a>
+                        <a href="' . $modulelink . '&action=sender_id_requests&status=approved" class="btn btn-' . ($statusFilter === 'approved' ? 'primary' : 'default') . '">Approved</a>
+                        <a href="' . $modulelink . '&action=sender_id_requests&status=active" class="btn btn-' . ($statusFilter === 'active' ? 'primary' : 'default') . '">Active</a>
+                        <a href="' . $modulelink . '&action=sender_id_requests&status=rejected" class="btn btn-' . ($statusFilter === 'rejected' ? 'primary' : 'default') . '">Rejected</a>
+                    </div>
+                </div>
+            </div>
+
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Client</th>
+                        <th>Sender ID</th>
+                        <th>Type</th>
+                        <th>Gateway</th>
+                        <th>Billing</th>
+                        <th>Status</th>
+                        <th>Requested</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+    if (empty($requests)) {
+        echo '<tr><td colspan="8" class="text-center text-muted">No requests found.</td></tr>';
+    } else {
+        foreach ($requests as $req) {
+            $statusLabel = match($req->status) {
+                'pending' => '<span class="label label-warning">Pending</span>',
+                'approved' => '<span class="label label-info">Awaiting Payment</span>',
+                'active' => '<span class="label label-success">Active</span>',
+                'rejected' => '<span class="label label-danger">Rejected</span>',
+                'expired' => '<span class="label label-default">Expired</span>',
+                default => '<span class="label label-default">' . ucfirst($req->status) . '</span>',
+            };
+
+            $clientName = trim(($req->firstname ?? '') . ' ' . ($req->lastname ?? ''));
+            if ($req->companyname) {
+                $clientName .= ' (' . $req->companyname . ')';
+            }
+
+            $billingInfo = ucfirst($req->billing_cycle);
+            if ($req->setup_fee > 0 || $req->recurring_fee > 0) {
+                $billingInfo .= '<br><small>Setup: $' . number_format($req->setup_fee, 2) . ', Recurring: $' . number_format($req->recurring_fee, 2) . '</small>';
+            }
+
+            echo '<tr>
+                <td>
+                    <a href="clientssummary.php?userid=' . $req->client_id . '" target="_blank">' . htmlspecialchars($clientName) . '</a>
+                    <br><small class="text-muted">' . htmlspecialchars($req->email ?? '') . '</small>
+                </td>
+                <td><strong>' . htmlspecialchars($req->sender_id) . '</strong></td>
+                <td>' . ucfirst($req->type) . '</td>
+                <td>' . htmlspecialchars($req->gateway_name ?? 'Not assigned') . '</td>
+                <td>' . $billingInfo . '</td>
+                <td>' . $statusLabel . '</td>
+                <td>' . date('M d, Y', strtotime($req->created_at)) . '</td>
+                <td>';
+
+            if ($req->status === 'pending') {
+                echo '<button class="btn btn-xs btn-success" onclick=\'showApproveModal(' . json_encode($req) . ')\'><i class="fa fa-check"></i> Approve</button> ';
+                echo '<button class="btn btn-xs btn-danger" onclick=\'showRejectModal(' . $req->id . ')\'><i class="fa fa-times"></i> Reject</button>';
+            } elseif ($req->status === 'approved' && $req->invoice_id) {
+                echo '<a href="invoices.php?action=edit&id=' . $req->invoice_id . '" class="btn btn-xs btn-info" target="_blank"><i class="fa fa-file-text"></i> Invoice #' . $req->invoice_id . '</a>';
+            } elseif ($req->admin_notes) {
+                echo '<span class="text-muted" title="' . htmlspecialchars($req->admin_notes) . '"><i class="fa fa-comment"></i></span>';
+            }
+
+            echo '</td></tr>';
+        }
+    }
+
+    echo '</tbody></table></div></div>';
+
+    // Gateway options for approve modal
+    $gatewayOptions = '';
+    foreach ($gateways as $gw) {
+        $gatewayOptions .= '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . '</option>';
+    }
+
+    // Approve Modal
+    echo '<div class="modal fade" id="approveModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="approve">
+                    <input type="hidden" name="request_id" id="approve_request_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-check"></i> Approve Sender ID Request</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <strong>Sender ID:</strong> <span id="approve_sender_id"></span><br>
+                            <strong>Client:</strong> <span id="approve_client"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Assign Gateway <span class="text-danger">*</span></label>
+                            <select name="gateway_id" id="approve_gateway" class="form-control" required>
+                                ' . $gatewayOptions . '
+                            </select>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Setup Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="setup_fee" id="approve_setup" class="form-control" step="0.01" value="0">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Recurring Fee</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">$</span>
+                                        <input type="number" name="recurring_fee" id="approve_recurring" class="form-control" step="0.01" value="0">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Admin Notes</label>
+                            <textarea name="admin_notes" class="form-control" rows="2" placeholder="Internal notes (not shown to client)"></textarea>
+                        </div>
+
+                        <div class="alert alert-warning">
+                            <i class="fa fa-info-circle"></i> If fees are set, an invoice will be created and the Sender ID will activate after payment.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success"><i class="fa fa-check"></i> Approve Request</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Reject Modal
+    echo '<div class="modal fade" id="rejectModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="reject">
+                    <input type="hidden" name="request_id" id="reject_request_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-times"></i> Reject Request</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Rejection Reason</label>
+                            <textarea name="reject_reason" class="form-control" rows="3" placeholder="Reason for rejection (optional)"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-danger">Reject</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+    function showApproveModal(req) {
+        document.getElementById("approve_request_id").value = req.id;
+        document.getElementById("approve_sender_id").textContent = req.sender_id;
+        document.getElementById("approve_client").textContent = (req.firstname || "") + " " + (req.lastname || "") + " (" + req.email + ")";
+        document.getElementById("approve_gateway").value = req.gateway_id || "";
+        document.getElementById("approve_setup").value = req.setup_fee || 0;
+        document.getElementById("approve_recurring").value = req.recurring_fee || 0;
+        jQuery("#approveModal").modal("show");
+    }
+
+    function showRejectModal(requestId) {
+        document.getElementById("reject_request_id").value = requestId;
+        jQuery("#rejectModal").modal("show");
     }
     </script>';
 }

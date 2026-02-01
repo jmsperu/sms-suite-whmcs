@@ -565,4 +565,1237 @@ class BillingService
             'total' => $total,
         ];
     }
+
+    // ============================================================
+    // SMS Credit Package Purchase Methods
+    // ============================================================
+
+    /**
+     * Create invoice for SMS credit package purchase
+     *
+     * @param int $clientId
+     * @param int $packageId
+     * @return array
+     */
+    public static function purchaseCreditPackage(int $clientId, int $packageId): array
+    {
+        try {
+            $package = Capsule::table('mod_sms_credit_packages')
+                ->where('id', $packageId)
+                ->where('status', 1)
+                ->first();
+
+            if (!$package) {
+                return ['success' => false, 'error' => 'Package not found or inactive'];
+            }
+
+            $client = Capsule::table('tblclients')->where('id', $clientId)->first();
+            if (!$client) {
+                return ['success' => false, 'error' => 'Client not found'];
+            }
+
+            $currencyId = $client->currency;
+            $price = $package->price;
+
+            if ($package->currency_id && $package->currency_id != $currencyId) {
+                $price = self::convertCurrency($price, $package->currency_id, $currencyId);
+            }
+
+            $invoiceResult = localAPI('CreateInvoice', [
+                'userid' => $clientId,
+                'sendinvoice' => true,
+                'paymentmethod' => '',
+                'itemdescription1' => 'SMS Credits: ' . $package->name . ' (' . $package->credits . ' credits)',
+                'itemamount1' => $price,
+                'itemtaxed1' => true,
+            ]);
+
+            if ($invoiceResult['result'] !== 'success') {
+                return ['success' => false, 'error' => 'Failed to create invoice: ' . ($invoiceResult['message'] ?? 'Unknown error')];
+            }
+
+            $invoiceId = $invoiceResult['invoiceid'];
+
+            $expiresAt = null;
+            if ($package->validity_days > 0) {
+                $expiresAt = date('Y-m-d H:i:s', strtotime("+{$package->validity_days} days"));
+            }
+
+            Capsule::table('mod_sms_credit_purchases')->insert([
+                'client_id' => $clientId,
+                'package_id' => $packageId,
+                'invoice_id' => $invoiceId,
+                'credits_purchased' => $package->credits,
+                'bonus_credits' => $package->bonus_credits,
+                'amount' => $price,
+                'status' => 'pending',
+                'expires_at' => $expiresAt,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return [
+                'success' => true,
+                'invoice_id' => $invoiceId,
+                'credits' => $package->credits,
+                'bonus_credits' => $package->bonus_credits,
+                'amount' => $price,
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Process paid invoice for credit purchase
+     *
+     * @param int $invoiceId
+     * @return array
+     */
+    public static function processCreditPurchasePayment(int $invoiceId): array
+    {
+        try {
+            $purchase = Capsule::table('mod_sms_credit_purchases')
+                ->where('invoice_id', $invoiceId)
+                ->where('status', 'pending')
+                ->first();
+
+            if (!$purchase) {
+                return ['success' => false, 'error' => 'No pending purchase found'];
+            }
+
+            $balance = Capsule::table('mod_sms_credit_balance')
+                ->where('client_id', $purchase->client_id)
+                ->first();
+
+            $currentBalance = $balance ? $balance->balance : 0;
+            $totalCredits = $purchase->credits_purchased + $purchase->bonus_credits;
+            $newBalance = $currentBalance + $totalCredits;
+
+            if ($balance) {
+                Capsule::table('mod_sms_credit_balance')
+                    ->where('client_id', $purchase->client_id)
+                    ->update([
+                        'balance' => $newBalance,
+                        'total_purchased' => $balance->total_purchased + $purchase->credits_purchased,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+            } else {
+                Capsule::table('mod_sms_credit_balance')->insert([
+                    'client_id' => $purchase->client_id,
+                    'balance' => $newBalance,
+                    'total_purchased' => $purchase->credits_purchased,
+                    'total_used' => 0,
+                    'total_expired' => 0,
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
+
+            Capsule::table('mod_sms_credit_transactions')->insert([
+                'client_id' => $purchase->client_id,
+                'type' => 'purchase',
+                'credits' => $purchase->credits_purchased,
+                'balance_before' => $currentBalance,
+                'balance_after' => $currentBalance + $purchase->credits_purchased,
+                'reference_type' => 'invoice',
+                'reference_id' => $invoiceId,
+                'description' => 'SMS Credit Purchase',
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            if ($purchase->bonus_credits > 0) {
+                Capsule::table('mod_sms_credit_transactions')->insert([
+                    'client_id' => $purchase->client_id,
+                    'type' => 'bonus',
+                    'credits' => $purchase->bonus_credits,
+                    'balance_before' => $currentBalance + $purchase->credits_purchased,
+                    'balance_after' => $newBalance,
+                    'reference_type' => 'invoice',
+                    'reference_id' => $invoiceId,
+                    'description' => 'Bonus Credits',
+                    'created_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
+
+            Capsule::table('mod_sms_credit_purchases')
+                ->where('id', $purchase->id)
+                ->update([
+                    'status' => 'paid',
+                    'credited_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            return [
+                'success' => true,
+                'credits_added' => $totalCredits,
+                'new_balance' => $newBalance,
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get client SMS credit balance
+     *
+     * @param int $clientId
+     * @return int
+     */
+    public static function getClientCreditBalance(int $clientId): int
+    {
+        $balance = Capsule::table('mod_sms_credit_balance')
+            ->where('client_id', $clientId)
+            ->first();
+
+        return $balance ? (int)$balance->balance : 0;
+    }
+
+    /**
+     * Deduct SMS credits for usage
+     *
+     * @param int $clientId
+     * @param int $credits
+     * @param string $description
+     * @param int|null $messageId
+     * @return array
+     */
+    public static function deductSmsCredits(int $clientId, int $credits, string $description = '', ?int $messageId = null): array
+    {
+        try {
+            $balance = Capsule::table('mod_sms_credit_balance')
+                ->where('client_id', $clientId)
+                ->first();
+
+            if (!$balance || $balance->balance < $credits) {
+                return ['success' => false, 'error' => 'Insufficient credits'];
+            }
+
+            $newBalance = $balance->balance - $credits;
+
+            Capsule::table('mod_sms_credit_balance')
+                ->where('client_id', $clientId)
+                ->update([
+                    'balance' => $newBalance,
+                    'total_used' => $balance->total_used + $credits,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            Capsule::table('mod_sms_credit_transactions')->insert([
+                'client_id' => $clientId,
+                'type' => 'usage',
+                'credits' => -$credits,
+                'balance_before' => $balance->balance,
+                'balance_after' => $newBalance,
+                'reference_type' => $messageId ? 'message' : null,
+                'reference_id' => $messageId,
+                'description' => $description ?: 'SMS Usage',
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return ['success' => true, 'new_balance' => $newBalance];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get all credit packages (for client purchase page)
+     *
+     * @param bool $activeOnly
+     * @return array
+     */
+    public static function getCreditPackages(bool $activeOnly = true): array
+    {
+        $query = Capsule::table('mod_sms_credit_packages');
+
+        if ($activeOnly) {
+            $query->where('status', 1);
+        }
+
+        return $query->orderBy('sort_order')->orderBy('price')->get()->toArray();
+    }
+
+    /**
+     * Create credit package (admin)
+     *
+     * @param array $data
+     * @return array
+     */
+    public static function createCreditPackage(array $data): array
+    {
+        try {
+            $packageId = Capsule::table('mod_sms_credit_packages')->insertGetId([
+                'name' => $data['name'],
+                'description' => $data['description'] ?? null,
+                'credits' => $data['credits'],
+                'price' => $data['price'],
+                'currency_id' => $data['currency_id'] ?? null,
+                'bonus_credits' => $data['bonus_credits'] ?? 0,
+                'validity_days' => $data['validity_days'] ?? 0,
+                'is_featured' => $data['is_featured'] ?? false,
+                'sort_order' => $data['sort_order'] ?? 0,
+                'status' => $data['status'] ?? true,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return ['success' => true, 'package_id' => $packageId];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Update credit package (admin)
+     *
+     * @param int $packageId
+     * @param array $data
+     * @return array
+     */
+    public static function updateCreditPackage(int $packageId, array $data): array
+    {
+        try {
+            Capsule::table('mod_sms_credit_packages')
+                ->where('id', $packageId)
+                ->update(array_merge($data, ['updated_at' => date('Y-m-d H:i:s')]));
+
+            return ['success' => true];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Delete credit package (admin)
+     *
+     * @param int $packageId
+     * @return array
+     */
+    public static function deleteCreditPackage(int $packageId): array
+    {
+        try {
+            Capsule::table('mod_sms_credit_packages')
+                ->where('id', $packageId)
+                ->delete();
+
+            return ['success' => true];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Admin: Add credits to client account
+     *
+     * @param int $clientId
+     * @param int $credits
+     * @param int $adminId
+     * @param string $reason
+     * @return array
+     */
+    public static function addCreditsToClient(int $clientId, int $credits, int $adminId, string $reason = ''): array
+    {
+        try {
+            $balance = Capsule::table('mod_sms_credit_balance')
+                ->where('client_id', $clientId)
+                ->first();
+
+            $currentBalance = $balance ? $balance->balance : 0;
+            $newBalance = $currentBalance + $credits;
+
+            if ($balance) {
+                Capsule::table('mod_sms_credit_balance')
+                    ->where('client_id', $clientId)
+                    ->update([
+                        'balance' => $newBalance,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+            } else {
+                Capsule::table('mod_sms_credit_balance')->insert([
+                    'client_id' => $clientId,
+                    'balance' => $newBalance,
+                    'total_purchased' => 0,
+                    'total_used' => 0,
+                    'total_expired' => 0,
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
+
+            Capsule::table('mod_sms_credit_transactions')->insert([
+                'client_id' => $clientId,
+                'type' => 'adjustment',
+                'credits' => $credits,
+                'balance_before' => $currentBalance,
+                'balance_after' => $newBalance,
+                'reference_type' => 'admin',
+                'reference_id' => $adminId,
+                'description' => $reason ?: 'Admin adjustment',
+                'admin_id' => $adminId,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return ['success' => true, 'new_balance' => $newBalance];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    // ============================================================
+    // Sender ID Pool and Assignment Methods
+    // ============================================================
+
+    /**
+     * Admin: Add Sender ID to pool
+     *
+     * @param array $data
+     * @return array
+     */
+    public static function addSenderIdToPool(array $data): array
+    {
+        try {
+            $gateway = Capsule::table('mod_sms_gateways')
+                ->where('id', $data['gateway_id'])
+                ->first();
+
+            if (!$gateway) {
+                return ['success' => false, 'error' => 'Gateway not found'];
+            }
+
+            $poolId = Capsule::table('mod_sms_sender_id_pool')->insertGetId([
+                'sender_id' => $data['sender_id'],
+                'type' => $data['type'] ?? 'alphanumeric',
+                'description' => $data['description'] ?? null,
+                'gateway_id' => $data['gateway_id'],
+                'country_codes' => isset($data['country_codes']) ? json_encode($data['country_codes']) : null,
+                'price_setup' => $data['price_setup'] ?? 0,
+                'price_monthly' => $data['price_monthly'] ?? 0,
+                'price_yearly' => $data['price_yearly'] ?? 0,
+                'requires_approval' => $data['requires_approval'] ?? true,
+                'is_shared' => $data['is_shared'] ?? false,
+                'status' => $data['status'] ?? 'active',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return ['success' => true, 'pool_id' => $poolId];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Admin: Update Sender ID in pool
+     *
+     * @param int $poolId
+     * @param array $data
+     * @return array
+     */
+    public static function updateSenderIdPool(int $poolId, array $data): array
+    {
+        try {
+            if (isset($data['country_codes']) && is_array($data['country_codes'])) {
+                $data['country_codes'] = json_encode($data['country_codes']);
+            }
+
+            Capsule::table('mod_sms_sender_id_pool')
+                ->where('id', $poolId)
+                ->update(array_merge($data, ['updated_at' => date('Y-m-d H:i:s')]));
+
+            return ['success' => true];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Admin: Delete Sender ID from pool
+     *
+     * @param int $poolId
+     * @return array
+     */
+    public static function deleteSenderIdFromPool(int $poolId): array
+    {
+        try {
+            // Check if assigned to any active clients
+            $activeAssignments = Capsule::table('mod_sms_client_sender_ids')
+                ->where('pool_id', $poolId)
+                ->where('status', 'active')
+                ->count();
+
+            if ($activeAssignments > 0) {
+                return ['success' => false, 'error' => 'Cannot delete: Sender ID is assigned to ' . $activeAssignments . ' active client(s)'];
+            }
+
+            Capsule::table('mod_sms_sender_id_pool')
+                ->where('id', $poolId)
+                ->delete();
+
+            return ['success' => true];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get all sender IDs in pool
+     *
+     * @param array $filters
+     * @return array
+     */
+    public static function getSenderIdPool(array $filters = []): array
+    {
+        $query = Capsule::table('mod_sms_sender_id_pool as p')
+            ->leftJoin('mod_sms_gateways as g', 'p.gateway_id', '=', 'g.id')
+            ->select([
+                'p.*',
+                'g.name as gateway_name',
+            ]);
+
+        if (!empty($filters['status'])) {
+            $query->where('p.status', $filters['status']);
+        }
+
+        if (!empty($filters['gateway_id'])) {
+            $query->where('p.gateway_id', $filters['gateway_id']);
+        }
+
+        return $query->orderBy('p.sender_id')->get()->toArray();
+    }
+
+    /**
+     * Get single sender ID from pool
+     *
+     * @param int $poolId
+     * @return object|null
+     */
+    public static function getSenderIdPoolItem(int $poolId): ?object
+    {
+        return Capsule::table('mod_sms_sender_id_pool as p')
+            ->leftJoin('mod_sms_gateways as g', 'p.gateway_id', '=', 'g.id')
+            ->where('p.id', $poolId)
+            ->select(['p.*', 'g.name as gateway_name'])
+            ->first();
+    }
+
+    /**
+     * Client: Request a new Sender ID
+     *
+     * @param int $clientId
+     * @param array $data
+     * @return array
+     */
+    public static function requestSenderId(int $clientId, array $data): array
+    {
+        try {
+            // Check if already exists
+            $existing = Capsule::table('mod_sms_client_sender_ids')
+                ->where('client_id', $clientId)
+                ->where('sender_id', $data['sender_id'])
+                ->where('status', '!=', 'expired')
+                ->first();
+
+            if ($existing) {
+                return ['success' => false, 'error' => 'You already have this Sender ID'];
+            }
+
+            // Check pending request
+            $pendingRequest = Capsule::table('mod_sms_sender_id_requests')
+                ->where('client_id', $clientId)
+                ->where('sender_id', $data['sender_id'])
+                ->whereIn('status', ['pending', 'approved'])
+                ->first();
+
+            if ($pendingRequest) {
+                return ['success' => false, 'error' => 'You already have a pending request for this Sender ID'];
+            }
+
+            $setupFee = 0;
+            $recurringFee = 0;
+            $gatewayId = $data['gateway_id'] ?? null;
+
+            if (!empty($data['pool_id'])) {
+                $poolItem = Capsule::table('mod_sms_sender_id_pool')
+                    ->where('id', $data['pool_id'])
+                    ->where('status', 'active')
+                    ->first();
+
+                if ($poolItem) {
+                    $setupFee = $poolItem->price_setup;
+                    $gatewayId = $poolItem->gateway_id;
+
+                    switch ($data['billing_cycle'] ?? 'monthly') {
+                        case 'yearly':
+                            $recurringFee = $poolItem->price_yearly;
+                            break;
+                        case 'onetime':
+                            $recurringFee = 0;
+                            break;
+                        default:
+                            $recurringFee = $poolItem->price_monthly;
+                    }
+                }
+            }
+
+            $requestId = Capsule::table('mod_sms_sender_id_requests')->insertGetId([
+                'client_id' => $clientId,
+                'sender_id' => $data['sender_id'],
+                'type' => $data['type'] ?? 'alphanumeric',
+                'pool_id' => $data['pool_id'] ?? null,
+                'gateway_id' => $gatewayId,
+                'business_name' => $data['business_name'] ?? null,
+                'use_case' => $data['use_case'] ?? null,
+                'documents' => isset($data['documents']) ? json_encode($data['documents']) : null,
+                'billing_cycle' => $data['billing_cycle'] ?? 'monthly',
+                'setup_fee' => $setupFee,
+                'recurring_fee' => $recurringFee,
+                'status' => 'pending',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            logActivity("SMS Suite: New Sender ID request from client #{$clientId}: {$data['sender_id']}");
+
+            return [
+                'success' => true,
+                'request_id' => $requestId,
+                'message' => 'Your Sender ID request has been submitted for approval.',
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Admin: Approve Sender ID request
+     *
+     * @param int $requestId
+     * @param int $adminId
+     * @param array $options
+     * @return array
+     */
+    public static function approveSenderIdRequest(int $requestId, int $adminId, array $options = []): array
+    {
+        try {
+            $request = Capsule::table('mod_sms_sender_id_requests')
+                ->where('id', $requestId)
+                ->where('status', 'pending')
+                ->first();
+
+            if (!$request) {
+                return ['success' => false, 'error' => 'Request not found or already processed'];
+            }
+
+            $setupFee = $options['setup_fee'] ?? $request->setup_fee;
+            $recurringFee = $options['recurring_fee'] ?? $request->recurring_fee;
+            $gatewayId = $options['gateway_id'] ?? $request->gateway_id;
+
+            if (!$gatewayId) {
+                return ['success' => false, 'error' => 'Gateway must be specified'];
+            }
+
+            $expiresAt = null;
+            switch ($request->billing_cycle) {
+                case 'monthly':
+                    $expiresAt = date('Y-m-d H:i:s', strtotime('+1 month'));
+                    break;
+                case 'yearly':
+                    $expiresAt = date('Y-m-d H:i:s', strtotime('+1 year'));
+                    break;
+            }
+
+            $invoiceId = null;
+            $totalFee = $setupFee + $recurringFee;
+
+            if ($totalFee > 0) {
+                $invoiceItems = [];
+                $itemIndex = 1;
+
+                if ($setupFee > 0) {
+                    $invoiceItems["itemdescription{$itemIndex}"] = "Sender ID Setup Fee: {$request->sender_id}";
+                    $invoiceItems["itemamount{$itemIndex}"] = $setupFee;
+                    $invoiceItems["itemtaxed{$itemIndex}"] = true;
+                    $itemIndex++;
+                }
+
+                if ($recurringFee > 0) {
+                    $cycleLabel = ucfirst($request->billing_cycle);
+                    $invoiceItems["itemdescription{$itemIndex}"] = "Sender ID {$cycleLabel} Fee: {$request->sender_id}";
+                    $invoiceItems["itemamount{$itemIndex}"] = $recurringFee;
+                    $invoiceItems["itemtaxed{$itemIndex}"] = true;
+                }
+
+                $invoiceResult = localAPI('CreateInvoice', array_merge([
+                    'userid' => $request->client_id,
+                    'sendinvoice' => true,
+                    'paymentmethod' => '',
+                ], $invoiceItems));
+
+                if ($invoiceResult['result'] !== 'success') {
+                    return ['success' => false, 'error' => 'Failed to create invoice'];
+                }
+
+                $invoiceId = $invoiceResult['invoiceid'];
+            }
+
+            Capsule::table('mod_sms_sender_id_requests')
+                ->where('id', $requestId)
+                ->update([
+                    'status' => $invoiceId ? 'approved' : 'active',
+                    'gateway_id' => $gatewayId,
+                    'setup_fee' => $setupFee,
+                    'recurring_fee' => $recurringFee,
+                    'invoice_id' => $invoiceId,
+                    'admin_notes' => $options['admin_notes'] ?? null,
+                    'approved_by' => $adminId,
+                    'approved_at' => date('Y-m-d H:i:s'),
+                    'expires_at' => $expiresAt,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            if (!$invoiceId) {
+                self::activateSenderId($requestId);
+            }
+
+            return [
+                'success' => true,
+                'invoice_id' => $invoiceId,
+                'message' => $invoiceId ? 'Request approved. Invoice created for client.' : 'Sender ID activated.',
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Admin: Reject Sender ID request
+     *
+     * @param int $requestId
+     * @param int $adminId
+     * @param string $reason
+     * @return array
+     */
+    public static function rejectSenderIdRequest(int $requestId, int $adminId, string $reason = ''): array
+    {
+        try {
+            $request = Capsule::table('mod_sms_sender_id_requests')
+                ->where('id', $requestId)
+                ->where('status', 'pending')
+                ->first();
+
+            if (!$request) {
+                return ['success' => false, 'error' => 'Request not found or already processed'];
+            }
+
+            Capsule::table('mod_sms_sender_id_requests')
+                ->where('id', $requestId)
+                ->update([
+                    'status' => 'rejected',
+                    'admin_notes' => $reason,
+                    'approved_by' => $adminId,
+                    'approved_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            return ['success' => true, 'message' => 'Request rejected.'];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Activate Sender ID after payment or free approval
+     *
+     * @param int $requestId
+     * @return array
+     */
+    public static function activateSenderId(int $requestId): array
+    {
+        try {
+            $request = Capsule::table('mod_sms_sender_id_requests')
+                ->where('id', $requestId)
+                ->first();
+
+            if (!$request) {
+                return ['success' => false, 'error' => 'Request not found'];
+            }
+
+            $allocationId = Capsule::table('mod_sms_client_sender_ids')->insertGetId([
+                'client_id' => $request->client_id,
+                'pool_id' => $request->pool_id,
+                'request_id' => $requestId,
+                'sender_id' => $request->sender_id,
+                'gateway_id' => $request->gateway_id,
+                'is_default' => false,
+                'status' => 'active',
+                'expires_at' => $request->expires_at,
+                'last_invoice_id' => $request->invoice_id,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            Capsule::table('mod_sms_sender_id_requests')
+                ->where('id', $requestId)
+                ->update([
+                    'status' => 'active',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            // Make default if client has no default
+            $hasDefault = Capsule::table('mod_sms_client_sender_ids')
+                ->where('client_id', $request->client_id)
+                ->where('is_default', true)
+                ->where('status', 'active')
+                ->where('id', '!=', $allocationId)
+                ->exists();
+
+            if (!$hasDefault) {
+                Capsule::table('mod_sms_client_sender_ids')
+                    ->where('id', $allocationId)
+                    ->update(['is_default' => true]);
+
+                // Update client settings
+                Capsule::table('mod_sms_settings')
+                    ->updateOrInsert(
+                        ['client_id' => $request->client_id],
+                        [
+                            'assigned_sender_id' => $request->sender_id,
+                            'assigned_gateway_id' => $request->gateway_id,
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]
+                    );
+            }
+
+            return [
+                'success' => true,
+                'allocation_id' => $allocationId,
+                'message' => 'Sender ID activated successfully.',
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Process Sender ID payment
+     *
+     * @param int $invoiceId
+     * @return array
+     */
+    public static function processSenderIdPayment(int $invoiceId): array
+    {
+        try {
+            $request = Capsule::table('mod_sms_sender_id_requests')
+                ->where('invoice_id', $invoiceId)
+                ->where('status', 'approved')
+                ->first();
+
+            if (!$request) {
+                return ['success' => false, 'error' => 'No pending sender ID request found'];
+            }
+
+            return self::activateSenderId($request->id);
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Admin: Manually assign sender ID to client
+     *
+     * @param int $clientId
+     * @param int $poolId
+     * @param array $options
+     * @return array
+     */
+    public static function assignSenderIdToClient(int $clientId, int $poolId, array $options = []): array
+    {
+        try {
+            $poolItem = Capsule::table('mod_sms_sender_id_pool')
+                ->where('id', $poolId)
+                ->where('status', 'active')
+                ->first();
+
+            if (!$poolItem) {
+                return ['success' => false, 'error' => 'Sender ID not found in pool'];
+            }
+
+            $existing = Capsule::table('mod_sms_client_sender_ids')
+                ->where('client_id', $clientId)
+                ->where('sender_id', $poolItem->sender_id)
+                ->where('gateway_id', $poolItem->gateway_id)
+                ->where('status', 'active')
+                ->first();
+
+            if ($existing) {
+                return ['success' => false, 'error' => 'Sender ID already assigned to this client'];
+            }
+
+            $expiresAt = null;
+            if (!empty($options['expires_at'])) {
+                $expiresAt = $options['expires_at'];
+            } elseif (!empty($options['validity_days'])) {
+                $expiresAt = date('Y-m-d H:i:s', strtotime("+{$options['validity_days']} days"));
+            }
+
+            $allocationId = Capsule::table('mod_sms_client_sender_ids')->insertGetId([
+                'client_id' => $clientId,
+                'pool_id' => $poolId,
+                'request_id' => null,
+                'sender_id' => $poolItem->sender_id,
+                'gateway_id' => $poolItem->gateway_id,
+                'is_default' => $options['is_default'] ?? false,
+                'status' => 'active',
+                'expires_at' => $expiresAt,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            if ($options['is_default'] ?? false) {
+                self::setClientDefaultSenderId($clientId, $allocationId);
+            }
+
+            return [
+                'success' => true,
+                'allocation_id' => $allocationId,
+                'message' => 'Sender ID assigned successfully.',
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Set client's default sender ID
+     *
+     * @param int $clientId
+     * @param int $allocationId
+     * @return array
+     */
+    public static function setClientDefaultSenderId(int $clientId, int $allocationId): array
+    {
+        try {
+            Capsule::table('mod_sms_client_sender_ids')
+                ->where('client_id', $clientId)
+                ->update(['is_default' => false]);
+
+            $allocation = Capsule::table('mod_sms_client_sender_ids')
+                ->where('id', $allocationId)
+                ->where('client_id', $clientId)
+                ->first();
+
+            if (!$allocation) {
+                return ['success' => false, 'error' => 'Sender ID allocation not found'];
+            }
+
+            Capsule::table('mod_sms_client_sender_ids')
+                ->where('id', $allocationId)
+                ->update(['is_default' => true]);
+
+            Capsule::table('mod_sms_settings')
+                ->updateOrInsert(
+                    ['client_id' => $clientId],
+                    [
+                        'assigned_sender_id' => $allocation->sender_id,
+                        'assigned_gateway_id' => $allocation->gateway_id,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]
+                );
+
+            return ['success' => true];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get client's active sender IDs
+     *
+     * @param int $clientId
+     * @return array
+     */
+    public static function getClientSenderIds(int $clientId): array
+    {
+        return Capsule::table('mod_sms_client_sender_ids as csi')
+            ->leftJoin('mod_sms_gateways as g', 'csi.gateway_id', '=', 'g.id')
+            ->where('csi.client_id', $clientId)
+            ->where('csi.status', 'active')
+            ->select([
+                'csi.id',
+                'csi.sender_id',
+                'csi.is_default',
+                'csi.expires_at',
+                'csi.status',
+                // Note: gateway_name is NOT exposed to clients for security
+            ])
+            ->get()
+            ->toArray();
+    }
+
+    /**
+     * Get client's active sender IDs with gateway info (admin only)
+     *
+     * @param int $clientId
+     * @return array
+     */
+    public static function getClientSenderIdsAdmin(int $clientId): array
+    {
+        return Capsule::table('mod_sms_client_sender_ids as csi')
+            ->leftJoin('mod_sms_gateways as g', 'csi.gateway_id', '=', 'g.id')
+            ->where('csi.client_id', $clientId)
+            ->select([
+                'csi.*',
+                'g.name as gateway_name',
+            ])
+            ->orderBy('csi.is_default', 'desc')
+            ->orderBy('csi.created_at', 'desc')
+            ->get()
+            ->toArray();
+    }
+
+    /**
+     * Get pending sender ID requests (admin)
+     *
+     * @return array
+     */
+    public static function getPendingSenderIdRequests(): array
+    {
+        return Capsule::table('mod_sms_sender_id_requests as r')
+            ->leftJoin('tblclients as c', 'r.client_id', '=', 'c.id')
+            ->where('r.status', 'pending')
+            ->select([
+                'r.*',
+                'c.firstname',
+                'c.lastname',
+                'c.companyname',
+                'c.email',
+            ])
+            ->orderBy('r.created_at', 'desc')
+            ->get()
+            ->toArray();
+    }
+
+    /**
+     * Get all sender ID requests (admin)
+     *
+     * @param array $filters
+     * @return array
+     */
+    public static function getSenderIdRequests(array $filters = []): array
+    {
+        $query = Capsule::table('mod_sms_sender_id_requests as r')
+            ->leftJoin('tblclients as c', 'r.client_id', '=', 'c.id')
+            ->leftJoin('mod_sms_gateways as g', 'r.gateway_id', '=', 'g.id')
+            ->select([
+                'r.*',
+                'c.firstname',
+                'c.lastname',
+                'c.companyname',
+                'c.email',
+                'g.name as gateway_name',
+            ]);
+
+        if (!empty($filters['status'])) {
+            $query->where('r.status', $filters['status']);
+        }
+
+        if (!empty($filters['client_id'])) {
+            $query->where('r.client_id', $filters['client_id']);
+        }
+
+        return $query->orderBy('r.created_at', 'desc')->get()->toArray();
+    }
+
+    /**
+     * Convert currency
+     *
+     * @param float $amount
+     * @param int $fromCurrencyId
+     * @param int $toCurrencyId
+     * @return float
+     */
+    private static function convertCurrency(float $amount, int $fromCurrencyId, int $toCurrencyId): float
+    {
+        if ($fromCurrencyId === $toCurrencyId) {
+            return $amount;
+        }
+
+        $fromCurrency = Capsule::table('tblcurrencies')->where('id', $fromCurrencyId)->first();
+        $toCurrency = Capsule::table('tblcurrencies')->where('id', $toCurrencyId)->first();
+
+        if (!$fromCurrency || !$toCurrency) {
+            return $amount;
+        }
+
+        $baseAmount = $amount / $fromCurrency->rate;
+        return round($baseAmount * $toCurrency->rate, 2);
+    }
+
+    /**
+     * Generate renewal invoices for expiring sender IDs
+     *
+     * @param int $daysBeforeExpiry
+     * @return array
+     */
+    public static function generateSenderIdRenewals(int $daysBeforeExpiry = 7): array
+    {
+        try {
+            $expiryDate = date('Y-m-d H:i:s', strtotime("+{$daysBeforeExpiry} days"));
+
+            $expiringIds = Capsule::table('mod_sms_client_sender_ids as csi')
+                ->leftJoin('mod_sms_sender_id_requests as r', 'csi.request_id', '=', 'r.id')
+                ->where('csi.status', 'active')
+                ->whereNotNull('csi.expires_at')
+                ->where('csi.expires_at', '<=', $expiryDate)
+                ->where('csi.expires_at', '>', date('Y-m-d H:i:s'))
+                ->select(['csi.*', 'r.billing_cycle', 'r.recurring_fee'])
+                ->get();
+
+            $invoicesCreated = 0;
+
+            foreach ($expiringIds as $senderId) {
+                if (!$senderId->recurring_fee || $senderId->recurring_fee <= 0) {
+                    continue;
+                }
+
+                // Check if renewal already exists
+                $existingRenewal = Capsule::table('mod_sms_sender_id_billing')
+                    ->where('client_sender_id', $senderId->id)
+                    ->where('billing_type', 'renewal')
+                    ->where('status', 'pending')
+                    ->exists();
+
+                if ($existingRenewal) {
+                    continue;
+                }
+
+                $newExpiry = null;
+                switch ($senderId->billing_cycle) {
+                    case 'monthly':
+                        $newExpiry = date('Y-m-d H:i:s', strtotime($senderId->expires_at . ' +1 month'));
+                        break;
+                    case 'yearly':
+                        $newExpiry = date('Y-m-d H:i:s', strtotime($senderId->expires_at . ' +1 year'));
+                        break;
+                }
+
+                if (!$newExpiry) {
+                    continue;
+                }
+
+                $invoiceResult = localAPI('CreateInvoice', [
+                    'userid' => $senderId->client_id,
+                    'sendinvoice' => true,
+                    'itemdescription1' => "Sender ID Renewal: {$senderId->sender_id}",
+                    'itemamount1' => $senderId->recurring_fee,
+                    'itemtaxed1' => true,
+                ]);
+
+                if ($invoiceResult['result'] === 'success') {
+                    Capsule::table('mod_sms_sender_id_billing')->insert([
+                        'client_id' => $senderId->client_id,
+                        'client_sender_id' => $senderId->id,
+                        'invoice_id' => $invoiceResult['invoiceid'],
+                        'billing_type' => 'renewal',
+                        'amount' => $senderId->recurring_fee,
+                        'status' => 'pending',
+                        'period_start' => $senderId->expires_at,
+                        'period_end' => $newExpiry,
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+
+                    $invoicesCreated++;
+                }
+            }
+
+            return ['success' => true, 'invoices_created' => $invoicesCreated];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Process sender ID renewal payment
+     *
+     * @param int $invoiceId
+     * @return array
+     */
+    public static function processSenderIdRenewalPayment(int $invoiceId): array
+    {
+        try {
+            $billing = Capsule::table('mod_sms_sender_id_billing')
+                ->where('invoice_id', $invoiceId)
+                ->where('billing_type', 'renewal')
+                ->where('status', 'pending')
+                ->first();
+
+            if (!$billing) {
+                return ['success' => false, 'error' => 'No pending renewal found'];
+            }
+
+            Capsule::table('mod_sms_sender_id_billing')
+                ->where('id', $billing->id)
+                ->update([
+                    'status' => 'paid',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            Capsule::table('mod_sms_client_sender_ids')
+                ->where('id', $billing->client_sender_id)
+                ->update([
+                    'expires_at' => $billing->period_end,
+                    'last_invoice_id' => $invoiceId,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            return ['success' => true, 'new_expiry' => $billing->period_end];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Expire sender IDs that are past their expiry date
+     *
+     * @return array
+     */
+    public static function expireOverdueSenderIds(): array
+    {
+        try {
+            $expired = Capsule::table('mod_sms_client_sender_ids')
+                ->where('status', 'active')
+                ->whereNotNull('expires_at')
+                ->where('expires_at', '<', date('Y-m-d H:i:s'))
+                ->update([
+                    'status' => 'expired',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+
+            return ['success' => true, 'expired_count' => $expired];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
 }
