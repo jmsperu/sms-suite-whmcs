@@ -949,7 +949,7 @@ function sms_suite_create_tables()
             $table->dateTime('next_send_at')->nullable();
             $table->string('status', 20)->default('active'); // active, completed, unsubscribed, paused
             $table->timestamps();
-            $table->index(['drip_campaign_id', 'status', 'next_send_at']);
+            $table->index(['drip_campaign_id', 'status', 'next_send_at'], 'idx_drip_sub_campaign_status');
         });
     }
 
