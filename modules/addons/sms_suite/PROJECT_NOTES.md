@@ -74,6 +74,9 @@
 - Network prefix management
 - Document viewing/download
 - System diagnostics
+- **Admin Contacts** - Manage contacts for internal campaigns (client_id = 0)
+- **Admin Contact Groups** - Create groups for internal campaign targeting
+- **Admin Campaigns** - Run internal SMS campaigns using admin contacts/groups
 
 ### 7. Two-Way SMS / Inbound Messages
 - Webhook endpoint for receiving delivery receipts and inbound messages
@@ -207,10 +210,11 @@ modules/addons/sms_suite/
 ## Recent Commits
 
 ```
+4324025 - Add admin Contacts and Contact Groups management for internal campaigns
+09bc09e - Fix Groups menu link with fallback text
+f075870 - Add PROJECT_NOTES.md for session continuity
 d23612a - Add client inbox/chat, contact groups, Sender ID documents, and network prefixes
 4fb9c85 - Add currency options and billing rates configuration
-67d2f38 - Add SMS credit purchasing and Sender ID billing with WHMCS integration
-b5dbaa2 - Add client profile SMS widget and notification system
 ```
 
 ---
@@ -232,4 +236,4 @@ b5dbaa2 - Add client profile SMS widget and notification system
 
 ---
 
-*Last Updated: 2026-02-01*
+*Last Updated: 2026-02-02*
