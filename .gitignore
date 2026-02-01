@@ -1,0 +1,33 @@
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs
+*.log
+cron.lock
+
+# Sensitive files
+*.env
+config.local.php
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Build artifacts
+/vendor/
+/node_modules/
+
+# Original Laravel source (not part of WHMCS module)
+/laravel_source/
+
+# Claude Code session files
+/.claude/
