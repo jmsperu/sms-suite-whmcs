@@ -43,6 +43,7 @@ class GatewayTypes
 
         // === Regional Providers - Africa ===
         'africastalking' => ['name' => 'Africa\'s Talking', 'class' => 'AfricasTalkingGateway', 'category' => 'Africa'],
+        'airtouch' => ['name' => 'Airtouch Kenya', 'class' => 'AirtouchGateway', 'category' => 'Africa'],
         'termii' => ['name' => 'Termii', 'class' => 'TermiiGateway', 'category' => 'Africa'],
         'smsbroadcast_ng' => ['name' => 'SMS Broadcast NG', 'class' => 'SmsBroadcastNgGateway', 'category' => 'Africa'],
         'bulksmsnigeria' => ['name' => 'BulkSMS Nigeria', 'class' => 'BulkSmsNigeriaGateway', 'category' => 'Africa'],
@@ -91,8 +92,8 @@ class GatewayTypes
         'firebase' => ['name' => 'Firebase Cloud Messaging', 'class' => 'FirebaseGateway', 'category' => 'Enterprise'],
 
         // === Generic/Custom ===
-        'generic_http' => ['name' => 'Generic HTTP', 'class' => 'GenericHttpGateway', 'category' => 'Custom'],
-        'smpp' => ['name' => 'SMPP Gateway', 'class' => 'SmppGateway', 'category' => 'Custom'],
+        'generic_http' => ['name' => 'Custom HTTP Gateway (Create Your Own)', 'class' => 'GenericHttpGateway', 'category' => 'Custom'],
+        'smpp' => ['name' => 'SMPP Gateway (Direct SMSC)', 'class' => 'SmppGateway', 'category' => 'Custom'],
     ];
 
     /**

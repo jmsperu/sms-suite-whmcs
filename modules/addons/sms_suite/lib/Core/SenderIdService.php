@@ -29,27 +29,37 @@ class SenderIdService
             return ['success' => false, 'error' => $validation['error']];
         }
 
-        // Check if already exists for this client
+        $network = $options['network'] ?? 'all';
+
+        // Check if already exists for this client on same network
         $exists = Capsule::table('mod_sms_sender_ids')
             ->where('client_id', $clientId)
             ->where('sender_id', $senderId)
+            ->where(function ($q) use ($network) {
+                $q->where('network', $network)
+                  ->orWhere('network', 'all')
+                  ->orWhere($network, 'all');
+            })
             ->whereIn('status', ['pending', 'active'])
             ->exists();
 
         if ($exists) {
-            return ['success' => false, 'error' => 'This sender ID already exists or is pending approval.'];
+            return ['success' => false, 'error' => 'This sender ID already exists or is pending approval for this network.'];
         }
 
         // Get pricing
         $price = self::getPrice($type);
 
-        // Create sender ID record
+        // Create sender ID record with full document and company info
         $id = Capsule::table('mod_sms_sender_ids')->insertGetId([
             'client_id' => $clientId,
             'sender_id' => $senderId,
             'type' => $type,
+            'network' => $network,
             'status' => 'pending',
             'price' => $price,
+            'company_name' => $options['company_name'] ?? null,
+            'use_case' => $options['use_case'] ?? null,
             'documents' => json_encode($options['documents'] ?? []),
             'notes' => $options['notes'] ?? null,
             'gateway_bindings' => json_encode([]),
@@ -57,7 +67,28 @@ class SenderIdService
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
-        logActivity("SMS Suite: Sender ID request - {$senderId} by client {$clientId}");
+        // Also create a request record for admin tracking
+        Capsule::table('mod_sms_sender_id_requests')->insert([
+            'client_id' => $clientId,
+            'sender_id' => $senderId,
+            'type' => $type,
+            'use_case' => $options['use_case'] ?? null,
+            'company_name' => $options['company_name'] ?? null,
+            'doc_certificate' => $options['documents']['doc_certificate']['path'] ?? null,
+            'doc_vat_cert' => $options['documents']['doc_vat']['path'] ?? null,
+            'doc_authorization' => $options['documents']['doc_authorization']['path'] ?? null,
+            'doc_other' => $options['documents']['doc_kyc']['path'] ?? null,
+            'status' => 'pending',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        logActivity("SMS Suite: Sender ID request - {$senderId} for {$network} by client {$clientId} with documents");
+
+        // Sender IDs with documents always require manual approval (telco submission)
+        if (!empty($options['documents'])) {
+            return ['success' => true, 'id' => $id, 'status' => 'pending', 'price' => $price];
+        }
 
         // If auto-approve is enabled and no price, approve immediately
         $settings = self::getModuleSettings();

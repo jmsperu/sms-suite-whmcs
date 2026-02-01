@@ -11,8 +11,10 @@
             <ul class="nav nav-pills">
                 <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
                 <li class="active"><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
+                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
                 <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
                 <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
+                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups}</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
             </ul>
         </div>

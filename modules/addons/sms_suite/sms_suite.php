@@ -89,17 +89,24 @@ function sms_suite_config()
 function sms_suite_activate()
 {
     try {
-        // Create all database tables
-        sms_suite_create_tables();
+        // Create all database tables using raw SQL for reliability
+        $errors = sms_suite_create_tables_sql();
+
+        if (!empty($errors)) {
+            logActivity('SMS Suite activation - table creation had warnings: ' . implode('; ', $errors));
+        }
 
         // Insert default data
         sms_suite_insert_defaults();
+
+        logActivity('SMS Suite activated successfully');
 
         return [
             'status' => 'success',
             'description' => 'SMS Suite has been activated successfully. Please configure your gateways.',
         ];
     } catch (Exception $e) {
+        logActivity('SMS Suite activation failed: ' . $e->getMessage());
         return [
             'status' => 'error',
             'description' => 'Activation failed: ' . $e->getMessage(),
@@ -126,18 +133,21 @@ function sms_suite_deactivate()
         }
 
         if ($purgeData) {
-            sms_suite_drop_tables();
+            sms_suite_drop_tables_sql();
+            logActivity('SMS Suite deactivated with data purge');
             return [
                 'status' => 'success',
                 'description' => 'SMS Suite has been deactivated and all data has been purged.',
             ];
         }
 
+        logActivity('SMS Suite deactivated - data preserved');
         return [
             'status' => 'success',
             'description' => 'SMS Suite has been deactivated. Data has been preserved.',
         ];
     } catch (Exception $e) {
+        logActivity('SMS Suite deactivation failed: ' . $e->getMessage());
         return [
             'status' => 'error',
             'description' => 'Deactivation failed: ' . $e->getMessage(),
@@ -146,22 +156,119 @@ function sms_suite_deactivate()
 }
 
 /**
+ * Drop all module tables using raw SQL
+ */
+function sms_suite_drop_tables_sql()
+{
+    $pdo = Capsule::connection()->getPdo();
+
+    $tables = [
+        // Billing and Credit tables
+        'mod_sms_credit_usage',
+        'mod_sms_credit_allocations',
+        'mod_sms_network_prefixes',
+        'mod_sms_sender_id_billing',
+        'mod_sms_credit_transactions',
+        'mod_sms_credit_balance',
+        'mod_sms_client_sender_ids',
+        'mod_sms_sender_id_requests',
+        'mod_sms_credit_purchases',
+        'mod_sms_credit_packages',
+        'mod_sms_sender_id_pool',
+        // Verification and Notification tables
+        'mod_sms_verification_logs',
+        'mod_sms_verification_templates',
+        'mod_sms_order_verification',
+        'mod_sms_client_verification',
+        'mod_sms_verification_tokens',
+        'mod_sms_admin_notifications',
+        'mod_sms_notification_templates',
+        // Advanced campaign tables
+        'mod_sms_scheduled',
+        'mod_sms_recurring_log',
+        'mod_sms_segment_conditions',
+        'mod_sms_segments',
+        'mod_sms_link_clicks',
+        'mod_sms_tracking_links',
+        'mod_sms_drip_subscribers',
+        'mod_sms_drip_steps',
+        'mod_sms_drip_campaigns',
+        'mod_sms_campaign_ab_tests',
+        'mod_sms_auto_replies',
+        'mod_sms_chatbox_messages',
+        'mod_sms_chatbox',
+        'mod_sms_whatsapp_templates',
+        // Original tables
+        'mod_sms_rate_limits',
+        'mod_sms_pending_topups',
+        'mod_sms_automation_logs',
+        'mod_sms_automations',
+        'mod_sms_cron_status',
+        'mod_sms_countries',
+        'mod_sms_automation_triggers',
+        'mod_sms_optouts',
+        'mod_sms_blacklist',
+        'mod_sms_plan_credits',
+        'mod_sms_wallet_transactions',
+        'mod_sms_wallet',
+        'mod_sms_api_audit',
+        'mod_sms_api_rate_limits',
+        'mod_sms_api_keys',
+        'mod_sms_templates',
+        'mod_sms_webhooks_inbox',
+        'mod_sms_messages',
+        'mod_sms_campaign_recipients',
+        'mod_sms_campaign_lists',
+        'mod_sms_campaigns',
+        'mod_sms_contacts',
+        'mod_sms_contact_group_fields',
+        'mod_sms_contact_groups',
+        'mod_sms_sender_id_plans',
+        'mod_sms_sender_ids',
+        'mod_sms_gateway_countries',
+        'mod_sms_gateways',
+        'mod_sms_settings',
+    ];
+
+    // Disable foreign key checks for clean drop
+    $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+
+    foreach ($tables as $table) {
+        try {
+            $pdo->exec("DROP TABLE IF EXISTS `{$table}`");
+        } catch (Exception $e) {
+            // Continue even if one table fails
+            logActivity("SMS Suite: Warning dropping table {$table}: " . $e->getMessage());
+        }
+    }
+
+    // Re-enable foreign key checks
+    $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+
+    logActivity('SMS Suite: All module tables dropped');
+}
+
+/**
  * Module upgrade handler
  */
 function sms_suite_upgrade($vars)
 {
     $currentVersion = $vars['version'];
-    $schema = Capsule::schema();
 
     try {
-        // Version-specific upgrades
-        if (version_compare($currentVersion, '1.0.0', '<')) {
-            // Initial installation or upgrade from pre-1.0
-            sms_suite_create_tables();
+        logActivity("SMS Suite: Upgrading from version {$currentVersion}");
+
+        // Always ensure tables exist and have correct structure
+        $errors = sms_suite_create_tables_sql();
+
+        if (!empty($errors)) {
+            logActivity('SMS Suite upgrade warnings: ' . implode('; ', $errors));
         }
 
-        // Add performance indexes (1.0.1)
+        // Add performance indexes
         sms_suite_add_performance_indexes();
+
+        logActivity('SMS Suite: Upgrade completed successfully');
 
     } catch (Exception $e) {
         logActivity('SMS Suite upgrade failed: ' . $e->getMessage());
@@ -340,6 +447,1411 @@ function sms_suite_clientarea($vars)
 }
 
 /**
+ * Create all database tables using raw SQL for reliability
+ * Returns array of any errors encountered (empty if all successful)
+ */
+function sms_suite_create_tables_sql()
+{
+    $pdo = Capsule::connection()->getPdo();
+    $errors = [];
+
+    // Helper function to execute SQL and catch errors
+    $execSql = function ($sql, $description) use ($pdo, &$errors) {
+        try {
+            $pdo->exec($sql);
+            return true;
+        } catch (Exception $e) {
+            $errors[] = "{$description}: " . $e->getMessage();
+            return false;
+        }
+    };
+
+    // Helper to check if table exists
+    $tableExists = function ($tableName) use ($pdo) {
+        try {
+            $result = $pdo->query("SHOW TABLES LIKE '{$tableName}'")->fetch();
+            return !empty($result);
+        } catch (Exception $e) {
+            return false;
+        }
+    };
+
+    // Helper to check if column exists
+    $columnExists = function ($tableName, $columnName) use ($pdo) {
+        try {
+            $result = $pdo->query("SHOW COLUMNS FROM `{$tableName}` LIKE '{$columnName}'")->fetch();
+            return !empty($result);
+        } catch (Exception $e) {
+            return false;
+        }
+    };
+
+    // 1. Gateways table (CRITICAL - must exist for gateway save to work)
+    if (!$tableExists('mod_sms_gateways')) {
+        $execSql("
+            CREATE TABLE `mod_sms_gateways` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `type` VARCHAR(50) NOT NULL,
+                `channel` VARCHAR(20) DEFAULT 'sms',
+                `status` TINYINT(1) DEFAULT 1,
+                `credentials` TEXT,
+                `settings` TEXT,
+                `quota_value` INT DEFAULT 0,
+                `quota_unit` VARCHAR(20) DEFAULT 'minute',
+                `success_keyword` VARCHAR(100),
+                `balance` DECIMAL(16,4),
+                `webhook_token` VARCHAR(64),
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_type` (`type`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_gateways");
+    }
+
+    // 2. Gateway country pricing
+    if (!$tableExists('mod_sms_gateway_countries')) {
+        $execSql("
+            CREATE TABLE `mod_sms_gateway_countries` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `gateway_id` INT UNSIGNED NOT NULL,
+                `country_code` VARCHAR(5) NOT NULL,
+                `country_name` VARCHAR(100) NOT NULL,
+                `sms_rate` DECIMAL(10,4) DEFAULT 0,
+                `whatsapp_rate` DECIMAL(10,4) DEFAULT 0,
+                `status` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_gateway_id` (`gateway_id`),
+                INDEX `idx_country_code` (`country_code`),
+                UNIQUE KEY `unique_gateway_country` (`gateway_id`, `country_code`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_gateway_countries");
+    }
+
+    // 3. Client settings table
+    if (!$tableExists('mod_sms_settings')) {
+        $execSql("
+            CREATE TABLE `mod_sms_settings` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `billing_mode` VARCHAR(20) DEFAULT 'per_segment',
+                `default_gateway_id` INT UNSIGNED,
+                `default_sender_id` VARCHAR(50),
+                `assigned_sender_id` VARCHAR(50),
+                `assigned_gateway_id` INT UNSIGNED,
+                `monthly_limit` INT UNSIGNED,
+                `monthly_used` INT UNSIGNED DEFAULT 0,
+                `webhook_url` VARCHAR(500),
+                `api_enabled` TINYINT(1) DEFAULT 1,
+                `accept_sms` TINYINT(1) DEFAULT 1,
+                `accept_marketing_sms` TINYINT(1) DEFAULT 0,
+                `two_factor_enabled` TINYINT(1) DEFAULT 0,
+                `enabled_notifications` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client` (`client_id`),
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_settings");
+    } else {
+        // Add missing columns to existing table
+        $columnsToAdd = [
+            'accept_sms' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `accept_sms` TINYINT(1) DEFAULT 1 AFTER `api_enabled`",
+            'accept_marketing_sms' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `accept_marketing_sms` TINYINT(1) DEFAULT 0 AFTER `accept_sms`",
+            'two_factor_enabled' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `two_factor_enabled` TINYINT(1) DEFAULT 0 AFTER `accept_marketing_sms`",
+            'enabled_notifications' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `enabled_notifications` TEXT AFTER `two_factor_enabled`",
+            'assigned_sender_id' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `assigned_sender_id` VARCHAR(50) AFTER `default_sender_id`",
+            'assigned_gateway_id' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `assigned_gateway_id` INT UNSIGNED AFTER `default_gateway_id`",
+            'monthly_limit' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `monthly_limit` INT UNSIGNED AFTER `assigned_gateway_id`",
+            'monthly_used' => "ALTER TABLE `mod_sms_settings` ADD COLUMN `monthly_used` INT UNSIGNED DEFAULT 0 AFTER `monthly_limit`",
+        ];
+        foreach ($columnsToAdd as $col => $sql) {
+            if (!$columnExists('mod_sms_settings', $col)) {
+                $execSql($sql, "Add column {$col} to mod_sms_settings");
+            }
+        }
+    }
+
+    // 4. Sender IDs
+    if (!$tableExists('mod_sms_sender_ids')) {
+        $execSql("
+            CREATE TABLE `mod_sms_sender_ids` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `sender_id` VARCHAR(50) NOT NULL,
+                `type` VARCHAR(20) DEFAULT 'alphanumeric',
+                `network` VARCHAR(20) DEFAULT 'all',
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `price` DECIMAL(10,2) DEFAULT 0,
+                `currency_id` INT UNSIGNED,
+                `invoice_id` INT UNSIGNED,
+                `service_id` INT UNSIGNED,
+                `gateway_ids` TEXT,
+                `gateway_bindings` TEXT,
+                `validity_date` DATE,
+                `approved_at` TIMESTAMP NULL,
+                `approved_by` INT UNSIGNED,
+                `rejection_reason` TEXT,
+                `notes` TEXT,
+                `company_name` VARCHAR(255),
+                `use_case` TEXT,
+                `documents` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_status` (`status`),
+                INDEX `idx_network` (`network`),
+                UNIQUE KEY `unique_client_sender_network` (`client_id`, `sender_id`, `network`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_sender_ids");
+    } else {
+        if (!$columnExists('mod_sms_sender_ids', 'service_id')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `service_id` INT UNSIGNED AFTER `invoice_id`", "Add service_id to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'network')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `network` VARCHAR(20) DEFAULT 'all' AFTER `type`", "Add network to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'company_name')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `company_name` VARCHAR(255) AFTER `notes`", "Add company_name to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'use_case')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `use_case` TEXT AFTER `company_name`", "Add use_case to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'documents')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `documents` TEXT AFTER `use_case`", "Add documents to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'gateway_bindings')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `gateway_bindings` TEXT AFTER `gateway_ids`", "Add gateway_bindings to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'approved_at')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `approved_at` TIMESTAMP NULL AFTER `validity_date`", "Add approved_at to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'approved_by')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `approved_by` INT UNSIGNED AFTER `approved_at`", "Add approved_by to mod_sms_sender_ids");
+        }
+        if (!$columnExists('mod_sms_sender_ids', 'rejection_reason')) {
+            $execSql("ALTER TABLE `mod_sms_sender_ids` ADD COLUMN `rejection_reason` TEXT AFTER `approved_by`", "Add rejection_reason to mod_sms_sender_ids");
+        }
+    }
+
+    // 5. Messages log table
+    if (!$tableExists('mod_sms_messages')) {
+        $execSql("
+            CREATE TABLE `mod_sms_messages` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `campaign_id` INT UNSIGNED,
+                `automation_id` INT UNSIGNED,
+                `gateway_id` INT UNSIGNED,
+                `channel` VARCHAR(20) DEFAULT 'sms',
+                `direction` VARCHAR(10) DEFAULT 'outbound',
+                `sender_id` VARCHAR(50),
+                `to_number` VARCHAR(30) NOT NULL,
+                `message` TEXT NOT NULL,
+                `media_url` TEXT,
+                `encoding` VARCHAR(10) DEFAULT 'gsm7',
+                `segments` TINYINT UNSIGNED DEFAULT 1,
+                `units` TINYINT UNSIGNED DEFAULT 1,
+                `cost` DECIMAL(10,4) DEFAULT 0,
+                `status` VARCHAR(20) DEFAULT 'queued',
+                `provider_message_id` VARCHAR(100),
+                `error` TEXT,
+                `gateway_response` TEXT,
+                `api_key_id` INT UNSIGNED,
+                `sent_at` TIMESTAMP NULL,
+                `delivered_at` TIMESTAMP NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_created` (`client_id`, `created_at`),
+                INDEX `idx_status` (`status`),
+                INDEX `idx_provider_msg_id` (`provider_message_id`),
+                INDEX `idx_gateway_created` (`gateway_id`, `created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_messages");
+    } else {
+        // Add missing columns
+        if (!$columnExists('mod_sms_messages', 'gateway_response')) {
+            $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `gateway_response` TEXT AFTER `error`", "Add gateway_response to mod_sms_messages");
+        }
+        if (!$columnExists('mod_sms_messages', 'sent_at')) {
+            $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `sent_at` TIMESTAMP NULL AFTER `api_key_id`", "Add sent_at to mod_sms_messages");
+        }
+    }
+
+    // 6. Wallet table
+    if (!$tableExists('mod_sms_wallet')) {
+        $execSql("
+            CREATE TABLE `mod_sms_wallet` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `balance` DECIMAL(16,4) DEFAULT 0,
+                `currency_id` INT UNSIGNED,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client` (`client_id`),
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_wallet");
+    }
+
+    // 7. Wallet transactions
+    if (!$tableExists('mod_sms_wallet_transactions')) {
+        $execSql("
+            CREATE TABLE `mod_sms_wallet_transactions` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `type` VARCHAR(30) NOT NULL,
+                `amount` DECIMAL(16,4) NOT NULL,
+                `balance_after` DECIMAL(16,4),
+                `description` VARCHAR(255),
+                `reference_type` VARCHAR(50),
+                `reference_id` INT UNSIGNED,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_type` (`type`),
+                INDEX `idx_client_date` (`client_id`, `created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_wallet_transactions");
+    }
+
+    // 8. Contact groups
+    if (!$tableExists('mod_sms_contact_groups')) {
+        $execSql("
+            CREATE TABLE `mod_sms_contact_groups` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(100) NOT NULL,
+                `description` TEXT,
+                `default_sender_id` VARCHAR(50),
+                `welcome_sms` TEXT,
+                `unsubscribe_sms` TEXT,
+                `status` TINYINT(1) DEFAULT 1,
+                `contact_count` INT UNSIGNED DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_contact_groups");
+    }
+
+    // 9. Contact group custom fields
+    if (!$tableExists('mod_sms_contact_group_fields')) {
+        $execSql("
+            CREATE TABLE `mod_sms_contact_group_fields` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `group_id` INT UNSIGNED NOT NULL,
+                `label` VARCHAR(100) NOT NULL,
+                `tag` VARCHAR(50) NOT NULL,
+                `type` VARCHAR(20) DEFAULT 'text',
+                `default_value` VARCHAR(255),
+                `required` TINYINT(1) DEFAULT 0,
+                `visible` TINYINT(1) DEFAULT 1,
+                `sort_order` INT DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_group_id` (`group_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_contact_group_fields");
+    }
+
+    // 10. Contacts
+    if (!$tableExists('mod_sms_contacts')) {
+        $execSql("
+            CREATE TABLE `mod_sms_contacts` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `group_id` INT UNSIGNED,
+                `phone` VARCHAR(30) NOT NULL,
+                `first_name` VARCHAR(100),
+                `last_name` VARCHAR(100),
+                `email` VARCHAR(255),
+                `status` VARCHAR(20) DEFAULT 'subscribed',
+                `custom_data` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_phone` (`client_id`, `phone`),
+                INDEX `idx_group_status` (`group_id`, `status`),
+                INDEX `idx_phone` (`phone`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_contacts");
+    }
+
+    // 11. Campaigns
+    if (!$tableExists('mod_sms_campaigns')) {
+        $execSql("
+            CREATE TABLE `mod_sms_campaigns` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(200) NOT NULL,
+                `channel` VARCHAR(20) DEFAULT 'sms',
+                `gateway_id` INT UNSIGNED,
+                `sender_id` VARCHAR(50),
+                `message` TEXT NOT NULL,
+                `media_url` TEXT,
+                `status` VARCHAR(20) DEFAULT 'draft',
+                `schedule_time` DATETIME,
+                `schedule_type` VARCHAR(20) DEFAULT 'onetime',
+                `frequency_amount` INT,
+                `frequency_unit` VARCHAR(10),
+                `recurring_end` DATETIME,
+                `total_recipients` INT UNSIGNED DEFAULT 0,
+                `sent_count` INT UNSIGNED DEFAULT 0,
+                `delivered_count` INT UNSIGNED DEFAULT 0,
+                `failed_count` INT UNSIGNED DEFAULT 0,
+                `cost_total` DECIMAL(16,4) DEFAULT 0,
+                `batch_id` VARCHAR(50),
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_status_schedule` (`status`, `schedule_time`),
+                INDEX `idx_client_status` (`client_id`, `status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_campaigns");
+    }
+
+    // 12. Campaign lists (junction)
+    if (!$tableExists('mod_sms_campaign_lists')) {
+        $execSql("
+            CREATE TABLE `mod_sms_campaign_lists` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `campaign_id` INT UNSIGNED NOT NULL,
+                `group_id` INT UNSIGNED NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_campaign_id` (`campaign_id`),
+                UNIQUE KEY `unique_campaign_group` (`campaign_id`, `group_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_campaign_lists");
+    }
+
+    // 13. Campaign recipients
+    if (!$tableExists('mod_sms_campaign_recipients')) {
+        $execSql("
+            CREATE TABLE `mod_sms_campaign_recipients` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `campaign_id` INT UNSIGNED NOT NULL,
+                `contact_id` INT UNSIGNED,
+                `phone` VARCHAR(30) NOT NULL,
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `message_id` INT UNSIGNED,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_campaign_status` (`campaign_id`, `status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_campaign_recipients");
+    }
+
+    // 14. Templates
+    if (!$tableExists('mod_sms_templates')) {
+        $execSql("
+            CREATE TABLE `mod_sms_templates` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(100) NOT NULL,
+                `type` VARCHAR(20) DEFAULT 'sms',
+                `category` VARCHAR(50),
+                `content` TEXT NOT NULL,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_type` (`type`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_templates");
+    }
+
+    // 15. API keys
+    if (!$tableExists('mod_sms_api_keys')) {
+        $execSql("
+            CREATE TABLE `mod_sms_api_keys` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(100) NOT NULL,
+                `api_key` VARCHAR(64) NOT NULL,
+                `api_secret` VARCHAR(64) NOT NULL,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `rate_limit` INT UNSIGNED DEFAULT 100,
+                `allowed_ips` TEXT,
+                `permissions` TEXT,
+                `last_used_at` TIMESTAMP NULL,
+                `expires_at` TIMESTAMP NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                UNIQUE KEY `unique_api_key` (`api_key`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_api_keys");
+    }
+
+    // 16. Rate limits tracking
+    if (!$tableExists('mod_sms_rate_limits')) {
+        $execSql("
+            CREATE TABLE `mod_sms_rate_limits` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `key` VARCHAR(100) NOT NULL,
+                `count` INT UNSIGNED DEFAULT 1,
+                `window` INT UNSIGNED NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_key` (`key`),
+                INDEX `idx_window` (`window`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_rate_limits");
+    }
+
+    // 17. Webhooks inbox
+    if (!$tableExists('mod_sms_webhooks_inbox')) {
+        $execSql("
+            CREATE TABLE `mod_sms_webhooks_inbox` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `gateway_id` INT UNSIGNED,
+                `gateway_type` VARCHAR(50) NOT NULL,
+                `payload` TEXT NOT NULL,
+                `raw_payload` MEDIUMTEXT,
+                `ip_address` VARCHAR(45),
+                `processed` TINYINT(1) DEFAULT 0,
+                `processed_at` TIMESTAMP NULL,
+                `error` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_processed_created` (`processed`, `created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_webhooks_inbox");
+    } else {
+        // Add missing columns
+        if (!$columnExists('mod_sms_webhooks_inbox', 'raw_payload')) {
+            $execSql("ALTER TABLE `mod_sms_webhooks_inbox` ADD COLUMN `raw_payload` MEDIUMTEXT AFTER `payload`", "Add raw_payload to mod_sms_webhooks_inbox");
+        }
+        if (!$columnExists('mod_sms_webhooks_inbox', 'ip_address')) {
+            $execSql("ALTER TABLE `mod_sms_webhooks_inbox` ADD COLUMN `ip_address` VARCHAR(45) AFTER `raw_payload`", "Add ip_address to mod_sms_webhooks_inbox");
+        }
+        if (!$columnExists('mod_sms_webhooks_inbox', 'processed_at')) {
+            $execSql("ALTER TABLE `mod_sms_webhooks_inbox` ADD COLUMN `processed_at` TIMESTAMP NULL AFTER `processed`", "Add processed_at to mod_sms_webhooks_inbox");
+        }
+    }
+
+    // 18. Automation triggers
+    if (!$tableExists('mod_sms_automations')) {
+        $execSql("
+            CREATE TABLE `mod_sms_automations` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `trigger_type` VARCHAR(50) NOT NULL,
+                `trigger_config` TEXT,
+                `message_template` TEXT,
+                `sender_id` VARCHAR(50),
+                `gateway_id` INT UNSIGNED,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `run_count` INT UNSIGNED DEFAULT 0,
+                `last_run` TIMESTAMP NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_trigger_type` (`trigger_type`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_automations");
+    }
+
+    // 19. Verification tokens (for 2FA)
+    if (!$tableExists('mod_sms_verification_tokens')) {
+        $execSql("
+            CREATE TABLE `mod_sms_verification_tokens` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `token` VARCHAR(10) NOT NULL,
+                `phone` VARCHAR(30) NOT NULL,
+                `purpose` VARCHAR(30) DEFAULT 'login',
+                `attempts` TINYINT UNSIGNED DEFAULT 0,
+                `verified` TINYINT(1) DEFAULT 0,
+                `expires_at` TIMESTAMP NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_token` (`token`),
+                INDEX `idx_expires` (`expires_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_verification_tokens");
+    }
+
+    // 20. Sender ID plans
+    if (!$tableExists('mod_sms_sender_id_plans')) {
+        $execSql("
+            CREATE TABLE `mod_sms_sender_id_plans` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `price` DECIMAL(10,2) NOT NULL,
+                `currency_id` INT UNSIGNED,
+                `billing_cycle` VARCHAR(20) DEFAULT 'monthly',
+                `validity_days` INT DEFAULT 30,
+                `status` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_sender_id_plans");
+    }
+
+    // 21. Plan credits (for credit packages)
+    if (!$tableExists('mod_sms_plan_credits')) {
+        $execSql("
+            CREATE TABLE `mod_sms_plan_credits` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `total` INT UNSIGNED NOT NULL,
+                `remaining` INT UNSIGNED NOT NULL,
+                `service_id` INT UNSIGNED,
+                `expires_at` DATE,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_expires` (`expires_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_plan_credits");
+    }
+
+    // 22. SMS packages (for billing page)
+    if (!$tableExists('mod_sms_credit_packages')) {
+        $execSql("
+            CREATE TABLE `mod_sms_credit_packages` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `credits` INT UNSIGNED NOT NULL,
+                `bonus_credits` INT UNSIGNED DEFAULT 0,
+                `price` DECIMAL(10,2) NOT NULL,
+                `currency_id` INT UNSIGNED,
+                `validity_days` INT DEFAULT 0,
+                `popular` TINYINT(1) DEFAULT 0,
+                `status` TINYINT(1) DEFAULT 1,
+                `sort_order` INT DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_credit_packages");
+    }
+
+    // 23. Optouts
+    if (!$tableExists('mod_sms_optouts')) {
+        $execSql("
+            CREATE TABLE `mod_sms_optouts` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `phone` VARCHAR(30) NOT NULL,
+                `client_id` INT UNSIGNED,
+                `reason` VARCHAR(255),
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_phone` (`phone`),
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_optouts");
+    }
+
+    // 24. Blacklist (global and per-client blocked numbers)
+    if (!$tableExists('mod_sms_blacklist')) {
+        $execSql("
+            CREATE TABLE `mod_sms_blacklist` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `phone` VARCHAR(30) NOT NULL,
+                `client_id` INT UNSIGNED DEFAULT NULL,
+                `reason` VARCHAR(255),
+                `blocked_by` VARCHAR(50) DEFAULT 'system',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_phone` (`phone`),
+                INDEX `idx_client_id` (`client_id`),
+                UNIQUE KEY `unique_phone_client` (`phone`, `client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_blacklist");
+    }
+
+    // 25. Scheduled messages
+    if (!$tableExists('mod_sms_scheduled')) {
+        $execSql("
+            CREATE TABLE `mod_sms_scheduled` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `gateway_id` INT UNSIGNED,
+                `sender_id` VARCHAR(50),
+                `to_number` VARCHAR(30) NOT NULL,
+                `message` TEXT NOT NULL,
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `scheduled_at` TIMESTAMP NOT NULL,
+                `sent_at` TIMESTAMP NULL,
+                `message_id` INT UNSIGNED,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_status_scheduled` (`status`, `scheduled_at`),
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_scheduled");
+    }
+
+    // 26. Notification templates
+    if (!$tableExists('mod_sms_notification_templates')) {
+        $execSql("
+            CREATE TABLE `mod_sms_notification_templates` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `category` VARCHAR(50) DEFAULT 'general',
+                `type` VARCHAR(20) DEFAULT 'sms',
+                `trigger_hook` VARCHAR(100),
+                `subject` VARCHAR(255),
+                `content` TEXT NOT NULL,
+                `variables` TEXT,
+                `status` TINYINT(1) DEFAULT 1,
+                `send_to_client` TINYINT(1) DEFAULT 1,
+                `send_to_admin` TINYINT(1) DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_category` (`category`),
+                INDEX `idx_trigger` (`trigger_hook`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_notification_templates");
+    }
+
+    // 27. Admin notifications log
+    if (!$tableExists('mod_sms_admin_notifications')) {
+        $execSql("
+            CREATE TABLE `mod_sms_admin_notifications` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `admin_id` INT UNSIGNED,
+                `event` VARCHAR(50) NOT NULL,
+                `phone` VARCHAR(30),
+                `enabled` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_admin_id` (`admin_id`),
+                INDEX `idx_event` (`event`),
+                UNIQUE KEY `unique_admin_event` (`admin_id`, `event`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_admin_notifications");
+    } else {
+        // Add missing columns for notification subscriptions
+        if (!$columnExists('mod_sms_admin_notifications', 'event')) {
+            $execSql("ALTER TABLE `mod_sms_admin_notifications` ADD COLUMN `event` VARCHAR(50) AFTER `admin_id`", "Add event to mod_sms_admin_notifications");
+        }
+        if (!$columnExists('mod_sms_admin_notifications', 'phone')) {
+            $execSql("ALTER TABLE `mod_sms_admin_notifications` ADD COLUMN `phone` VARCHAR(30) AFTER `event`", "Add phone to mod_sms_admin_notifications");
+        }
+        if (!$columnExists('mod_sms_admin_notifications', 'enabled')) {
+            $execSql("ALTER TABLE `mod_sms_admin_notifications` ADD COLUMN `enabled` TINYINT(1) DEFAULT 1 AFTER `phone`", "Add enabled to mod_sms_admin_notifications");
+        }
+    }
+
+    // 27b. Client verification status
+    if (!$tableExists('mod_sms_client_verification')) {
+        $execSql("
+            CREATE TABLE `mod_sms_client_verification` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `phone_verified` TINYINT(1) DEFAULT 0,
+                `verified_at` TIMESTAMP NULL,
+                `verified_phone` VARCHAR(30),
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client` (`client_id`),
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_client_verification");
+    }
+
+    // 27c. Order verification status
+    if (!$tableExists('mod_sms_order_verification')) {
+        $execSql("
+            CREATE TABLE `mod_sms_order_verification` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `order_id` INT UNSIGNED NOT NULL,
+                `verified` TINYINT(1) DEFAULT 0,
+                `verified_at` TIMESTAMP NULL,
+                `verification_type` VARCHAR(20) DEFAULT 'sms',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_order` (`order_id`),
+                INDEX `idx_order_id` (`order_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_order_verification");
+    }
+
+    // 28. Cron status tracking
+    if (!$tableExists('mod_sms_cron_status')) {
+        $execSql("
+            CREATE TABLE `mod_sms_cron_status` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `task` VARCHAR(50) NOT NULL,
+                `last_run` TIMESTAMP NULL,
+                `is_running` TINYINT(1) DEFAULT 0,
+                `started_at` TIMESTAMP NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_task` (`task`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_cron_status");
+    }
+
+    // 29. Countries reference table
+    if (!$tableExists('mod_sms_countries')) {
+        $execSql("
+            CREATE TABLE `mod_sms_countries` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `iso_code` VARCHAR(3) NOT NULL,
+                `phone_code` VARCHAR(10) NOT NULL,
+                `status` TINYINT(1) DEFAULT 1,
+                INDEX `idx_iso_code` (`iso_code`),
+                INDEX `idx_phone_code` (`phone_code`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_countries");
+    }
+
+    // 30. Automation triggers
+    if (!$tableExists('mod_sms_automation_triggers')) {
+        $execSql("
+            CREATE TABLE `mod_sms_automation_triggers` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `automation_id` INT UNSIGNED NOT NULL,
+                `trigger_type` VARCHAR(50) NOT NULL,
+                `trigger_config` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_automation_id` (`automation_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_automation_triggers");
+    }
+
+    // 31. Automation logs
+    if (!$tableExists('mod_sms_automation_logs')) {
+        $execSql("
+            CREATE TABLE `mod_sms_automation_logs` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `automation_id` INT UNSIGNED NOT NULL,
+                `trigger_data` TEXT,
+                `message_id` INT UNSIGNED,
+                `status` VARCHAR(20) DEFAULT 'sent',
+                `error` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_automation_id` (`automation_id`),
+                INDEX `idx_created_at` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_automation_logs");
+    }
+
+    // 32. Pending wallet topups
+    if (!$tableExists('mod_sms_pending_topups')) {
+        $execSql("
+            CREATE TABLE `mod_sms_pending_topups` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `amount` DECIMAL(16,4) NOT NULL,
+                `invoice_id` INT UNSIGNED,
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_invoice_id` (`invoice_id`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_pending_topups");
+    }
+
+    // 33. API audit log
+    if (!$tableExists('mod_sms_api_audit')) {
+        $execSql("
+            CREATE TABLE `mod_sms_api_audit` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `api_key_id` INT UNSIGNED,
+                `client_id` INT UNSIGNED,
+                `endpoint` VARCHAR(100),
+                `method` VARCHAR(10),
+                `request_data` TEXT,
+                `response_code` INT,
+                `response_data` TEXT,
+                `ip_address` VARCHAR(45),
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_api_key_id` (`api_key_id`),
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_created_at` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_api_audit");
+    }
+
+    // 34. API rate limits per key
+    if (!$tableExists('mod_sms_api_rate_limits')) {
+        $execSql("
+            CREATE TABLE `mod_sms_api_rate_limits` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `api_key_id` INT UNSIGNED NOT NULL,
+                `endpoint` VARCHAR(100),
+                `requests` INT UNSIGNED DEFAULT 0,
+                `window_start` TIMESTAMP NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_api_key_window` (`api_key_id`, `window_start`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_api_rate_limits");
+    }
+
+    // 35. WhatsApp message templates
+    if (!$tableExists('mod_sms_whatsapp_templates')) {
+        $execSql("
+            CREATE TABLE `mod_sms_whatsapp_templates` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `gateway_id` INT UNSIGNED,
+                `template_name` VARCHAR(100) NOT NULL,
+                `template_id` VARCHAR(100),
+                `language` VARCHAR(10) DEFAULT 'en',
+                `category` VARCHAR(50),
+                `content` TEXT,
+                `variables` TEXT,
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_whatsapp_templates");
+    }
+
+    // 36. Chatbox conversations
+    if (!$tableExists('mod_sms_chatbox')) {
+        $execSql("
+            CREATE TABLE `mod_sms_chatbox` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED,
+                `phone` VARCHAR(30) NOT NULL,
+                `contact_name` VARCHAR(100),
+                `channel` VARCHAR(20) DEFAULT 'sms',
+                `last_message_at` TIMESTAMP NULL,
+                `unread_count` INT UNSIGNED DEFAULT 0,
+                `status` VARCHAR(20) DEFAULT 'open',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_phone` (`phone`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_chatbox");
+    }
+
+    // 37. Chatbox messages
+    if (!$tableExists('mod_sms_chatbox_messages')) {
+        $execSql("
+            CREATE TABLE `mod_sms_chatbox_messages` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `chatbox_id` INT UNSIGNED NOT NULL,
+                `direction` VARCHAR(10) NOT NULL,
+                `message` TEXT,
+                `media_url` TEXT,
+                `message_id` INT UNSIGNED,
+                `status` VARCHAR(20) DEFAULT 'sent',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_chatbox_id` (`chatbox_id`),
+                INDEX `idx_created_at` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_chatbox_messages");
+    }
+
+    // 38. Auto-replies
+    if (!$tableExists('mod_sms_auto_replies')) {
+        $execSql("
+            CREATE TABLE `mod_sms_auto_replies` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED,
+                `keyword` VARCHAR(100),
+                `match_type` VARCHAR(20) DEFAULT 'exact',
+                `reply_message` TEXT NOT NULL,
+                `sender_id` VARCHAR(50),
+                `status` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_keyword` (`keyword`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_auto_replies");
+    }
+
+    // 39. Sender ID requests (with document uploads)
+    if (!$tableExists('mod_sms_sender_id_requests')) {
+        $execSql("
+            CREATE TABLE `mod_sms_sender_id_requests` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `sender_id` VARCHAR(50) NOT NULL,
+                `type` VARCHAR(20) DEFAULT 'alphanumeric',
+                `gateway_id` INT UNSIGNED,
+                `use_case` TEXT,
+                `company_name` VARCHAR(255),
+                `registration_number` VARCHAR(100),
+                `doc_certificate` VARCHAR(500),
+                `doc_vat_cert` VARCHAR(500),
+                `doc_authorization` VARCHAR(500),
+                `doc_other` VARCHAR(500),
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `admin_notes` TEXT,
+                `reviewed_by` INT UNSIGNED,
+                `reviewed_at` TIMESTAMP NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_status` (`status`),
+                INDEX `idx_sender_id` (`sender_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_sender_id_requests");
+    }
+
+    // 40. Sender ID pool (admin-managed pool of sender IDs)
+    if (!$tableExists('mod_sms_sender_id_pool')) {
+        $execSql("
+            CREATE TABLE `mod_sms_sender_id_pool` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `sender_id` VARCHAR(50) NOT NULL,
+                `type` VARCHAR(20) DEFAULT 'alphanumeric',
+                `network` VARCHAR(20) DEFAULT 'all',
+                `gateway_id` INT UNSIGNED,
+                `country_codes` TEXT,
+                `description` TEXT,
+                `price_setup` DECIMAL(10,2) DEFAULT 0,
+                `price_monthly` DECIMAL(10,2) DEFAULT 0,
+                `price_yearly` DECIMAL(10,2) DEFAULT 0,
+                `requires_approval` TINYINT(1) DEFAULT 1,
+                `is_shared` TINYINT(1) DEFAULT 0,
+                `telco_status` VARCHAR(20) DEFAULT 'approved',
+                `telco_approved_date` DATE,
+                `telco_reference` VARCHAR(100),
+                `status` VARCHAR(20) DEFAULT 'active',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_sender_id` (`sender_id`),
+                INDEX `idx_network` (`network`),
+                INDEX `idx_status` (`status`),
+                INDEX `idx_gateway_id` (`gateway_id`),
+                INDEX `idx_telco_status` (`telco_status`),
+                UNIQUE KEY `unique_sender_network` (`sender_id`, `network`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_sender_id_pool");
+    } else {
+        // Add missing columns to existing table
+        if (!$columnExists('mod_sms_sender_id_pool', 'network')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `network` VARCHAR(20) DEFAULT 'all' AFTER `type`", "Add network to mod_sms_sender_id_pool");
+        }
+        if (!$columnExists('mod_sms_sender_id_pool', 'telco_status')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_status` VARCHAR(20) DEFAULT 'approved' AFTER `is_shared`", "Add telco_status to mod_sms_sender_id_pool");
+        }
+        if (!$columnExists('mod_sms_sender_id_pool', 'telco_approved_date')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_approved_date` DATE AFTER `telco_status`", "Add telco_approved_date to mod_sms_sender_id_pool");
+        }
+        if (!$columnExists('mod_sms_sender_id_pool', 'telco_reference')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_reference` VARCHAR(100) AFTER `telco_approved_date`", "Add telco_reference to mod_sms_sender_id_pool");
+        }
+    }
+
+    // 41. Client-specific rates (per client, gateway, destination)
+    if (!$tableExists('mod_sms_client_rates')) {
+        $execSql("
+            CREATE TABLE `mod_sms_client_rates` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `gateway_id` INT UNSIGNED,
+                `country_code` VARCHAR(5),
+                `network_prefix` VARCHAR(10),
+                `sms_rate` DECIMAL(10,6) NOT NULL,
+                `whatsapp_rate` DECIMAL(10,6),
+                `effective_from` DATE,
+                `effective_to` DATE,
+                `priority` INT DEFAULT 0,
+                `status` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_gateway_id` (`gateway_id`),
+                INDEX `idx_country_code` (`country_code`),
+                INDEX `idx_lookup` (`client_id`, `gateway_id`, `country_code`, `status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_client_rates");
+    }
+
+    // 42. Credit packages for purchase
+    if (!$tableExists('mod_sms_credit_packages')) {
+        $execSql("
+            CREATE TABLE `mod_sms_credit_packages` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `credits` INT UNSIGNED NOT NULL,
+                `bonus_credits` INT UNSIGNED DEFAULT 0,
+                `price` DECIMAL(10,2) NOT NULL,
+                `currency_id` INT UNSIGNED,
+                `validity_days` INT DEFAULT 0,
+                `popular` TINYINT(1) DEFAULT 0,
+                `status` TINYINT(1) DEFAULT 1,
+                `sort_order` INT DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_credit_packages");
+    }
+
+    // 43. Credit purchases history
+    if (!$tableExists('mod_sms_credit_purchases')) {
+        $execSql("
+            CREATE TABLE `mod_sms_credit_purchases` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `package_id` INT UNSIGNED,
+                `credits` INT UNSIGNED NOT NULL,
+                `bonus_credits` INT UNSIGNED DEFAULT 0,
+                `amount` DECIMAL(10,2) NOT NULL,
+                `invoice_id` INT UNSIGNED,
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `expires_at` DATE,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_invoice_id` (`invoice_id`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_credit_purchases");
+    }
+
+    // 44. Credit balance tracking
+    if (!$tableExists('mod_sms_credit_balance')) {
+        $execSql("
+            CREATE TABLE `mod_sms_credit_balance` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `total_credits` INT UNSIGNED DEFAULT 0,
+                `used_credits` INT UNSIGNED DEFAULT 0,
+                `reserved_credits` INT UNSIGNED DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_credit_balance");
+    }
+
+    // 45. Credit transactions
+    if (!$tableExists('mod_sms_credit_transactions')) {
+        $execSql("
+            CREATE TABLE `mod_sms_credit_transactions` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `type` VARCHAR(30) NOT NULL,
+                `credits` INT NOT NULL,
+                `balance_after` INT UNSIGNED,
+                `description` VARCHAR(255),
+                `reference_type` VARCHAR(50),
+                `reference_id` INT UNSIGNED,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_type` (`type`),
+                INDEX `idx_created_at` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_credit_transactions");
+    }
+
+    // 46. Client sender IDs (assigned to clients)
+    if (!$tableExists('mod_sms_client_sender_ids')) {
+        $execSql("
+            CREATE TABLE `mod_sms_client_sender_ids` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `sender_id` VARCHAR(50) NOT NULL,
+                `pool_id` INT UNSIGNED,
+                `request_id` INT UNSIGNED,
+                `gateway_id` INT UNSIGNED,
+                `type` VARCHAR(20) DEFAULT 'alphanumeric',
+                `network` VARCHAR(20) DEFAULT 'all',
+                `status` VARCHAR(20) DEFAULT 'active',
+                `service_id` INT UNSIGNED,
+                `monthly_fee` DECIMAL(10,2) DEFAULT 0,
+                `next_billing` DATE,
+                `expires_at` DATE,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_status` (`status`),
+                INDEX `idx_network` (`network`),
+                UNIQUE KEY `unique_client_sender_network` (`client_id`, `sender_id`, `network`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_client_sender_ids");
+    }
+
+    // 47b. Credit Allocations (track credits per package/service)
+    if (!$tableExists('mod_sms_credit_allocations')) {
+        $execSql("
+            CREATE TABLE `mod_sms_credit_allocations` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `service_id` INT UNSIGNED,
+                `sender_id_ref` INT UNSIGNED,
+                `total_credits` INT NOT NULL,
+                `remaining_credits` INT NOT NULL,
+                `used_credits` INT DEFAULT 0,
+                `expires_at` DATETIME,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_service_id` (`service_id`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_credit_allocations");
+    }
+
+    // 47c. Credit Usage Log (track per-message credit usage linked to sender ID)
+    if (!$tableExists('mod_sms_credit_usage')) {
+        $execSql("
+            CREATE TABLE `mod_sms_credit_usage` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `allocation_id` INT UNSIGNED,
+                `sender_id_ref` INT UNSIGNED,
+                `message_id` INT UNSIGNED,
+                `credits_used` INT DEFAULT 1,
+                `destination` VARCHAR(30),
+                `network` VARCHAR(20),
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_allocation_id` (`allocation_id`),
+                INDEX `idx_sender_id_ref` (`sender_id_ref`),
+                INDEX `idx_created_at` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_credit_usage");
+    }
+
+    // 47d. Network Prefixes (for detecting carrier/operator from phone numbers)
+    if (!$tableExists('mod_sms_network_prefixes')) {
+        $execSql("
+            CREATE TABLE `mod_sms_network_prefixes` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `country_code` VARCHAR(5) NOT NULL,
+                `country_name` VARCHAR(100),
+                `prefix` VARCHAR(10) NOT NULL,
+                `operator` VARCHAR(100) NOT NULL,
+                `operator_code` VARCHAR(20),
+                `network_type` VARCHAR(20) DEFAULT 'mobile',
+                `mcc` VARCHAR(5),
+                `mnc` VARCHAR(5),
+                `status` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_country_code` (`country_code`),
+                INDEX `idx_prefix` (`prefix`),
+                INDEX `idx_operator` (`operator`),
+                UNIQUE KEY `unique_country_prefix` (`country_code`, `prefix`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_network_prefixes");
+    }
+
+    // 47. Sender ID billing records
+    if (!$tableExists('mod_sms_sender_id_billing')) {
+        $execSql("
+            CREATE TABLE `mod_sms_sender_id_billing` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_sender_id` INT UNSIGNED NOT NULL,
+                `client_id` INT UNSIGNED NOT NULL,
+                `amount` DECIMAL(10,2) NOT NULL,
+                `invoice_id` INT UNSIGNED,
+                `period_start` DATE,
+                `period_end` DATE,
+                `status` VARCHAR(20) DEFAULT 'pending',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_invoice_id` (`invoice_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_sender_id_billing");
+    }
+
+    // 48. Verification logs
+    if (!$tableExists('mod_sms_verification_logs')) {
+        $execSql("
+            CREATE TABLE `mod_sms_verification_logs` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED,
+                `phone` VARCHAR(30) NOT NULL,
+                `type` VARCHAR(30) NOT NULL,
+                `token_hash` VARCHAR(255),
+                `attempts` TINYINT UNSIGNED DEFAULT 0,
+                `verified` TINYINT(1) DEFAULT 0,
+                `verified_at` TIMESTAMP NULL,
+                `expires_at` TIMESTAMP NOT NULL,
+                `ip_address` VARCHAR(45),
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_phone` (`phone`),
+                INDEX `idx_type` (`type`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_verification_logs");
+    }
+
+    // 49. Segments for targeting
+    if (!$tableExists('mod_sms_segments')) {
+        $execSql("
+            CREATE TABLE `mod_sms_segments` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(100) NOT NULL,
+                `description` TEXT,
+                `type` VARCHAR(20) DEFAULT 'dynamic',
+                `contact_count` INT UNSIGNED DEFAULT 0,
+                `last_calculated` TIMESTAMP NULL,
+                `status` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_segments");
+    }
+
+    // 50. Segment conditions
+    if (!$tableExists('mod_sms_segment_conditions')) {
+        $execSql("
+            CREATE TABLE `mod_sms_segment_conditions` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `segment_id` INT UNSIGNED NOT NULL,
+                `field` VARCHAR(50) NOT NULL,
+                `operator` VARCHAR(20) NOT NULL,
+                `value` VARCHAR(255),
+                `logic` VARCHAR(5) DEFAULT 'AND',
+                `sort_order` INT DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_segment_id` (`segment_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_segment_conditions");
+    }
+
+    // 51. Link tracking
+    if (!$tableExists('mod_sms_tracking_links')) {
+        $execSql("
+            CREATE TABLE `mod_sms_tracking_links` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `campaign_id` INT UNSIGNED,
+                `original_url` TEXT NOT NULL,
+                `short_code` VARCHAR(20) NOT NULL,
+                `click_count` INT UNSIGNED DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_campaign_id` (`campaign_id`),
+                UNIQUE KEY `unique_short_code` (`short_code`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_tracking_links");
+    }
+
+    // 52. Link clicks
+    if (!$tableExists('mod_sms_link_clicks')) {
+        $execSql("
+            CREATE TABLE `mod_sms_link_clicks` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `link_id` INT UNSIGNED NOT NULL,
+                `contact_id` INT UNSIGNED,
+                `message_id` INT UNSIGNED,
+                `ip_address` VARCHAR(45),
+                `user_agent` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_link_id` (`link_id`),
+                INDEX `idx_contact_id` (`contact_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_link_clicks");
+    }
+
+    // 53. Drip campaigns
+    if (!$tableExists('mod_sms_drip_campaigns')) {
+        $execSql("
+            CREATE TABLE `mod_sms_drip_campaigns` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(100) NOT NULL,
+                `description` TEXT,
+                `trigger_type` VARCHAR(50),
+                `trigger_config` TEXT,
+                `status` VARCHAR(20) DEFAULT 'draft',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_drip_campaigns");
+    }
+
+    // 54. Drip campaign steps
+    if (!$tableExists('mod_sms_drip_steps')) {
+        $execSql("
+            CREATE TABLE `mod_sms_drip_steps` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `drip_id` INT UNSIGNED NOT NULL,
+                `step_order` INT NOT NULL,
+                `delay_value` INT DEFAULT 0,
+                `delay_unit` VARCHAR(10) DEFAULT 'days',
+                `message` TEXT NOT NULL,
+                `sender_id` VARCHAR(50),
+                `condition_type` VARCHAR(50),
+                `condition_config` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_drip_id` (`drip_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_drip_steps");
+    }
+
+    // 55. Drip subscribers
+    if (!$tableExists('mod_sms_drip_subscribers')) {
+        $execSql("
+            CREATE TABLE `mod_sms_drip_subscribers` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `drip_id` INT UNSIGNED NOT NULL,
+                `contact_id` INT UNSIGNED,
+                `phone` VARCHAR(30) NOT NULL,
+                `current_step` INT DEFAULT 0,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `next_step_at` TIMESTAMP NULL,
+                `completed_at` TIMESTAMP NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX `idx_drip_id` (`drip_id`),
+                INDEX `idx_status` (`status`),
+                INDEX `idx_next_step` (`status`, `next_step_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_drip_subscribers");
+    }
+
+    // 56. Campaign A/B tests
+    if (!$tableExists('mod_sms_campaign_ab_tests')) {
+        $execSql("
+            CREATE TABLE `mod_sms_campaign_ab_tests` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `campaign_id` INT UNSIGNED NOT NULL,
+                `variant` CHAR(1) NOT NULL,
+                `message` TEXT NOT NULL,
+                `sender_id` VARCHAR(50),
+                `percentage` INT DEFAULT 50,
+                `sent_count` INT UNSIGNED DEFAULT 0,
+                `delivered_count` INT UNSIGNED DEFAULT 0,
+                `clicked_count` INT UNSIGNED DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_campaign_id` (`campaign_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_campaign_ab_tests");
+    }
+
+    // 57. Recurring campaign log
+    if (!$tableExists('mod_sms_recurring_log')) {
+        $execSql("
+            CREATE TABLE `mod_sms_recurring_log` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `campaign_id` INT UNSIGNED NOT NULL,
+                `run_at` TIMESTAMP NOT NULL,
+                `recipients` INT UNSIGNED DEFAULT 0,
+                `sent` INT UNSIGNED DEFAULT 0,
+                `failed` INT UNSIGNED DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_campaign_id` (`campaign_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_recurring_log");
+    }
+
+    // Log creation result
+    if (empty($errors)) {
+        logActivity('SMS Suite: All database tables created/verified successfully');
+    } else {
+        logActivity('SMS Suite: Table creation completed with ' . count($errors) . ' warnings');
+    }
+
+    return $errors;
+}
+
+/**
  * Create all database tables
  */
 function sms_suite_create_tables()
@@ -400,6 +1912,12 @@ function sms_suite_create_tables()
         if (!$schema->hasColumn('mod_sms_settings', 'monthly_used')) {
             $schema->table('mod_sms_settings', function ($table) {
                 $table->unsignedInteger('monthly_used')->default(0)->after('monthly_limit');
+            });
+        }
+        // Two-factor authentication
+        if (!$schema->hasColumn('mod_sms_settings', 'two_factor_enabled')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->boolean('two_factor_enabled')->default(false)->after('accept_marketing_sms');
             });
         }
     }
@@ -1200,20 +2718,50 @@ function sms_suite_create_tables()
             $table->increments('id');
             $table->string('sender_id', 50);
             $table->string('type', 20)->default('alphanumeric'); // alphanumeric, numeric, shortcode
+            $table->string('network', 20)->default('all'); // all, safaricom, airtel, telkom
             $table->text('description')->nullable();
-            $table->unsignedInteger('gateway_id'); // Mapped gateway
+            $table->unsignedInteger('gateway_id')->nullable(); // Mapped gateway
             $table->text('country_codes')->nullable(); // JSON array of allowed country codes
             $table->decimal('price_setup', 10, 2)->default(0); // One-time setup fee
             $table->decimal('price_monthly', 10, 2)->default(0); // Monthly recurring
             $table->decimal('price_yearly', 10, 2)->default(0); // Yearly recurring
             $table->boolean('requires_approval')->default(true); // Needs telco approval
             $table->boolean('is_shared')->default(false); // Can be used by multiple clients
+            $table->string('telco_status', 20)->default('approved'); // approved, pending, rejected
+            $table->date('telco_approved_date')->nullable();
+            $table->string('telco_reference', 100)->nullable(); // Telco reference number
             $table->string('status', 20)->default('active'); // active, inactive, reserved
             $table->timestamps();
             $table->index('gateway_id');
+            $table->index('network');
             $table->index('status');
-            $table->unique(['sender_id', 'gateway_id']);
+            $table->index('telco_status');
+            $table->unique(['sender_id', 'network']);
         });
+    }
+
+    // Add network column to existing mod_sms_sender_id_pool if it exists
+    if ($schema->hasTable('mod_sms_sender_id_pool')) {
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'network')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->string('network', 20)->default('all')->after('type');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'telco_status')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->string('telco_status', 20)->default('approved')->after('is_shared');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'telco_approved_date')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->date('telco_approved_date')->nullable()->after('telco_status');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'telco_reference')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->string('telco_reference', 100)->nullable()->after('telco_approved_date');
+            });
+        }
     }
 
     // SMS Credit Packages (products for sale)
@@ -1288,15 +2836,73 @@ function sms_suite_create_tables()
             $table->unsignedInteger('client_id');
             $table->unsignedInteger('pool_id')->nullable(); // Reference to pool
             $table->unsignedInteger('request_id')->nullable(); // Reference to request
+            $table->unsignedInteger('service_id')->nullable(); // WHMCS product service ID
             $table->string('sender_id', 50);
-            $table->unsignedInteger('gateway_id');
+            $table->string('type', 20)->default('alphanumeric'); // alphanumeric, numeric
+            $table->unsignedInteger('gateway_id')->nullable();
             $table->boolean('is_default')->default(false);
-            $table->string('status', 20)->default('active'); // active, suspended, expired
+            $table->string('status', 20)->default('active'); // active, suspended, expired, terminated
             $table->dateTime('expires_at')->nullable();
             $table->unsignedInteger('last_invoice_id')->nullable();
             $table->timestamps();
             $table->index(['client_id', 'status']);
-            $table->unique(['client_id', 'sender_id', 'gateway_id']);
+            $table->index('service_id');
+        });
+    }
+
+    // Add columns to existing mod_sms_client_sender_ids table
+    if ($schema->hasTable('mod_sms_client_sender_ids')) {
+        if (!$schema->hasColumn('mod_sms_client_sender_ids', 'service_id')) {
+            $schema->table('mod_sms_client_sender_ids', function ($table) {
+                $table->unsignedInteger('service_id')->nullable()->after('request_id');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_client_sender_ids', 'type')) {
+            $schema->table('mod_sms_client_sender_ids', function ($table) {
+                $table->string('type', 20)->default('alphanumeric')->after('sender_id');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_client_sender_ids', 'network')) {
+            $schema->table('mod_sms_client_sender_ids', function ($table) {
+                $table->string('network', 20)->default('all')->after('type');
+            });
+        }
+    }
+
+    // Credit Allocations - Track credits per package/service (for linking to sender IDs)
+    if (!$schema->hasTable('mod_sms_credit_allocations')) {
+        $schema->create('mod_sms_credit_allocations', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->unsignedInteger('service_id')->nullable(); // WHMCS hosting service ID
+            $table->unsignedInteger('sender_id_ref')->nullable(); // Link to specific sender ID
+            $table->integer('total_credits');
+            $table->integer('remaining_credits');
+            $table->integer('used_credits')->default(0);
+            $table->dateTime('expires_at')->nullable();
+            $table->string('status', 20)->default('active'); // active, exhausted, expired
+            $table->timestamps();
+            $table->index(['client_id', 'status']);
+            $table->index('service_id');
+            $table->index('sender_id_ref');
+        });
+    }
+
+    // Credit Usage Log - Track per-message credit usage linked to sender ID
+    if (!$schema->hasTable('mod_sms_credit_usage')) {
+        $schema->create('mod_sms_credit_usage', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->unsignedInteger('allocation_id')->nullable(); // FK to credit_allocations
+            $table->unsignedInteger('sender_id_ref')->nullable(); // Which sender ID was used
+            $table->unsignedInteger('message_id')->nullable(); // FK to messages table
+            $table->integer('credits_used')->default(1);
+            $table->string('destination', 30)->nullable(); // Phone number
+            $table->string('network', 20)->nullable(); // safaricom, airtel, telkom
+            $table->timestamps();
+            $table->index(['client_id', 'created_at']);
+            $table->index('allocation_id');
+            $table->index('sender_id_ref');
         });
     }
 
@@ -1376,6 +2982,18 @@ function sms_suite_create_tables()
         if (!$schema->hasColumn('mod_sms_messages', 'media_type')) {
             $schema->table('mod_sms_messages', function ($table) {
                 $table->string('media_type', 20)->nullable()->after('media_url');
+            });
+        }
+        // Gateway response for debugging
+        if (!$schema->hasColumn('mod_sms_messages', 'gateway_response')) {
+            $schema->table('mod_sms_messages', function ($table) {
+                $table->text('gateway_response')->nullable()->after('error');
+            });
+        }
+        // Sent timestamp
+        if (!$schema->hasColumn('mod_sms_messages', 'sent_at')) {
+            $schema->table('mod_sms_messages', function ($table) {
+                $table->dateTime('sent_at')->nullable()->after('provider_message_id');
             });
         }
     }
@@ -1465,81 +3083,12 @@ function sms_suite_create_tables()
 }
 
 /**
- * Drop all module tables
+ * Drop all module tables (legacy wrapper)
  */
 function sms_suite_drop_tables()
 {
-    $tables = [
-        // Billing and Credit tables
-        'mod_sms_sender_id_billing',
-        'mod_sms_credit_transactions',
-        'mod_sms_credit_balance',
-        'mod_sms_client_sender_ids',
-        'mod_sms_sender_id_requests',
-        'mod_sms_credit_purchases',
-        'mod_sms_credit_packages',
-        'mod_sms_sender_id_pool',
-        // Verification and Notification tables
-        'mod_sms_verification_logs',
-        'mod_sms_verification_templates',
-        'mod_sms_order_verification',
-        'mod_sms_client_verification',
-        'mod_sms_verification_tokens',
-        'mod_sms_admin_notifications',
-        'mod_sms_notification_templates',
-        // Advanced campaign tables
-        'mod_sms_scheduled',
-        'mod_sms_recurring_log',
-        'mod_sms_segment_conditions',
-        'mod_sms_segments',
-        'mod_sms_link_clicks',
-        'mod_sms_tracking_links',
-        'mod_sms_drip_subscribers',
-        'mod_sms_drip_steps',
-        'mod_sms_drip_campaigns',
-        'mod_sms_campaign_ab_tests',
-        'mod_sms_auto_replies',
-        'mod_sms_chatbox_messages',
-        'mod_sms_chatbox',
-        'mod_sms_whatsapp_templates',
-        // Original tables
-        'mod_sms_rate_limits',
-        'mod_sms_pending_topups',
-        'mod_sms_automation_logs',
-        'mod_sms_automations',
-        'mod_sms_cron_status',
-        'mod_sms_countries',
-        'mod_sms_automation_triggers',
-        'mod_sms_optouts',
-        'mod_sms_blacklist',
-        'mod_sms_plan_credits',
-        'mod_sms_wallet_transactions',
-        'mod_sms_wallet',
-        'mod_sms_api_audit',
-        'mod_sms_api_rate_limits',
-        'mod_sms_api_keys',
-        'mod_sms_templates',
-        'mod_sms_webhooks_inbox',
-        'mod_sms_messages',
-        'mod_sms_campaign_recipients',
-        'mod_sms_campaign_lists',
-        'mod_sms_campaigns',
-        'mod_sms_contacts',
-        'mod_sms_contact_group_fields',
-        'mod_sms_contact_groups',
-        'mod_sms_sender_id_plans',
-        'mod_sms_sender_ids',
-        'mod_sms_gateway_countries',
-        'mod_sms_gateways',
-        'mod_sms_settings',
-    ];
-
-    $schema = Capsule::schema();
-    foreach ($tables as $table) {
-        if ($schema->hasTable($table)) {
-            $schema->drop($table);
-        }
-    }
+    // Call the new SQL-based drop function
+    sms_suite_drop_tables_sql();
 }
 
 /**
@@ -1610,18 +3159,145 @@ function sms_suite_load_language()
 }
 
 /**
+ * Diagnose database tables - checks if all required tables exist
+ * Returns array of missing/problematic tables
+ */
+function sms_suite_diagnose_tables()
+{
+    $pdo = Capsule::connection()->getPdo();
+    $results = [
+        'missing' => [],
+        'existing' => [],
+        'total_checked' => 0,
+    ];
+
+    $requiredTables = [
+        // Core tables
+        'mod_sms_gateways',
+        'mod_sms_gateway_countries',
+        'mod_sms_settings',
+        'mod_sms_messages',
+        // Contacts & Campaigns
+        'mod_sms_contact_groups',
+        'mod_sms_contacts',
+        'mod_sms_campaigns',
+        'mod_sms_campaign_lists',
+        'mod_sms_campaign_recipients',
+        'mod_sms_templates',
+        // Billing & Credits
+        'mod_sms_wallet',
+        'mod_sms_wallet_transactions',
+        'mod_sms_credit_balance',
+        'mod_sms_credit_transactions',
+        'mod_sms_credit_packages',
+        'mod_sms_credit_purchases',
+        'mod_sms_plan_credits',
+        'mod_sms_client_rates',
+        'mod_sms_credit_allocations',
+        'mod_sms_credit_usage',
+        // Network Prefixes
+        'mod_sms_network_prefixes',
+        // Sender IDs
+        'mod_sms_sender_ids',
+        'mod_sms_sender_id_pool',
+        'mod_sms_sender_id_requests',
+        'mod_sms_client_sender_ids',
+        'mod_sms_sender_id_billing',
+        // API & Security
+        'mod_sms_api_keys',
+        'mod_sms_verification_tokens',
+        'mod_sms_blacklist',
+        'mod_sms_optouts',
+        // Notifications & Automation
+        'mod_sms_notification_templates',
+        'mod_sms_admin_notifications',
+        'mod_sms_client_verification',
+        'mod_sms_order_verification',
+        'mod_sms_automations',
+        'mod_sms_automation_triggers',
+        'mod_sms_automation_logs',
+        // System
+        'mod_sms_cron_status',
+        'mod_sms_countries',
+        'mod_sms_webhooks_inbox',
+    ];
+
+    foreach ($requiredTables as $table) {
+        $results['total_checked']++;
+        try {
+            $result = $pdo->query("SHOW TABLES LIKE '{$table}'")->fetch();
+            if (!empty($result)) {
+                $results['existing'][] = $table;
+            } else {
+                $results['missing'][] = $table;
+            }
+        } catch (Exception $e) {
+            $results['missing'][] = $table . ' (error: ' . $e->getMessage() . ')';
+        }
+    }
+
+    return $results;
+}
+
+/**
+ * Repair database tables - creates missing tables
+ */
+function sms_suite_repair_tables()
+{
+    $diagnosis = sms_suite_diagnose_tables();
+
+    // Always run table creation/migration - it handles both creating missing tables
+    // AND adding missing columns to existing tables
+    logActivity('SMS Suite: Running database repair/migration');
+
+    $errors = sms_suite_create_tables_sql();
+
+    $newDiagnosis = sms_suite_diagnose_tables();
+
+    $tablesRepaired = count($diagnosis['missing']) - count($newDiagnosis['missing']);
+
+    return [
+        'success' => empty($newDiagnosis['missing']),
+        'repaired' => $tablesRepaired,
+        'still_missing' => $newDiagnosis['missing'],
+        'errors' => $errors,
+        'message' => $tablesRepaired > 0
+            ? "Repaired {$tablesRepaired} tables and updated column schemas."
+            : "All tables exist. Column schemas updated.",
+    ];
+}
+
+/**
  * Get basic statistics
  */
 function sms_suite_get_stats()
 {
     try {
-        return [
-            'total_messages' => Capsule::table('mod_sms_messages')->count(),
-            'total_gateways' => Capsule::table('mod_sms_gateways')->where('status', 1)->count(),
-            'total_campaigns' => Capsule::table('mod_sms_campaigns')->count(),
-            'total_clients' => Capsule::table('mod_sms_settings')->count(),
+        $stats = [
+            'total_messages' => 0,
+            'total_gateways' => 0,
+            'total_campaigns' => 0,
+            'total_clients' => 0,
         ];
+
+        $schema = Capsule::schema();
+
+        if ($schema->hasTable('mod_sms_messages')) {
+            $stats['total_messages'] = Capsule::table('mod_sms_messages')->count();
+        }
+        if ($schema->hasTable('mod_sms_gateways')) {
+            $stats['total_gateways'] = Capsule::table('mod_sms_gateways')->where('status', 1)->count();
+        }
+        if ($schema->hasTable('mod_sms_campaigns')) {
+            $stats['total_campaigns'] = Capsule::table('mod_sms_campaigns')->count();
+        }
+        if ($schema->hasTable('mod_sms_settings')) {
+            $stats['total_clients'] = Capsule::table('mod_sms_settings')->count();
+        }
+
+        return $stats;
     } catch (Exception $e) {
+        logActivity('SMS Suite: Error getting stats - ' . $e->getMessage());
         return [
             'total_messages' => 0,
             'total_gateways' => 0,
@@ -1643,8 +3319,13 @@ function sms_suite_encrypt($data)
     // Use WHMCS localAPI for encryption
     $result = localAPI('EncryptPassword', ['password2' => $data]);
 
-    if (isset($result['password'])) {
+    if (isset($result['password']) && !empty($result['password'])) {
         return $result['password'];
+    }
+
+    // Log if WHMCS API failed
+    if (isset($result['result']) && $result['result'] === 'error') {
+        logActivity('SMS Suite: WHMCS EncryptPassword API failed: ' . ($result['message'] ?? 'Unknown error'));
     }
 
     // Fallback: Use OpenSSL with WHMCS hash
@@ -1653,10 +3334,14 @@ function sms_suite_encrypt($data)
         $key = hash('sha256', $cc_encryption_hash, true);
         $iv = openssl_random_pseudo_bytes(16);
         $encrypted = openssl_encrypt($data, 'AES-256-CBC', $key, 0, $iv);
-        return base64_encode($iv . $encrypted);
+        if ($encrypted !== false) {
+            return base64_encode($iv . $encrypted);
+        }
     }
 
-    return $data;
+    // Final fallback: base64 encode (not secure but ensures data is saved)
+    logActivity('SMS Suite: Using base64 fallback for encryption');
+    return 'b64:' . base64_encode($data);
 }
 
 /**
@@ -1668,22 +3353,38 @@ function sms_suite_decrypt($data)
         return '';
     }
 
+    // Check for base64 fallback prefix
+    if (strpos($data, 'b64:') === 0) {
+        return base64_decode(substr($data, 4));
+    }
+
     // Use WHMCS localAPI for decryption
     $result = localAPI('DecryptPassword', ['password2' => $data]);
 
-    if (isset($result['password'])) {
-        return $result['password'];
+    if (isset($result['password']) && !empty($result['password'])) {
+        $decrypted = $result['password'];
+
+        // WHMCS DecryptPassword returns HTML-encoded data, decode it
+        $decrypted = html_entity_decode($decrypted, ENT_QUOTES, 'UTF-8');
+
+        return $decrypted;
     }
 
     // Fallback: Use OpenSSL with WHMCS hash
     global $cc_encryption_hash;
     if (!empty($cc_encryption_hash)) {
-        $data = base64_decode($data);
-        $iv = substr($data, 0, 16);
-        $encrypted = substr($data, 16);
-        $key = hash('sha256', $cc_encryption_hash, true);
-        return openssl_decrypt($encrypted, 'AES-256-CBC', $key, 0, $iv);
+        $decoded = base64_decode($data);
+        if ($decoded !== false && strlen($decoded) > 16) {
+            $iv = substr($decoded, 0, 16);
+            $encrypted = substr($decoded, 16);
+            $key = hash('sha256', $cc_encryption_hash, true);
+            $decrypted = openssl_decrypt($encrypted, 'AES-256-CBC', $key, 0, $iv);
+            if ($decrypted !== false) {
+                return $decrypted;
+            }
+        }
     }
 
+    // If all else fails, return as-is (might already be plaintext)
     return $data;
 }

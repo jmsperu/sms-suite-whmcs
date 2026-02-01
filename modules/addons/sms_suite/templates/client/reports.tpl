@@ -10,6 +10,7 @@
         <div class="col-sm-12">
             <ul class="nav nav-pills">
                 <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
+                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
                 <li><a href="{$modulelink}&action=campaigns">{$lang.campaigns}</a></li>
                 <li class="active"><a href="{$modulelink}&action=reports">{$lang.reports}</a></li>

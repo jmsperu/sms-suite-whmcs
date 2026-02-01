@@ -11,6 +11,7 @@
             <ul class="nav nav-pills">
                 <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
                 <li><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
+                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
                 <li><a href="{$modulelink}&action=billing">{$lang.billing}</a></li>
                 <li class="active"><a href="{$modulelink}&action=api_keys">{$lang.api_keys}</a></li>

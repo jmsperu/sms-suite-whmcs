@@ -104,6 +104,17 @@ function processWebhook(string $gatewayType, array $payload, int $inboxId): arra
             $gatewayClass = \SMSSuite\Gateways\InfobipGateway::class;
             break;
 
+        case 'airtouch':
+        case 'airtouch_kenya':
+            require_once $baseDir . 'AirtouchGateway.php';
+            $gatewayClass = \SMSSuite\Gateways\AirtouchGateway::class;
+            break;
+
+        case 'generic':
+            require_once $baseDir . 'GenericHttpGateway.php';
+            $gatewayClass = \SMSSuite\Gateways\GenericHttpGateway::class;
+            break;
+
         default:
             // Try generic processing
             return processGenericWebhook($payload, $inboxId);
@@ -228,13 +239,16 @@ function handleInbound(\SMSSuite\Gateways\InboundResult $inbound, string $gatewa
     }
 
     // Store inbound message
+    // For conversation tracking: to_number always stores the customer/remote phone
+    // For inbound: from = customer, to = our sender ID
+    // So we store: to_number = customer phone (from), sender_id = our number (to)
     $messageId = Capsule::table('mod_sms_messages')->insertGetId([
         'client_id' => $clientId,
         'gateway_id' => $gateway ? $gateway->id : null,
         'channel' => 'sms',
         'direction' => 'inbound',
-        'sender_id' => $inbound->from,
-        'to_number' => $inbound->to,
+        'sender_id' => $inbound->to,      // Our sender ID that received the message
+        'to_number' => $inbound->from,    // Customer phone (for conversation grouping)
         'message' => $inbound->message,
         'media_url' => $inbound->mediaUrl,
         'provider_message_id' => $inbound->messageId,
@@ -246,21 +260,22 @@ function handleInbound(\SMSSuite\Gateways\InboundResult $inbound, string $gatewa
     // Check for opt-out keywords
     $optOutKeywords = ['STOP', 'UNSUBSCRIBE', 'OPTOUT', 'OPT OUT', 'CANCEL', 'END', 'QUIT'];
     $messageUpper = strtoupper(trim($inbound->message));
+    $customerPhone = $inbound->from; // Customer's phone number
 
     if (in_array($messageUpper, $optOutKeywords)) {
         // Add to opt-out list
         $exists = Capsule::table('mod_sms_optouts')
-            ->where('phone', $inbound->from)
+            ->where('phone', $customerPhone)
             ->exists();
 
         if (!$exists) {
             Capsule::table('mod_sms_optouts')->insert([
-                'phone' => $inbound->from,
-                'keyword' => $messageUpper,
+                'phone' => $customerPhone,
+                'reason' => 'Keyword: ' . $messageUpper,
                 'created_at' => date('Y-m-d H:i:s'),
             ]);
 
-            logActivity("SMS Suite: Opt-out received from {$inbound->from}");
+            logActivity("SMS Suite: Opt-out received from {$customerPhone}");
         }
     }
 

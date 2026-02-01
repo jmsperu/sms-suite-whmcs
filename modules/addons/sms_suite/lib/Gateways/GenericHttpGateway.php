@@ -1,8 +1,9 @@
 <?php
 /**
- * SMS Suite - Generic HTTP Gateway
+ * SMS Suite - Generic/Custom HTTP Gateway
  *
  * A fully configurable HTTP gateway for any SMS provider
+ * Supports custom parameter mapping, authentication, rate limiting, and more
  */
 
 namespace SMSSuite\Gateways;
@@ -22,7 +23,7 @@ class GenericHttpGateway extends AbstractGateway
      */
     public function getName(): string
     {
-        return 'Generic HTTP Gateway';
+        return 'Custom HTTP Gateway';
     }
 
     /**
@@ -39,19 +40,28 @@ class GenericHttpGateway extends AbstractGateway
     public function getRequiredFields(): array
     {
         return [
+            // Basic Configuration
             [
                 'name' => 'api_endpoint',
-                'label' => 'API Endpoint URL',
+                'label' => 'Base URL / API Endpoint',
                 'type' => 'text',
+                'required' => true,
                 'description' => 'Full URL to the SMS API endpoint',
                 'placeholder' => 'https://api.provider.com/sms/send',
             ],
             [
                 'name' => 'http_method',
-                'label' => 'HTTP Method',
+                'label' => 'HTTP Request Method',
                 'type' => 'select',
-                'options' => ['GET' => 'GET', 'POST' => 'POST', 'PUT' => 'PUT'],
+                'options' => ['POST' => 'POST', 'GET' => 'GET', 'PUT' => 'PUT'],
                 'default' => 'POST',
+            ],
+            [
+                'name' => 'success_keyword',
+                'label' => 'Success Keyword',
+                'type' => 'text',
+                'description' => 'Text/code that appears in response to indicate success (e.g., 200, success, OK)',
+                'placeholder' => '200',
             ],
         ];
     }
@@ -62,97 +72,400 @@ class GenericHttpGateway extends AbstractGateway
     public function getOptionalFields(): array
     {
         return [
+            // === Request Configuration ===
             [
-                'name' => 'auth_type',
-                'label' => 'Authentication Type',
+                'name' => '_section_request',
+                'label' => 'Request Configuration',
+                'type' => 'section',
+            ],
+            [
+                'name' => 'json_encoded',
+                'label' => 'Enable JSON Encoded POST',
                 'type' => 'select',
-                'options' => [
-                    'none' => 'None',
-                    'basic' => 'Basic Auth',
-                    'bearer' => 'Bearer Token',
-                    'api_key_header' => 'API Key (Header)',
-                    'api_key_query' => 'API Key (Query Param)',
-                ],
-                'default' => 'none',
-            ],
-            [
-                'name' => 'auth_username',
-                'label' => 'Username / API Key',
-                'type' => 'text',
-                'description' => 'For Basic Auth or API Key authentication',
-            ],
-            [
-                'name' => 'auth_password',
-                'label' => 'Password / Secret',
-                'type' => 'password',
-                'description' => 'For Basic Auth',
-            ],
-            [
-                'name' => 'auth_header_name',
-                'label' => 'API Key Header Name',
-                'type' => 'text',
-                'default' => 'X-API-Key',
-                'description' => 'Header name for API key authentication',
-            ],
-            [
-                'name' => 'auth_query_param',
-                'label' => 'API Key Query Parameter',
-                'type' => 'text',
-                'default' => 'api_key',
-                'description' => 'Query parameter name for API key',
+                'options' => ['no' => 'No (Form Data)', 'yes' => 'Yes (JSON Body)'],
+                'default' => 'no',
             ],
             [
                 'name' => 'content_type',
                 'label' => 'Content Type',
                 'type' => 'select',
                 'options' => [
-                    'application/x-www-form-urlencoded' => 'Form Encoded',
-                    'application/json' => 'JSON',
+                    'application/x-www-form-urlencoded' => 'application/x-www-form-urlencoded',
+                    'application/json' => 'application/json',
+                    'multipart/form-data' => 'multipart/form-data',
+                    'text/plain' => 'text/plain',
+                ],
+                'default' => 'application/x-www-form-urlencoded',
+            ],
+            [
+                'name' => 'accept_header',
+                'label' => 'Content Type Accept',
+                'type' => 'select',
+                'options' => [
+                    'application/json' => 'application/json',
+                    'text/plain' => 'text/plain',
+                    'text/xml' => 'text/xml',
+                    '*/*' => '*/* (Any)',
                 ],
                 'default' => 'application/json',
             ],
             [
-                'name' => 'custom_headers',
-                'label' => 'Custom Headers',
-                'type' => 'textarea',
-                'description' => 'One header per line: Header-Name: Value',
+                'name' => 'character_encoding',
+                'label' => 'Character Encoding',
+                'type' => 'select',
+                'options' => [
+                    'none' => 'None',
+                    'utf-8' => 'UTF-8',
+                    'iso-8859-1' => 'ISO-8859-1',
+                ],
+                'default' => 'none',
             ],
             [
-                'name' => 'param_to',
-                'label' => 'Recipient Parameter Name',
+                'name' => 'ignore_ssl',
+                'label' => 'Ignore SSL Certificate Verification',
+                'type' => 'select',
+                'options' => ['no' => 'No', 'yes' => 'Yes'],
+                'default' => 'no',
+                'description' => 'Enable only for testing or if provider has self-signed cert',
+            ],
+
+            // === Authentication ===
+            [
+                'name' => '_section_auth',
+                'label' => 'Authentication',
+                'type' => 'section',
+            ],
+            [
+                'name' => 'auth_type',
+                'label' => 'Authorization Type',
+                'type' => 'select',
+                'options' => [
+                    'params' => 'Authentication via Parameters',
+                    'basic' => 'Basic Auth (Header)',
+                    'bearer' => 'Bearer Token (Header)',
+                    'api_key_header' => 'API Key (Custom Header)',
+                    'none' => 'None',
+                ],
+                'default' => 'params',
+            ],
+            [
+                'name' => 'auth_header_name',
+                'label' => 'API Key Header Name',
                 'type' => 'text',
-                'default' => 'to',
+                'default' => 'Authorization',
+                'description' => 'For API Key header auth',
+            ],
+
+            // === Rate Limiting ===
+            [
+                'name' => '_section_rate',
+                'label' => 'Rate Limiting',
+                'type' => 'section',
             ],
             [
-                'name' => 'param_from',
-                'label' => 'Sender Parameter Name',
+                'name' => 'rate_limit',
+                'label' => 'Sending Credit (max messages)',
+                'type' => 'text',
+                'default' => '60',
+                'description' => 'Maximum number of SMS per time period',
+            ],
+            [
+                'name' => 'rate_time_value',
+                'label' => 'Time Base',
+                'type' => 'text',
+                'default' => '1',
+            ],
+            [
+                'name' => 'rate_time_unit',
+                'label' => 'Time Unit',
+                'type' => 'select',
+                'options' => [
+                    'second' => 'Second',
+                    'minute' => 'Minute',
+                    'hour' => 'Hour',
+                ],
+                'default' => 'minute',
+            ],
+            [
+                'name' => 'sms_per_request',
+                'label' => 'SMS Per Single Request',
+                'type' => 'text',
+                'default' => '1',
+                'description' => 'Number of SMS in single API request (for bulk)',
+            ],
+            [
+                'name' => 'bulk_delimiter',
+                'label' => 'Delimiter (for bulk)',
+                'type' => 'select',
+                'options' => [
+                    ',' => 'Comma (,)',
+                    ';' => 'Semicolon (;)',
+                    '|' => 'Pipe (|)',
+                    '\n' => 'New Line',
+                ],
+                'default' => ',',
+            ],
+
+            // === Features ===
+            [
+                'name' => '_section_features',
+                'label' => 'Features',
+                'type' => 'section',
+            ],
+            [
+                'name' => 'support_plain',
+                'label' => 'Plain Text Messages',
+                'type' => 'select',
+                'options' => ['yes' => 'Yes', 'no' => 'No'],
+                'default' => 'yes',
+            ],
+            [
+                'name' => 'support_unicode',
+                'label' => 'Unicode Messages',
+                'type' => 'select',
+                'options' => ['yes' => 'Yes', 'no' => 'No'],
+                'default' => 'yes',
+            ],
+            [
+                'name' => 'support_schedule',
+                'label' => 'Scheduled Messages',
+                'type' => 'select',
+                'options' => ['yes' => 'Yes', 'no' => 'No'],
+                'default' => 'no',
+            ],
+
+            // === Parameter Mapping ===
+            [
+                'name' => '_section_params',
+                'label' => 'Parameter Mapping',
+                'type' => 'section',
+            ],
+            // Username/API Key
+            [
+                'name' => 'param_username_key',
+                'label' => 'Username/API Key - Parameter Name',
+                'type' => 'text',
+                'placeholder' => 'username',
+            ],
+            [
+                'name' => 'param_username_value',
+                'label' => 'Username/API Key - Value',
+                'type' => 'text',
+                'placeholder' => 'your_username',
+            ],
+            [
+                'name' => 'param_username_location',
+                'label' => 'Username/API Key - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL'],
+                'default' => 'body',
+            ],
+            // Password
+            [
+                'name' => 'param_password_key',
+                'label' => 'Password - Parameter Name',
+                'type' => 'text',
+                'placeholder' => 'password',
+            ],
+            [
+                'name' => 'param_password_value',
+                'label' => 'Password - Value',
+                'type' => 'password',
+            ],
+            [
+                'name' => 'param_password_location',
+                'label' => 'Password - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'body',
+            ],
+            // Action
+            [
+                'name' => 'param_action_key',
+                'label' => 'Action - Parameter Name',
+                'type' => 'text',
+                'placeholder' => 'action',
+            ],
+            [
+                'name' => 'param_action_value',
+                'label' => 'Action - Value',
+                'type' => 'text',
+                'placeholder' => 'send',
+            ],
+            [
+                'name' => 'param_action_location',
+                'label' => 'Action - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'blank',
+            ],
+            // Source (Sender ID)
+            [
+                'name' => 'param_source_key',
+                'label' => 'Source/Sender ID - Parameter Name',
                 'type' => 'text',
                 'default' => 'from',
+                'placeholder' => 'from, sender, source',
             ],
             [
-                'name' => 'param_message',
-                'label' => 'Message Parameter Name',
+                'name' => 'param_source_value',
+                'label' => 'Source/Sender ID - Default Value',
+                'type' => 'text',
+                'description' => 'Default sender ID (can be overridden per message)',
+            ],
+            [
+                'name' => 'param_source_location',
+                'label' => 'Source - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL'],
+                'default' => 'body',
+            ],
+            // Destination (Phone Number)
+            [
+                'name' => 'param_destination_key',
+                'label' => 'Destination - Parameter Name',
+                'type' => 'text',
+                'default' => 'to',
+                'placeholder' => 'to, msisdn, destination, phone',
+            ],
+            // Message
+            [
+                'name' => 'param_message_key',
+                'label' => 'Message - Parameter Name',
                 'type' => 'text',
                 'default' => 'message',
+                'placeholder' => 'message, text, body, content',
             ],
+            // Unicode
             [
-                'name' => 'extra_params',
-                'label' => 'Extra Parameters',
-                'type' => 'textarea',
-                'description' => 'One parameter per line: param_name=value',
-            ],
-            [
-                'name' => 'body_template',
-                'label' => 'Custom Body Template (JSON)',
-                'type' => 'textarea',
-                'description' => 'JSON template with {to}, {from}, {message} placeholders',
-            ],
-            [
-                'name' => 'response_message_id_path',
-                'label' => 'Message ID Path in Response',
+                'name' => 'param_unicode_key',
+                'label' => 'Unicode - Parameter Name',
                 'type' => 'text',
-                'default' => 'message_id',
-                'description' => 'JSON path to message ID (e.g., data.id or messages.0.id)',
+                'placeholder' => 'unicode, encoding, type',
+            ],
+            [
+                'name' => 'param_unicode_value',
+                'label' => 'Unicode - Value (when unicode)',
+                'type' => 'text',
+                'placeholder' => '1, true, unicode',
+            ],
+            [
+                'name' => 'param_unicode_location',
+                'label' => 'Unicode - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'blank',
+            ],
+            // Type/Route
+            [
+                'name' => 'param_type_key',
+                'label' => 'Type/Route - Parameter Name',
+                'type' => 'text',
+                'placeholder' => 'type, route',
+            ],
+            [
+                'name' => 'param_type_value',
+                'label' => 'Type/Route - Value',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_type_location',
+                'label' => 'Type/Route - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'blank',
+            ],
+            // Language
+            [
+                'name' => 'param_language_key',
+                'label' => 'Language - Parameter Name',
+                'type' => 'text',
+                'placeholder' => 'lang, language',
+            ],
+            [
+                'name' => 'param_language_value',
+                'label' => 'Language - Value',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_language_location',
+                'label' => 'Language - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'blank',
+            ],
+            // Schedule
+            [
+                'name' => 'param_schedule_key',
+                'label' => 'Schedule - Parameter Name',
+                'type' => 'text',
+                'placeholder' => 'schedule, send_at, datetime',
+            ],
+            [
+                'name' => 'param_schedule_format',
+                'label' => 'Schedule - Date Format',
+                'type' => 'text',
+                'default' => 'Y-m-d H:i:s',
+                'placeholder' => 'Y-m-d H:i:s',
+            ],
+            // Custom Values 1-3
+            [
+                'name' => 'param_custom1_key',
+                'label' => 'Custom Value 1 - Parameter Name',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_custom1_value',
+                'label' => 'Custom Value 1 - Value',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_custom1_location',
+                'label' => 'Custom Value 1 - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'blank',
+            ],
+            [
+                'name' => 'param_custom2_key',
+                'label' => 'Custom Value 2 - Parameter Name',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_custom2_value',
+                'label' => 'Custom Value 2 - Value',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_custom2_location',
+                'label' => 'Custom Value 2 - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'blank',
+            ],
+            [
+                'name' => 'param_custom3_key',
+                'label' => 'Custom Value 3 - Parameter Name',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_custom3_value',
+                'label' => 'Custom Value 3 - Value',
+                'type' => 'text',
+            ],
+            [
+                'name' => 'param_custom3_location',
+                'label' => 'Custom Value 3 - Location',
+                'type' => 'select',
+                'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'],
+                'default' => 'blank',
+            ],
+
+            // === Response Handling ===
+            [
+                'name' => '_section_response',
+                'label' => 'Response Handling',
+                'type' => 'section',
             ],
             [
                 'name' => 'success_codes',
@@ -162,28 +475,36 @@ class GenericHttpGateway extends AbstractGateway
                 'description' => 'Comma-separated HTTP status codes indicating success',
             ],
             [
-                'name' => 'success_keyword',
-                'label' => 'Success Keyword',
+                'name' => 'response_message_id_path',
+                'label' => 'Message ID Path in Response',
                 'type' => 'text',
-                'description' => 'Text that must appear in response for success (optional)',
+                'default' => 'message_id',
+                'description' => 'JSON path to message ID (e.g., data.id or messages.0.id)',
             ],
             [
                 'name' => 'phone_format',
                 'label' => 'Phone Number Format',
                 'type' => 'select',
                 'options' => [
-                    'as_is' => 'As Is',
+                    'as_is' => 'As Is (no modification)',
                     'plus_prefix' => 'With + Prefix',
                     'no_plus' => 'Without + Prefix',
                     'digits_only' => 'Digits Only',
                 ],
                 'default' => 'as_is',
             ],
+
+            // === Balance Check ===
+            [
+                'name' => '_section_balance',
+                'label' => 'Balance Check (Optional)',
+                'type' => 'section',
+            ],
             [
                 'name' => 'balance_endpoint',
                 'label' => 'Balance Check Endpoint',
                 'type' => 'text',
-                'description' => 'URL to check account balance (optional)',
+                'description' => 'URL to check account balance',
             ],
             [
                 'name' => 'balance_path',
@@ -191,6 +512,19 @@ class GenericHttpGateway extends AbstractGateway
                 'type' => 'text',
                 'default' => 'balance',
                 'description' => 'JSON path to balance value',
+            ],
+
+            // === Custom Headers ===
+            [
+                'name' => '_section_headers',
+                'label' => 'Custom Headers',
+                'type' => 'section',
+            ],
+            [
+                'name' => 'custom_headers',
+                'label' => 'Additional Headers',
+                'type' => 'textarea',
+                'description' => 'One header per line: Header-Name: Value',
             ],
         ];
     }
@@ -210,17 +544,40 @@ class GenericHttpGateway extends AbstractGateway
         // Format phone number
         $to = $this->formatPhoneByConfig($message->to);
 
-        // Build request data
-        $data = $this->buildRequestData($message, $to);
+        // Detect if unicode
+        $isUnicode = $this->detectUnicode($message->message);
+
+        // Build URL parameters
+        $urlParams = $this->buildUrlParams($message, $to, $isUnicode);
+        if (!empty($urlParams)) {
+            $separator = (strpos($endpoint, '?') === false) ? '?' : '&';
+            $endpoint .= $separator . http_build_query($urlParams);
+        }
+
+        // Build body parameters
+        $bodyData = $this->buildBodyParams($message, $to, $isUnicode);
 
         // Build headers
         $headers = $this->buildHeaders();
 
-        // Add auth to URL if needed
-        $endpoint = $this->addUrlAuth($endpoint);
+        // Check JSON encoding
+        $jsonEncoded = $this->getConfig('json_encoded', 'no') === 'yes';
+        if ($jsonEncoded) {
+            $headers['Content-Type'] = 'application/json';
+        }
+
+        // SSL verification
+        $verifySSL = $this->getConfig('ignore_ssl', 'no') !== 'yes';
 
         // Make request
-        list($success, $response, $httpCode, $error) = $this->httpRequest($method, $endpoint, $data, $headers);
+        list($success, $response, $httpCode, $error) = $this->httpRequestCustom(
+            $method,
+            $endpoint,
+            $bodyData,
+            $headers,
+            $jsonEncoded,
+            $verifySSL
+        );
 
         // Check HTTP error
         if (!empty($error)) {
@@ -243,60 +600,110 @@ class GenericHttpGateway extends AbstractGateway
     }
 
     /**
-     * Build request data array
+     * Build URL query parameters
      */
-    protected function buildRequestData(MessageDTO $message, string $formattedTo): array
+    protected function buildUrlParams(MessageDTO $message, string $formattedTo, bool $isUnicode): array
     {
-        // Check for custom body template
-        $bodyTemplate = $this->getConfig('body_template');
-        if (!empty($bodyTemplate)) {
-            return $this->parseBodyTemplate($bodyTemplate, $message, $formattedTo);
-        }
+        $params = [];
 
-        // Build from parameters
-        $paramTo = $this->getConfig('param_to', 'to');
-        $paramFrom = $this->getConfig('param_from', 'from');
-        $paramMessage = $this->getConfig('param_message', 'message');
-
-        $data = [
-            $paramTo => $formattedTo,
-            $paramFrom => $message->from,
-            $paramMessage => $message->message,
+        // Parameter mappings that go to URL
+        $mappings = [
+            'username' => ['key' => 'param_username_key', 'value' => 'param_username_value', 'location' => 'param_username_location'],
+            'password' => ['key' => 'param_password_key', 'value' => 'param_password_value', 'location' => 'param_password_location'],
+            'action' => ['key' => 'param_action_key', 'value' => 'param_action_value', 'location' => 'param_action_location'],
+            'source' => ['key' => 'param_source_key', 'value' => 'param_source_value', 'location' => 'param_source_location'],
+            'type' => ['key' => 'param_type_key', 'value' => 'param_type_value', 'location' => 'param_type_location'],
+            'language' => ['key' => 'param_language_key', 'value' => 'param_language_value', 'location' => 'param_language_location'],
+            'unicode' => ['key' => 'param_unicode_key', 'value' => 'param_unicode_value', 'location' => 'param_unicode_location'],
+            'custom1' => ['key' => 'param_custom1_key', 'value' => 'param_custom1_value', 'location' => 'param_custom1_location'],
+            'custom2' => ['key' => 'param_custom2_key', 'value' => 'param_custom2_value', 'location' => 'param_custom2_location'],
+            'custom3' => ['key' => 'param_custom3_key', 'value' => 'param_custom3_value', 'location' => 'param_custom3_location'],
         ];
 
-        // Add extra parameters
-        $extraParams = $this->getConfig('extra_params', '');
-        if (!empty($extraParams)) {
-            $lines = explode("\n", $extraParams);
-            foreach ($lines as $line) {
-                $line = trim($line);
-                if (strpos($line, '=') !== false) {
-                    list($key, $value) = explode('=', $line, 2);
-                    $data[trim($key)] = trim($value);
+        foreach ($mappings as $name => $config) {
+            $paramKey = $this->getConfig($config['key'], '');
+            $paramValue = $this->getConfig($config['value'], '');
+            $location = $this->getConfig($config['location'], 'blank');
+
+            if ($location === 'url' && !empty($paramKey)) {
+                // Special handling for source (sender ID) - use message sender if available
+                if ($name === 'source' && !empty($message->from)) {
+                    $paramValue = $message->from;
                 }
+                // Special handling for unicode - only add if unicode message
+                if ($name === 'unicode' && !$isUnicode) {
+                    continue;
+                }
+
+                $params[$paramKey] = $paramValue;
             }
         }
 
-        return $data;
+        return $params;
     }
 
     /**
-     * Parse custom body template
+     * Build request body parameters
      */
-    protected function parseBodyTemplate(string $template, MessageDTO $message, string $formattedTo): array
+    protected function buildBodyParams(MessageDTO $message, string $formattedTo, bool $isUnicode): array
     {
-        // Replace placeholders
-        $replacements = [
-            '{to}' => $formattedTo,
-            '{from}' => $message->from,
-            '{message}' => $message->message,
-            '{media_url}' => $message->mediaUrl ?? '',
+        $params = [];
+
+        // Destination (always in body)
+        $destKey = $this->getConfig('param_destination_key', 'to');
+        if (!empty($destKey)) {
+            $params[$destKey] = $formattedTo;
+        }
+
+        // Message (always in body)
+        $msgKey = $this->getConfig('param_message_key', 'message');
+        if (!empty($msgKey)) {
+            $params[$msgKey] = $message->message;
+        }
+
+        // Parameter mappings that go to body
+        $mappings = [
+            'username' => ['key' => 'param_username_key', 'value' => 'param_username_value', 'location' => 'param_username_location'],
+            'password' => ['key' => 'param_password_key', 'value' => 'param_password_value', 'location' => 'param_password_location'],
+            'action' => ['key' => 'param_action_key', 'value' => 'param_action_value', 'location' => 'param_action_location'],
+            'source' => ['key' => 'param_source_key', 'value' => 'param_source_value', 'location' => 'param_source_location'],
+            'type' => ['key' => 'param_type_key', 'value' => 'param_type_value', 'location' => 'param_type_location'],
+            'language' => ['key' => 'param_language_key', 'value' => 'param_language_value', 'location' => 'param_language_location'],
+            'unicode' => ['key' => 'param_unicode_key', 'value' => 'param_unicode_value', 'location' => 'param_unicode_location'],
+            'custom1' => ['key' => 'param_custom1_key', 'value' => 'param_custom1_value', 'location' => 'param_custom1_location'],
+            'custom2' => ['key' => 'param_custom2_key', 'value' => 'param_custom2_value', 'location' => 'param_custom2_location'],
+            'custom3' => ['key' => 'param_custom3_key', 'value' => 'param_custom3_value', 'location' => 'param_custom3_location'],
         ];
 
-        $body = str_replace(array_keys($replacements), array_values($replacements), $template);
+        foreach ($mappings as $name => $config) {
+            $paramKey = $this->getConfig($config['key'], '');
+            $paramValue = $this->getConfig($config['value'], '');
+            $location = $this->getConfig($config['location'], 'blank');
 
-        $data = json_decode($body, true);
-        return is_array($data) ? $data : [];
+            if ($location === 'body' && !empty($paramKey)) {
+                // Special handling for source (sender ID) - use message sender if available
+                if ($name === 'source' && !empty($message->from)) {
+                    $paramValue = $message->from;
+                }
+                // Special handling for unicode - only add if unicode message
+                if ($name === 'unicode' && !$isUnicode) {
+                    continue;
+                }
+
+                $params[$paramKey] = $paramValue;
+            }
+        }
+
+        // Schedule parameter
+        if (!empty($message->scheduleTime)) {
+            $scheduleKey = $this->getConfig('param_schedule_key', '');
+            if (!empty($scheduleKey)) {
+                $format = $this->getConfig('param_schedule_format', 'Y-m-d H:i:s');
+                $params[$scheduleKey] = date($format, strtotime($message->scheduleTime));
+            }
+        }
+
+        return $params;
     }
 
     /**
@@ -307,27 +714,37 @@ class GenericHttpGateway extends AbstractGateway
         $headers = [];
 
         // Content type
-        $contentType = $this->getConfig('content_type', 'application/json');
+        $contentType = $this->getConfig('content_type', 'application/x-www-form-urlencoded');
         $headers['Content-Type'] = $contentType;
 
-        // Authentication headers
-        $authType = $this->getConfig('auth_type', 'none');
+        // Accept header
+        $acceptHeader = $this->getConfig('accept_header', 'application/json');
+        $headers['Accept'] = $acceptHeader;
+
+        // Character encoding
+        $encoding = $this->getConfig('character_encoding', 'none');
+        if ($encoding !== 'none') {
+            $headers['Content-Type'] .= '; charset=' . $encoding;
+        }
+
+        // Authentication
+        $authType = $this->getConfig('auth_type', 'params');
 
         switch ($authType) {
             case 'basic':
-                $username = $this->getConfig('auth_username', '');
-                $password = $this->getConfig('auth_password', '');
+                $username = $this->getConfig('param_username_value', '');
+                $password = $this->getConfig('param_password_value', '');
                 $headers['Authorization'] = 'Basic ' . base64_encode("{$username}:{$password}");
                 break;
 
             case 'bearer':
-                $token = $this->getConfig('auth_username', '');
+                $token = $this->getConfig('param_username_value', '');
                 $headers['Authorization'] = 'Bearer ' . $token;
                 break;
 
             case 'api_key_header':
-                $headerName = $this->getConfig('auth_header_name', 'X-API-Key');
-                $apiKey = $this->getConfig('auth_username', '');
+                $headerName = $this->getConfig('auth_header_name', 'Authorization');
+                $apiKey = $this->getConfig('param_username_value', '');
                 $headers[$headerName] = $apiKey;
                 break;
         }
@@ -349,21 +766,77 @@ class GenericHttpGateway extends AbstractGateway
     }
 
     /**
-     * Add authentication to URL if using query param auth
+     * Custom HTTP request with full options
      */
-    protected function addUrlAuth(string $url): string
-    {
-        $authType = $this->getConfig('auth_type', 'none');
+    protected function httpRequestCustom(
+        string $method,
+        string $url,
+        array $data,
+        array $headers,
+        bool $jsonEncode = false,
+        bool $verifySSL = true
+    ): array {
+        $ch = curl_init();
 
-        if ($authType === 'api_key_query') {
-            $paramName = $this->getConfig('auth_query_param', 'api_key');
-            $apiKey = $this->getConfig('auth_username', '');
-
+        // Set URL
+        if (strtoupper($method) === 'GET' && !empty($data)) {
             $separator = (strpos($url, '?') === false) ? '?' : '&';
-            $url .= $separator . urlencode($paramName) . '=' . urlencode($apiKey);
+            $url .= $separator . http_build_query($data);
         }
 
-        return $url;
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+
+        // SSL verification
+        if (!$verifySSL) {
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        }
+
+        // Set method
+        switch (strtoupper($method)) {
+            case 'POST':
+                curl_setopt($ch, CURLOPT_POST, true);
+                if ($jsonEncode) {
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+                } else {
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+                }
+                break;
+            case 'PUT':
+                curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+                if ($jsonEncode) {
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+                } else {
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+                }
+                break;
+        }
+
+        // Set headers
+        $headerArray = [];
+        foreach ($headers as $key => $value) {
+            $headerArray[] = "{$key}: {$value}";
+        }
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headerArray);
+
+        // Execute
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        return [empty($error), $response, $httpCode, $error];
+    }
+
+    /**
+     * Detect if message contains unicode characters
+     */
+    protected function detectUnicode(string $message): bool
+    {
+        return strlen($message) !== strlen(utf8_decode($message));
     }
 
     /**
@@ -396,7 +869,7 @@ class GenericHttpGateway extends AbstractGateway
     {
         // Check HTTP codes
         $successCodes = $this->getConfig('success_codes', '200,201,202');
-        $codes = array_map('intval', explode(',', $successCodes));
+        $codes = array_map('intval', array_map('trim', explode(',', $successCodes)));
 
         if (!in_array($httpCode, $codes)) {
             return false;
@@ -427,7 +900,7 @@ class GenericHttpGateway extends AbstractGateway
     protected function extractError(array $response, string $rawResponse): string
     {
         // Try common error paths
-        $errorPaths = ['error', 'error.message', 'errors.0', 'message', 'errorMessage', 'error_message'];
+        $errorPaths = ['error', 'error.message', 'errors.0', 'message', 'errorMessage', 'error_message', 'description'];
 
         foreach ($errorPaths as $path) {
             $error = $this->getNestedValue($response, $path);
@@ -470,9 +943,16 @@ class GenericHttpGateway extends AbstractGateway
         }
 
         $headers = $this->buildHeaders();
-        $endpoint = $this->addUrlAuth($endpoint);
+        $verifySSL = $this->getConfig('ignore_ssl', 'no') !== 'yes';
 
-        list($success, $response, $httpCode, $error) = $this->httpRequest('GET', $endpoint, [], $headers);
+        // Add auth params to URL if needed
+        $urlParams = $this->buildUrlParams(new MessageDTO('', '', ''), '', false);
+        if (!empty($urlParams)) {
+            $separator = (strpos($endpoint, '?') === false) ? '?' : '&';
+            $endpoint .= $separator . http_build_query($urlParams);
+        }
+
+        list($success, $response, $httpCode, $error) = $this->httpRequestCustom('GET', $endpoint, [], $headers, false, $verifySSL);
 
         if (!$success || !empty($error)) {
             return null;
@@ -521,5 +1001,18 @@ class GenericHttpGateway extends AbstractGateway
         }
 
         return null;
+    }
+
+    /**
+     * Get rate limit configuration
+     */
+    public function getRateLimit(): array
+    {
+        return [
+            'limit' => (int)$this->getConfig('rate_limit', 60),
+            'time_value' => (int)$this->getConfig('rate_time_value', 1),
+            'time_unit' => $this->getConfig('rate_time_unit', 'minute'),
+            'sms_per_request' => (int)$this->getConfig('sms_per_request', 1),
+        ];
     }
 }

@@ -754,48 +754,269 @@ class BillingService
     }
 
     /**
-     * Deduct SMS credits for usage
+     * Deduct SMS credits for usage with sender ID tracking
      *
      * @param int $clientId
      * @param int $credits
      * @param string $description
      * @param int|null $messageId
+     * @param int|null $senderIdRef  Client sender ID reference
+     * @param string|null $destination Phone number
+     * @param string|null $network Network (safaricom, airtel, telkom)
      * @return array
      */
-    public static function deductSmsCredits(int $clientId, int $credits, string $description = '', ?int $messageId = null): array
+    public static function deductSmsCredits(int $clientId, int $credits, string $description = '', ?int $messageId = null, ?int $senderIdRef = null, ?string $destination = null, ?string $network = null): array
     {
         try {
-            $balance = Capsule::table('mod_sms_credit_balance')
-                ->where('client_id', $clientId)
+            return Capsule::connection()->transaction(function () use ($clientId, $credits, $description, $messageId, $senderIdRef, $destination, $network) {
+                $balance = Capsule::table('mod_sms_credit_balance')
+                    ->where('client_id', $clientId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$balance || $balance->balance < $credits) {
+                    throw new Exception('Insufficient credits');
+                }
+
+                $newBalance = $balance->balance - $credits;
+
+                // Update main balance
+                Capsule::table('mod_sms_credit_balance')
+                    ->where('client_id', $clientId)
+                    ->update([
+                        'balance' => $newBalance,
+                        'total_used' => $balance->total_used + $credits,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+
+                // Deduct from allocations (FIFO - oldest first)
+                $allocationId = self::deductFromAllocations($clientId, $credits, $senderIdRef);
+
+                // Record transaction
+                Capsule::table('mod_sms_credit_transactions')->insert([
+                    'client_id' => $clientId,
+                    'type' => 'usage',
+                    'credits' => -$credits,
+                    'balance_before' => $balance->balance,
+                    'balance_after' => $newBalance,
+                    'reference_type' => $messageId ? 'message' : null,
+                    'reference_id' => $messageId,
+                    'description' => $description ?: 'SMS Usage',
+                    'created_at' => date('Y-m-d H:i:s'),
+                ]);
+
+                // Record detailed usage for sender ID tracking
+                Capsule::table('mod_sms_credit_usage')->insert([
+                    'client_id' => $clientId,
+                    'allocation_id' => $allocationId,
+                    'sender_id_ref' => $senderIdRef,
+                    'message_id' => $messageId,
+                    'credits_used' => $credits,
+                    'destination' => $destination,
+                    'network' => $network,
+                    'created_at' => date('Y-m-d H:i:s'),
+                ]);
+
+                return ['success' => true, 'new_balance' => $newBalance, 'allocation_id' => $allocationId];
+            });
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Deduct credits from allocations (FIFO - oldest non-expired first)
+     *
+     * @param int $clientId
+     * @param int $credits
+     * @param int|null $senderIdRef
+     * @return int|null Allocation ID used
+     */
+    private static function deductFromAllocations(int $clientId, int $credits, ?int $senderIdRef = null): ?int
+    {
+        // First try to find allocations linked to this specific sender ID
+        $query = Capsule::table('mod_sms_credit_allocations')
+            ->where('client_id', $clientId)
+            ->where('remaining_credits', '>', 0)
+            ->where('status', 'active')
+            ->where(function ($q) {
+                $q->whereNull('expires_at')
+                  ->orWhere('expires_at', '>', date('Y-m-d H:i:s'));
+            });
+
+        if ($senderIdRef) {
+            // Prefer allocations linked to this sender ID
+            $senderSpecific = (clone $query)->where('sender_id_ref', $senderIdRef)
+                ->orderBy('created_at', 'asc')
                 ->first();
 
-            if (!$balance || $balance->balance < $credits) {
-                return ['success' => false, 'error' => 'Insufficient credits'];
+            if ($senderSpecific && $senderSpecific->remaining_credits >= $credits) {
+                self::updateAllocation($senderSpecific->id, $credits);
+                return $senderSpecific->id;
+            }
+        }
+
+        // Fall back to general allocations (no sender ID link or any available)
+        $allocations = $query->orderBy('expires_at', 'asc')
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+        $remainingToDeduct = $credits;
+        $primaryAllocationId = null;
+
+        foreach ($allocations as $allocation) {
+            if ($remainingToDeduct <= 0) break;
+
+            $deductAmount = min($allocation->remaining_credits, $remainingToDeduct);
+            self::updateAllocation($allocation->id, $deductAmount);
+
+            if ($primaryAllocationId === null) {
+                $primaryAllocationId = $allocation->id;
             }
 
-            $newBalance = $balance->balance - $credits;
+            $remainingToDeduct -= $deductAmount;
+        }
 
-            Capsule::table('mod_sms_credit_balance')
-                ->where('client_id', $clientId)
+        return $primaryAllocationId;
+    }
+
+    /**
+     * Update allocation after deduction
+     *
+     * @param int $allocationId
+     * @param int $deductAmount
+     */
+    private static function updateAllocation(int $allocationId, int $deductAmount): void
+    {
+        $allocation = Capsule::table('mod_sms_credit_allocations')
+            ->where('id', $allocationId)
+            ->first();
+
+        if (!$allocation) return;
+
+        $newRemaining = $allocation->remaining_credits - $deductAmount;
+        $newUsed = $allocation->used_credits + $deductAmount;
+
+        Capsule::table('mod_sms_credit_allocations')
+            ->where('id', $allocationId)
+            ->update([
+                'remaining_credits' => $newRemaining,
+                'used_credits' => $newUsed,
+                'status' => $newRemaining <= 0 ? 'exhausted' : 'active',
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+    }
+
+    /**
+     * Get credit usage report per sender ID
+     *
+     * @param int $clientId
+     * @param string|null $startDate
+     * @param string|null $endDate
+     * @return array
+     */
+    public static function getCreditUsageBySenderId(int $clientId, ?string $startDate = null, ?string $endDate = null): array
+    {
+        $query = Capsule::table('mod_sms_credit_usage as u')
+            ->leftJoin('mod_sms_client_sender_ids as s', 'u.sender_id_ref', '=', 's.id')
+            ->where('u.client_id', $clientId)
+            ->select([
+                's.sender_id',
+                's.network',
+                Capsule::raw('SUM(u.credits_used) as total_credits'),
+                Capsule::raw('COUNT(*) as message_count'),
+            ])
+            ->groupBy('s.sender_id', 's.network');
+
+        if ($startDate) {
+            $query->where('u.created_at', '>=', $startDate);
+        }
+        if ($endDate) {
+            $query->where('u.created_at', '<=', $endDate);
+        }
+
+        return $query->get()->toArray();
+    }
+
+    /**
+     * Get credit usage report per network
+     *
+     * @param int $clientId
+     * @param string|null $startDate
+     * @param string|null $endDate
+     * @return array
+     */
+    public static function getCreditUsageByNetwork(int $clientId, ?string $startDate = null, ?string $endDate = null): array
+    {
+        $query = Capsule::table('mod_sms_credit_usage')
+            ->where('client_id', $clientId)
+            ->select([
+                'network',
+                Capsule::raw('SUM(credits_used) as total_credits'),
+                Capsule::raw('COUNT(*) as message_count'),
+            ])
+            ->groupBy('network');
+
+        if ($startDate) {
+            $query->where('created_at', '>=', $startDate);
+        }
+        if ($endDate) {
+            $query->where('created_at', '<=', $endDate);
+        }
+
+        return $query->get()->toArray();
+    }
+
+    /**
+     * Get client's credit allocations
+     *
+     * @param int $clientId
+     * @param bool $activeOnly
+     * @return array
+     */
+    public static function getClientAllocations(int $clientId, bool $activeOnly = true): array
+    {
+        $query = Capsule::table('mod_sms_credit_allocations as a')
+            ->leftJoin('mod_sms_client_sender_ids as s', 'a.sender_id_ref', '=', 's.id')
+            ->leftJoin('tblhosting as h', 'a.service_id', '=', 'h.id')
+            ->where('a.client_id', $clientId)
+            ->select([
+                'a.*',
+                's.sender_id',
+                's.network',
+                'h.domain as service_name',
+            ]);
+
+        if ($activeOnly) {
+            $query->where('a.status', 'active')
+                  ->where(function ($q) {
+                      $q->whereNull('a.expires_at')
+                        ->orWhere('a.expires_at', '>', date('Y-m-d H:i:s'));
+                  });
+        }
+
+        return $query->orderBy('a.created_at', 'desc')->get()->toArray();
+    }
+
+    /**
+     * Link credit allocation to a sender ID
+     *
+     * @param int $allocationId
+     * @param int $senderIdRef
+     * @return array
+     */
+    public static function linkAllocationToSenderId(int $allocationId, int $senderIdRef): array
+    {
+        try {
+            Capsule::table('mod_sms_credit_allocations')
+                ->where('id', $allocationId)
                 ->update([
-                    'balance' => $newBalance,
-                    'total_used' => $balance->total_used + $credits,
+                    'sender_id_ref' => $senderIdRef,
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
 
-            Capsule::table('mod_sms_credit_transactions')->insert([
-                'client_id' => $clientId,
-                'type' => 'usage',
-                'credits' => -$credits,
-                'balance_before' => $balance->balance,
-                'balance_after' => $newBalance,
-                'reference_type' => $messageId ? 'message' : null,
-                'reference_id' => $messageId,
-                'description' => $description ?: 'SMS Usage',
-                'created_at' => date('Y-m-d H:i:s'),
-            ]);
-
-            return ['success' => true, 'new_balance' => $newBalance];
+            return ['success' => true];
 
         } catch (Exception $e) {
             return ['success' => false, 'error' => $e->getMessage()];

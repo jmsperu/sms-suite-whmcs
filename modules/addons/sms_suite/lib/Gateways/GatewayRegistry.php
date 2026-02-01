@@ -180,6 +180,7 @@ class GatewayRegistry
     {
         // Load additional gateway drivers
         require_once __DIR__ . '/GatewayDrivers.php';
+        require_once __DIR__ . '/AirtouchGateway.php';
 
         // Register core gateway drivers
         self::register('generic_http', GenericHttpGateway::class);
@@ -187,6 +188,9 @@ class GatewayRegistry
         self::register('plivo', PlivoGateway::class);
         self::register('vonage', VonageGateway::class);
         self::register('infobip', InfobipGateway::class);
+
+        // Register Airtouch Kenya gateway
+        self::register('airtouch', AirtouchGateway::class);
 
         // Register extended gateway drivers from GatewayDrivers.php
         self::register('messagebird', MessageBirdGateway::class);

@@ -11,8 +11,10 @@
             <ul class="nav nav-pills">
                 <li class="active"><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
                 <li><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
+                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
                 <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
                 <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
+                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups}</a></li>
                 <li><a href="{$modulelink}&action=sender_ids">{$lang.menu_sender_ids}</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
                 <li><a href="{$modulelink}&action=api_keys">{$lang.menu_api_keys}</a></li>
@@ -109,6 +111,9 @@
                 <div class="panel-body">
                     <a href="{$modulelink}&action=send" class="btn btn-primary btn-block">
                         <i class="fa fa-paper-plane"></i> {$lang.menu_send_sms}
+                    </a>
+                    <a href="{$modulelink}&action=inbox" class="btn btn-info btn-block">
+                        <i class="fa fa-inbox"></i> Inbox
                     </a>
                     <a href="{$modulelink}&action=campaigns" class="btn btn-default btn-block">
                         <i class="fa fa-bullhorn"></i> {$lang.menu_campaigns}

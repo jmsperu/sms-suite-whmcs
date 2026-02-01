@@ -860,3 +860,294 @@ add_hook('QuoteAccepted', 5, function($vars) {
         logActivity('SMS Suite Hook Error (QuoteAccepted notification): ' . $e->getMessage());
     }
 });
+
+/**
+ * ============================================================================
+ * TWO-FACTOR AUTHENTICATION (2FA) HOOKS
+ * ============================================================================
+ */
+
+/**
+ * Client Login - Initiate 2FA if enabled
+ * This hook sends the OTP code when a client with 2FA enabled logs in
+ */
+add_hook('ClientLogin', 1, function($vars) {
+    try {
+        $userId = $vars['userid'];
+
+        // Check if client has 2FA enabled
+        $settings = Capsule::table('mod_sms_settings')
+            ->where('client_id', $userId)
+            ->first();
+
+        if (!$settings || !$settings->two_factor_enabled) {
+            return; // 2FA not enabled, allow normal login
+        }
+
+        // Check if phone is verified
+        $phoneVerified = Capsule::table('mod_sms_client_verification')
+            ->where('client_id', $userId)
+            ->where('verified', 1)
+            ->exists();
+
+        if (!$phoneVerified) {
+            return; // Phone not verified, skip 2FA
+        }
+
+        // Get client phone
+        $client = Capsule::table('tblclients')
+            ->where('id', $userId)
+            ->first();
+
+        if (empty($client->phonenumber)) {
+            return; // No phone number, skip 2FA
+        }
+
+        // Start session if needed
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        // Send 2FA code
+        require_once __DIR__ . '/lib/Core/VerificationService.php';
+        $result = \SMSSuite\Core\VerificationService::sendTwoFactorToken($userId, $client->phonenumber);
+
+        if ($result['success']) {
+            // Set session flag for 2FA pending
+            $_SESSION['sms_2fa_pending'] = true;
+            $_SESSION['sms_2fa_user_id'] = $userId;
+            $_SESSION['sms_2fa_timestamp'] = time();
+            logActivity('SMS Suite 2FA: Code sent to client #' . $userId);
+        } else {
+            logActivity('SMS Suite 2FA Error: Failed to send code to client #' . $userId . ' - ' . ($result['error'] ?? 'Unknown error'));
+        }
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (ClientLogin 2FA): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Client Area Page - Intercept pages when 2FA verification is pending
+ */
+add_hook('ClientAreaPage', 1, function($vars) {
+    try {
+        // Start session if needed
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        // Check if 2FA verification is pending
+        if (empty($_SESSION['sms_2fa_pending'])) {
+            return $vars;
+        }
+
+        // Allow access to specific pages
+        $currentPage = $vars['filename'] ?? '';
+        $allowedPages = ['logout', 'dologout', 'clientarea'];
+
+        // Check if this is the 2FA verification action
+        if (isset($_GET['action']) && $_GET['action'] === 'sms_2fa_verify') {
+            return $vars; // Let it through for verification
+        }
+
+        // Allow logout
+        if (in_array($currentPage, $allowedPages) && isset($_GET['action']) && $_GET['action'] === 'logout') {
+            unset($_SESSION['sms_2fa_pending']);
+            unset($_SESSION['sms_2fa_user_id']);
+            unset($_SESSION['sms_2fa_timestamp']);
+            return $vars;
+        }
+
+        // Check for timeout (10 minutes)
+        if (isset($_SESSION['sms_2fa_timestamp']) && (time() - $_SESSION['sms_2fa_timestamp']) > 600) {
+            // Session expired, log out user
+            unset($_SESSION['sms_2fa_pending']);
+            unset($_SESSION['sms_2fa_user_id']);
+            unset($_SESSION['sms_2fa_timestamp']);
+            header('Location: index.php?action=logout&reason=2fa_timeout');
+            exit;
+        }
+
+        // Redirect to 2FA verification page
+        if ($currentPage !== 'clientarea' || !isset($_GET['action']) || $_GET['action'] !== 'sms_2fa') {
+            header('Location: index.php?action=sms_2fa');
+            exit;
+        }
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (ClientAreaPage 2FA): ' . $e->getMessage());
+    }
+
+    return $vars;
+});
+
+/**
+ * Client Area Page - Handle 2FA verification page rendering
+ */
+add_hook('ClientAreaPageHome', 1, function($vars) {
+    try {
+        // Check if this is the 2FA page request
+        if (!isset($_GET['action']) || $_GET['action'] !== 'sms_2fa') {
+            return $vars;
+        }
+
+        // Start session if needed
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        // Check if 2FA is actually pending
+        if (empty($_SESSION['sms_2fa_pending']) || empty($_SESSION['sms_2fa_user_id'])) {
+            header('Location: clientarea.php');
+            exit;
+        }
+
+        $error = '';
+        $success = '';
+        $userId = $_SESSION['sms_2fa_user_id'];
+
+        // Handle verification submission
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (isset($_POST['verify_2fa'])) {
+                $code = trim($_POST['verification_code'] ?? '');
+
+                require_once __DIR__ . '/lib/Core/VerificationService.php';
+                $result = \SMSSuite\Core\VerificationService::verifyToken(
+                    $userId,
+                    $code,
+                    \SMSSuite\Core\VerificationService::TYPE_TWO_FACTOR
+                );
+
+                if ($result['success']) {
+                    // Clear 2FA session flags
+                    unset($_SESSION['sms_2fa_pending']);
+                    unset($_SESSION['sms_2fa_user_id']);
+                    unset($_SESSION['sms_2fa_timestamp']);
+
+                    logActivity('SMS Suite 2FA: Client #' . $userId . ' verified successfully');
+
+                    // Redirect to client area
+                    header('Location: clientarea.php');
+                    exit;
+                } else {
+                    $error = $result['error'] ?? 'Invalid verification code. Please try again.';
+                }
+            }
+
+            // Handle resend request
+            if (isset($_POST['resend_code'])) {
+                $client = Capsule::table('tblclients')->where('id', $userId)->first();
+                if ($client && !empty($client->phonenumber)) {
+                    require_once __DIR__ . '/lib/Core/VerificationService.php';
+                    $result = \SMSSuite\Core\VerificationService::sendTwoFactorToken($userId, $client->phonenumber);
+                    if ($result['success']) {
+                        $success = 'A new verification code has been sent to your phone.';
+                    } else {
+                        $error = 'Failed to resend code. Please try again later.';
+                    }
+                }
+            }
+        }
+
+        // Get client's masked phone number
+        $client = Capsule::table('tblclients')->where('id', $userId)->first();
+        $maskedPhone = '****' . substr($client->phonenumber, -4);
+
+        // Return custom page vars
+        $vars['pagetitle'] = 'Two-Factor Authentication';
+        $vars['sms_2fa_page'] = true;
+        $vars['sms_2fa_error'] = $error;
+        $vars['sms_2fa_success'] = $success;
+        $vars['sms_2fa_masked_phone'] = $maskedPhone;
+
+        return $vars;
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (ClientAreaPageHome 2FA): ' . $e->getMessage());
+    }
+
+    return $vars;
+});
+
+/**
+ * Client Area Header Output - Inject 2FA page HTML
+ */
+add_hook('ClientAreaHeaderOutput', 1, function($vars) {
+    try {
+        if (!isset($_GET['action']) || $_GET['action'] !== 'sms_2fa') {
+            return '';
+        }
+
+        // Start session if needed
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        if (empty($_SESSION['sms_2fa_pending'])) {
+            return '';
+        }
+
+        $userId = $_SESSION['sms_2fa_user_id'] ?? 0;
+        $client = Capsule::table('tblclients')->where('id', $userId)->first();
+        $maskedPhone = $client ? '****' . substr($client->phonenumber, -4) : '****';
+
+        $error = $_SESSION['sms_2fa_error'] ?? '';
+        $success = $_SESSION['sms_2fa_success'] ?? '';
+        unset($_SESSION['sms_2fa_error'], $_SESSION['sms_2fa_success']);
+
+        // Output custom 2FA page
+        echo '
+        <style>
+            .sms-2fa-container { max-width: 400px; margin: 50px auto; padding: 30px; background: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .sms-2fa-container h2 { text-align: center; margin-bottom: 20px; color: #333; }
+            .sms-2fa-container .icon { text-align: center; font-size: 48px; color: #007bff; margin-bottom: 20px; }
+            .sms-2fa-container p { text-align: center; color: #666; margin-bottom: 20px; }
+            .sms-2fa-container .code-input { text-align: center; font-size: 24px; letter-spacing: 8px; padding: 15px; }
+            .sms-2fa-container .btn-block { margin-top: 15px; }
+            .sms-2fa-container .resend-link { text-align: center; margin-top: 15px; }
+        </style>
+        <div class="sms-2fa-container">
+            <div class="icon"><i class="fa fa-shield"></i></div>
+            <h2>Two-Factor Authentication</h2>
+            <p>A verification code has been sent to your phone number ending in <strong>' . htmlspecialchars($maskedPhone) . '</strong></p>
+            ' . ($error ? '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>' : '') . '
+            ' . ($success ? '<div class="alert alert-success">' . htmlspecialchars($success) . '</div>' : '') . '
+            <form method="post">
+                <div class="form-group">
+                    <input type="text" name="verification_code" class="form-control code-input" placeholder="000000" maxlength="6" required autofocus pattern="[0-9]{6}">
+                </div>
+                <button type="submit" name="verify_2fa" class="btn btn-primary btn-lg btn-block">Verify Code</button>
+            </form>
+            <div class="resend-link">
+                <form method="post" style="display: inline;">
+                    <button type="submit" name="resend_code" class="btn btn-link">Did not receive the code? Send again</button>
+                </form>
+            </div>
+            <hr>
+            <div class="text-center">
+                <a href="index.php?action=logout" class="text-muted">Cancel and log out</a>
+            </div>
+        </div>
+        <script>
+            // Hide other page content
+            document.addEventListener("DOMContentLoaded", function() {
+                var mainContent = document.querySelector(".main-content, #main-body, .container");
+                if (mainContent) {
+                    var children = mainContent.children;
+                    for (var i = 0; i < children.length; i++) {
+                        if (!children[i].classList.contains("sms-2fa-container")) {
+                            children[i].style.display = "none";
+                        }
+                    }
+                }
+            });
+        </script>';
+
+        exit; // Stop further page rendering
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (ClientAreaHeaderOutput 2FA): ' . $e->getMessage());
+        return '';
+    }
+});

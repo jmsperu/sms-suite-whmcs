@@ -11,6 +11,9 @@
             <ul class="nav nav-pills">
                 <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
                 <li><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
+                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
+                <li><a href="{$modulelink}&action=campaigns">{$lang.campaigns}</a></li>
+                <li><a href="{$modulelink}&action=contacts">{$lang.contacts}</a></li>
                 <li class="active"><a href="{$modulelink}&action=sender_ids">{$lang.sender_ids}</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
             </ul>
@@ -101,8 +104,9 @@
                     <h3 class="panel-title">{$lang.sender_id_request}</h3>
                 </div>
                 <div class="panel-body">
-                    <form method="post" id="senderIdForm">
+                    <form method="post" id="senderIdForm" enctype="multipart/form-data">
                         <input type="hidden" name="request_sender" value="1">
+                        <input type="hidden" name="csrf_token" value="{$csrf_token}">
 
                         <div class="form-group">
                             <label>{$lang.type} <span class="text-danger">*</span></label>
@@ -138,14 +142,82 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="notes">Notes (optional)</label>
+                            <label for="network">Target Network <span class="text-danger">*</span></label>
+                            <select name="network" id="network" class="form-control" required>
+                                <option value="all">All Networks</option>
+                                <option value="safaricom">Safaricom</option>
+                                <option value="airtel">Airtel</option>
+                                <option value="telkom">Telkom</option>
+                            </select>
+                            <small class="help-block">Select which network(s) you need this Sender ID for</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="company_name">Company/Business Name <span class="text-danger">*</span></label>
+                            <input type="text" name="company_name" id="company_name" class="form-control" required
+                                   placeholder="Your registered company name">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="use_case">Use Case / Purpose <span class="text-danger">*</span></label>
+                            <textarea name="use_case" id="use_case" class="form-control" rows="3" required
+                                      placeholder="Describe how you will use this Sender ID (e.g., transactional notifications, marketing, OTP, etc.)"></textarea>
+                        </div>
+
+                        <hr>
+                        <h4><i class="fas fa-file-upload"></i> Required Documents</h4>
+                        <p class="text-muted small">Please upload the following documents for telco registration. Accepted formats: PDF, JPG, PNG (max 5MB each)</p>
+
+                        <div class="form-group">
+                            <label for="doc_certificate">
+                                <i class="fas fa-file-pdf text-danger"></i> Certificate of Incorporation <span class="text-danger">*</span>
+                            </label>
+                            <input type="file" name="doc_certificate" id="doc_certificate" class="form-control"
+                                   accept=".pdf,.jpg,.jpeg,.png" required>
+                            <small class="help-block">Company registration certificate from the Registrar of Companies</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="doc_vat">
+                                <i class="fas fa-receipt text-warning"></i> VAT Certificate <span class="text-danger">*</span>
+                            </label>
+                            <input type="file" name="doc_vat" id="doc_vat" class="form-control"
+                                   accept=".pdf,.jpg,.jpeg,.png" required>
+                            <small class="help-block">Valid VAT registration certificate</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="doc_kyc">
+                                <i class="fas fa-id-card text-primary"></i> KYC Documents <span class="text-danger">*</span>
+                            </label>
+                            <input type="file" name="doc_kyc" id="doc_kyc" class="form-control"
+                                   accept=".pdf,.jpg,.jpeg,.png" required>
+                            <small class="help-block">Director's ID/Passport, KRA PIN Certificate, or other KYC documents</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="doc_authorization">
+                                <i class="fas fa-file-signature text-success"></i> Letter of Authorization <span class="text-danger">*</span>
+                            </label>
+                            <input type="file" name="doc_authorization" id="doc_authorization" class="form-control"
+                                   accept=".pdf,.jpg,.jpeg,.png" required>
+                            <small class="help-block">Official letter authorizing the use of the company name as Sender ID (on company letterhead)</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="notes">Additional Notes (optional)</label>
                             <textarea name="notes" id="notes" class="form-control" rows="2"
-                                      placeholder="Purpose of this sender ID, company info, etc."></textarea>
+                                      placeholder="Any additional information..."></textarea>
+                        </div>
+
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Processing Time:</strong> Sender ID registration with telcos typically takes 3-7 business days after document verification.
                         </div>
 
                         <div class="form-group">
                             <button type="submit" class="btn btn-primary btn-lg">
-                                <i class="fas fa-paper-plane"></i> {$lang.sender_id_request}
+                                <i class="fas fa-paper-plane"></i> Submit Sender ID Request
                             </button>
                         </div>
                     </form>
@@ -157,7 +229,7 @@
         <div class="col-md-4">
             <div class="panel panel-info">
                 <div class="panel-heading">
-                    <h3 class="panel-title">About Sender IDs</h3>
+                    <h3 class="panel-title"><i class="fas fa-info-circle"></i> About Sender IDs</h3>
                 </div>
                 <div class="panel-body">
                     <p><strong>Alphanumeric Sender ID:</strong></p>
@@ -167,29 +239,49 @@
 
                     <p><strong>Numeric Sender ID:</strong></p>
                     <p class="small">A phone number that appears as the sender. Recipients may be able to reply to this number.</p>
+                </div>
+            </div>
 
-                    <hr>
-
-                    <p><strong>Approval Process:</strong></p>
+            <div class="panel panel-success">
+                <div class="panel-heading">
+                    <h3 class="panel-title"><i class="fas fa-list-ol"></i> Registration Process</h3>
+                </div>
+                <div class="panel-body">
                     <ol class="small">
-                        <li>Submit your request</li>
-                        <li>Pay the registration fee (if applicable)</li>
-                        <li>Wait for admin approval</li>
-                        <li>Start using your sender ID</li>
+                        <li><strong>Submit Request</strong><br>Fill the form with company details and upload required documents</li>
+                        <li><strong>Document Review</strong><br>Our team reviews your documents (1-2 business days)</li>
+                        <li><strong>Telco Submission</strong><br>We submit to Safaricom/Airtel/Telkom for approval</li>
+                        <li><strong>Telco Approval</strong><br>Telcos process the request (3-7 business days)</li>
+                        <li><strong>Activation</strong><br>Once approved, your Sender ID is activated</li>
                     </ol>
                 </div>
             </div>
 
             <div class="panel panel-warning">
                 <div class="panel-heading">
-                    <h3 class="panel-title">Important Notes</h3>
+                    <h3 class="panel-title"><i class="fas fa-file-alt"></i> Required Documents</h3>
                 </div>
                 <div class="panel-body small">
                     <ul>
-                        <li>Sender IDs are subject to carrier restrictions in some countries</li>
-                        <li>Some countries require pre-registration</li>
-                        <li>Misuse may result in suspension</li>
-                        <li>Contact support for international requirements</li>
+                        <li><strong>Certificate of Incorporation</strong> - Company registration document</li>
+                        <li><strong>VAT Certificate</strong> - Valid VAT registration</li>
+                        <li><strong>KYC Documents</strong> - Director's ID, KRA PIN</li>
+                        <li><strong>Authorization Letter</strong> - On company letterhead authorizing Sender ID use</li>
+                    </ul>
+                    <p class="text-muted">All documents must be clear and legible. Max file size: 5MB each.</p>
+                </div>
+            </div>
+
+            <div class="panel panel-danger">
+                <div class="panel-heading">
+                    <h3 class="panel-title"><i class="fas fa-exclamation-triangle"></i> Important Notes</h3>
+                </div>
+                <div class="panel-body small">
+                    <ul>
+                        <li>Each network (Safaricom, Airtel, Telkom) requires separate registration</li>
+                        <li>Sender IDs must match company/brand name</li>
+                        <li>Offensive or misleading Sender IDs will be rejected</li>
+                        <li>Misuse may result in permanent suspension</li>
                     </ul>
                 </div>
             </div>

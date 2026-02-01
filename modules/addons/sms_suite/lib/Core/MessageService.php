@@ -182,8 +182,16 @@ class MessageService
                 'status' => $result->success ? 'sent' : 'failed',
                 'provider_message_id' => $result->messageId,
                 'error' => $result->error,
+                'sent_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ];
+
+            // Store gateway response for debugging
+            if (!empty($result->rawResponse)) {
+                $updateData['gateway_response'] = is_array($result->rawResponse)
+                    ? json_encode($result->rawResponse)
+                    : (string)$result->rawResponse;
+            }
 
             Capsule::table('mod_sms_messages')
                 ->where('id', $messageId)
@@ -201,7 +209,31 @@ class MessageService
                         $message->gateway_id,
                         $countryCode
                     );
+
+                    // Get sender ID reference for tracking
+                    $senderIdRef = self::getSenderIdReference($message->client_id, $message->sender_id);
+
+                    // Detect network from phone number (Kenya networks)
+                    $network = self::detectKenyaNetwork($message->to_number);
+
                     BillingService::deduct($message->client_id, $messageId, $cost, $message->segments);
+
+                    // Also deduct from SMS credits balance with sender ID tracking
+                    $settings = Capsule::table('mod_sms_settings')
+                        ->where('client_id', $message->client_id)
+                        ->first();
+
+                    if ($settings && $settings->billing_mode === 'plan') {
+                        BillingService::deductSmsCredits(
+                            $message->client_id,
+                            $message->segments,
+                            "Message to {$message->to_number}",
+                            $messageId,
+                            $senderIdRef,
+                            $message->to_number,
+                            $network
+                        );
+                    }
                 }
 
                 return [
@@ -682,5 +714,280 @@ class MessageService
             ->first();
 
         return $setting->value ?? null;
+    }
+
+    /**
+     * Get sender ID reference (mod_sms_client_sender_ids.id) for a client's sender ID
+     *
+     * @param int $clientId
+     * @param string|null $senderId
+     * @return int|null
+     */
+    private static function getSenderIdReference(int $clientId, ?string $senderId): ?int
+    {
+        if (!$senderId) {
+            return null;
+        }
+
+        $record = Capsule::table('mod_sms_client_sender_ids')
+            ->where('client_id', $clientId)
+            ->where('sender_id', $senderId)
+            ->where('status', 'active')
+            ->first();
+
+        return $record->id ?? null;
+    }
+
+    /**
+     * Detect Kenya mobile network from phone number
+     *
+     * Safaricom prefixes: 0700-0729, 0740-0743, 0745-0746, 0748, 0757-0759, 0768-0769, 0790-0799, 0110-0115
+     * Airtel prefixes: 0730-0739, 0750-0756, 0780-0789, 0100-0108
+     * Telkom prefixes: 0770-0779, 0760-0769 (some overlap)
+     *
+     * @param string $phone
+     * @return string|null Network name or null if not Kenya/unknown
+     */
+    private static function detectKenyaNetwork(string $phone): ?string
+    {
+        return self::detectNetworkFromPhone($phone, '254');
+    }
+
+    /**
+     * Detect network operator from phone number using database prefixes
+     *
+     * @param string $phone Phone number (any format)
+     * @param string|null $countryCode Optional country code to filter by
+     * @return string|null Operator code (lowercase) or null if not found
+     */
+    public static function detectNetworkFromPhone(string $phone, ?string $countryCode = null): ?string
+    {
+        // Normalize phone - remove +, spaces, dashes
+        $phone = preg_replace('/[^0-9]/', '', $phone);
+
+        if (strlen($phone) < 9) {
+            return null;
+        }
+
+        // Try to detect country code from phone
+        $detectedCountryCode = null;
+        $localNumber = $phone;
+
+        // Check for common country codes
+        $countryCodes = ['254', '255', '256', '250', '1', '44', '27']; // Kenya, Tanzania, Uganda, Rwanda, US, UK, SA
+
+        foreach ($countryCodes as $cc) {
+            if (substr($phone, 0, strlen($cc)) === $cc) {
+                $detectedCountryCode = $cc;
+                $localNumber = substr($phone, strlen($cc));
+                break;
+            }
+        }
+
+        // If no country code detected and starts with 0, likely local format
+        if (!$detectedCountryCode && substr($phone, 0, 1) === '0') {
+            $localNumber = substr($phone, 1); // Remove leading 0
+            // Default to provided country code or Kenya
+            $detectedCountryCode = $countryCode ?? '254';
+        }
+
+        // Use provided country code if available
+        $searchCountryCode = $countryCode ?? $detectedCountryCode;
+
+        if (!$searchCountryCode || strlen($localNumber) < 2) {
+            return null;
+        }
+
+        // Get first 3 digits for prefix lookup
+        $prefix3 = substr($localNumber, 0, 3);
+        $prefix2 = substr($localNumber, 0, 2);
+
+        // Try to find in database
+        try {
+            // First try exact 3-digit prefix match
+            $result = Capsule::table('mod_sms_network_prefixes')
+                ->where('country_code', $searchCountryCode)
+                ->where('prefix', $prefix3)
+                ->where('status', 1)
+                ->first();
+
+            if ($result) {
+                return strtolower($result->operator_code ?: $result->operator);
+            }
+
+            // Try 2-digit prefix match
+            $result = Capsule::table('mod_sms_network_prefixes')
+                ->where('country_code', $searchCountryCode)
+                ->where('prefix', $prefix2)
+                ->where('status', 1)
+                ->first();
+
+            if ($result) {
+                return strtolower($result->operator_code ?: $result->operator);
+            }
+        } catch (\Exception $e) {
+            // Database table might not exist yet, fall back to hardcoded
+        }
+
+        // Fallback to hardcoded Kenya prefixes if database is empty/unavailable
+        if ($searchCountryCode === '254') {
+            return self::detectKenyaNetworkFallback($prefix3);
+        }
+
+        return null;
+    }
+
+    /**
+     * Fallback hardcoded Kenya network detection
+     */
+    private static function detectKenyaNetworkFallback(string $prefix3): ?string
+    {
+        // Safaricom prefixes (without leading 0)
+        $safaricom = [
+            '700', '701', '702', '703', '704', '705', '706', '707', '708', '709',
+            '710', '711', '712', '713', '714', '715', '716', '717', '718', '719',
+            '720', '721', '722', '723', '724', '725', '726', '727', '728', '729',
+            '740', '741', '742', '743', '745', '746', '748',
+            '757', '758', '759', '768', '769',
+            '790', '791', '792', '793', '794', '795', '796', '797', '798', '799',
+            '110', '111', '112', '113', '114', '115',
+        ];
+
+        // Airtel prefixes
+        $airtel = [
+            '730', '731', '732', '733', '734', '735', '736', '737', '738', '739',
+            '750', '751', '752', '753', '754', '755', '756',
+            '780', '781', '782', '783', '784', '785', '786', '787', '788', '789',
+            '100', '101', '102', '103', '104', '105', '106', '107', '108',
+        ];
+
+        // Telkom prefixes
+        $telkom = [
+            '770', '771', '772', '773', '774', '775', '776', '777', '778', '779',
+        ];
+
+        if (in_array($prefix3, $safaricom)) {
+            return 'safaricom';
+        }
+        if (in_array($prefix3, $airtel)) {
+            return 'airtel';
+        }
+        if (in_array($prefix3, $telkom)) {
+            return 'telkom';
+        }
+
+        return null;
+    }
+
+    /**
+     * Get full network information for a phone number
+     *
+     * @param string $phone Phone number
+     * @return array|null Network info or null
+     */
+    public static function getNetworkInfo(string $phone): ?array
+    {
+        // Normalize phone
+        $phone = preg_replace('/[^0-9]/', '', $phone);
+
+        if (strlen($phone) < 9) {
+            return null;
+        }
+
+        // Detect country code
+        $detectedCountryCode = null;
+        $localNumber = $phone;
+
+        $countryCodes = ['254', '255', '256', '250', '1', '44', '27'];
+
+        foreach ($countryCodes as $cc) {
+            if (substr($phone, 0, strlen($cc)) === $cc) {
+                $detectedCountryCode = $cc;
+                $localNumber = substr($phone, strlen($cc));
+                break;
+            }
+        }
+
+        if (!$detectedCountryCode && substr($phone, 0, 1) === '0') {
+            $localNumber = substr($phone, 1);
+            $detectedCountryCode = '254'; // Default to Kenya
+        }
+
+        if (!$detectedCountryCode) {
+            return null;
+        }
+
+        $prefix3 = substr($localNumber, 0, 3);
+
+        try {
+            $result = Capsule::table('mod_sms_network_prefixes')
+                ->where('country_code', $detectedCountryCode)
+                ->where('prefix', $prefix3)
+                ->where('status', 1)
+                ->first();
+
+            if ($result) {
+                return [
+                    'country_code' => $result->country_code,
+                    'country_name' => $result->country_name,
+                    'operator' => $result->operator,
+                    'operator_code' => $result->operator_code,
+                    'network_type' => $result->network_type,
+                    'mcc' => $result->mcc,
+                    'mnc' => $result->mnc,
+                    'prefix' => $result->prefix,
+                ];
+            }
+        } catch (\Exception $e) {
+            // Fall through
+        }
+
+        // Fallback for Kenya
+        if ($detectedCountryCode === '254') {
+            $network = self::detectKenyaNetworkFallback($prefix3);
+            if ($network) {
+                return [
+                    'country_code' => '254',
+                    'country_name' => 'Kenya',
+                    'operator' => ucfirst($network),
+                    'operator_code' => $network,
+                    'network_type' => 'mobile',
+                    'mcc' => '639',
+                    'mnc' => '',
+                    'prefix' => $prefix3,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get client's sender IDs with usage statistics
+     *
+     * @param int $clientId
+     * @return array
+     */
+    public static function getClientSenderIdsWithStats(int $clientId): array
+    {
+        return Capsule::table('mod_sms_client_sender_ids as s')
+            ->leftJoin(Capsule::raw('(SELECT sender_id_ref, SUM(credits_used) as total_used, COUNT(*) as message_count
+                FROM mod_sms_credit_usage
+                WHERE client_id = ' . (int)$clientId . '
+                GROUP BY sender_id_ref) as u'), 's.id', '=', 'u.sender_id_ref')
+            ->where('s.client_id', $clientId)
+            ->where('s.status', 'active')
+            ->select([
+                's.id',
+                's.sender_id',
+                's.type',
+                's.network',
+                's.expires_at',
+                's.is_default',
+                Capsule::raw('COALESCE(u.total_used, 0) as credits_used'),
+                Capsule::raw('COALESCE(u.message_count, 0) as messages_sent'),
+            ])
+            ->get()
+            ->toArray();
     }
 }

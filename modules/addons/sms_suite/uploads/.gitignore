@@ -1,0 +1,7 @@
+# Ignore uploaded files but keep directory
+*
+!.htaccess
+!.gitignore
+!sender_ids/
+sender_ids/*
+!sender_ids/.gitkeep

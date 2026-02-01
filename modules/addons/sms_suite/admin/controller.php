@@ -47,6 +47,15 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_campaigns($vars, $lang);
             break;
 
+        case 'campaign_create':
+        case 'campaign_edit':
+            sms_suite_admin_campaign_edit($vars, $lang);
+            break;
+
+        case 'campaign_view':
+            sms_suite_admin_campaign_view($vars, $lang);
+            break;
+
         case 'messages':
             sms_suite_admin_messages($vars, $lang);
             break;
@@ -115,6 +124,23 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_sender_id_requests($vars, $lang);
             break;
 
+        case 'network_prefixes':
+            sms_suite_admin_network_prefixes($vars, $lang);
+            break;
+
+        case 'download_doc':
+            sms_suite_admin_download_document();
+            break;
+
+        // AJAX handlers
+        case 'ajax_message_detail':
+            sms_suite_ajax_message_detail();
+            break;
+
+        case 'ajax_retry_message':
+            sms_suite_ajax_retry_message();
+            break;
+
         case 'dashboard':
         default:
             sms_suite_admin_dashboard($vars, $lang);
@@ -135,6 +161,7 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'sender_id_requests' => ['icon' => 'fa-inbox', 'label' => 'ID Requests'],
         'credit_packages' => ['icon' => 'fa-credit-card', 'label' => 'SMS Packages'],
         'billing_rates' => ['icon' => 'fa-dollar', 'label' => 'Billing Rates'],
+        'network_prefixes' => ['icon' => 'fa-globe', 'label' => 'Network Prefixes'],
         'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
         'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
         'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
@@ -414,7 +441,9 @@ function sms_suite_admin_gateway_edit($vars, $lang)
 
     // Get available drivers
     $drivers = [
-        'generic_http' => ['name' => 'Generic HTTP Gateway', 'channels' => ['sms', 'whatsapp']],
+        'generic_http' => ['name' => 'Custom HTTP Gateway (Create Your Own)', 'channels' => ['sms', 'whatsapp']],
+        'airtouch' => ['name' => 'Airtouch Kenya', 'channels' => ['sms']],
+        'africastalking' => ['name' => 'Africa\'s Talking', 'channels' => ['sms']],
         'twilio' => ['name' => 'Twilio', 'channels' => ['sms', 'whatsapp', 'mms']],
         'plivo' => ['name' => 'Plivo', 'channels' => ['sms', 'mms']],
         'vonage' => ['name' => 'Vonage (Nexmo)', 'channels' => ['sms']],
@@ -429,15 +458,49 @@ function sms_suite_admin_gateway_edit($vars, $lang)
 
     // Decrypt credentials
     $credentials = [];
+    $debugInfo = [];
     if ($gateway && !empty($gateway->credentials)) {
         $decrypted = sms_suite_decrypt($gateway->credentials);
-        $credentials = json_decode($decrypted, true) ?: [];
+        $decoded = json_decode($decrypted, true);
+        $jsonError = json_last_error();
+        $credentials = is_array($decoded) ? $decoded : [];
+
+        // Debug info (remove in production)
+        $debugInfo['encrypted_length'] = strlen($gateway->credentials);
+        $debugInfo['decrypted_length'] = strlen($decrypted);
+        $debugInfo['decrypted_raw'] = $decrypted;
+        $debugInfo['json_valid'] = ($jsonError === JSON_ERROR_NONE);
+        $debugInfo['json_error'] = $jsonError !== JSON_ERROR_NONE ? json_last_error_msg() : '';
+        $debugInfo['credentials_count'] = count($credentials);
     }
 
     // Parse settings
     $settings = [];
     if ($gateway && !empty($gateway->settings)) {
         $settings = json_decode($gateway->settings, true) ?: [];
+    }
+
+    // Show debug info for troubleshooting (can be removed later)
+    if (!$isNew && isset($_GET['debug'])) {
+        $decryptedPreview = isset($debugInfo['decrypted_raw']) ? $debugInfo['decrypted_raw'] : '';
+        $jsonError = isset($debugInfo['json_error']) ? $debugInfo['json_error'] : '';
+
+        echo '<div class="alert alert-info"><strong>Debug Info:</strong><br>';
+        echo 'Gateway ID: ' . $gateway->id . '<br>';
+        echo 'Encrypted Length: ' . ($debugInfo['encrypted_length'] ?? 'N/A') . '<br>';
+        echo 'Decrypted Length: ' . ($debugInfo['decrypted_length'] ?? 'N/A') . '<br>';
+        echo 'JSON Valid: ' . (($debugInfo['json_valid'] ?? false) ? 'Yes' : 'No') . '<br>';
+        if ($jsonError) {
+            echo 'JSON Error: ' . htmlspecialchars($jsonError) . '<br>';
+        }
+        echo 'Credentials Count: ' . ($debugInfo['credentials_count'] ?? 0) . '<br>';
+        echo 'Credential Keys: ' . (count($credentials) > 0 ? implode(', ', array_keys($credentials)) : 'None') . '<br>';
+        echo '<hr>';
+        echo '<strong>Raw Encrypted (first 100 chars):</strong><br>';
+        echo '<code>' . htmlspecialchars(substr($gateway->credentials, 0, 100)) . '...</code><br>';
+        echo '<strong>Raw Decrypted (first 200 chars):</strong><br>';
+        echo '<code>' . htmlspecialchars(substr($decryptedPreview, 0, 200)) . '...</code><br>';
+        echo '</div>';
     }
 
     echo '<div class="panel panel-default">';
@@ -569,6 +632,12 @@ function sms_suite_admin_gateway_edit($vars, $lang)
         var html = "";
 
         fields.forEach(function(field) {
+            // Handle section headers
+            if (field.type === "section") {
+                html += "<hr><h5 class=\"text-primary\"><i class=\"fa fa-cog\"></i> " + field.label + "</h5>";
+                return;
+            }
+
             html += "<div class=\"form-group\">";
             html += "<label class=\"col-sm-3 control-label\">" + field.label + (field.required ? " *" : "") + "</label>";
             html += "<div class=\"col-sm-6\">";
@@ -576,14 +645,17 @@ function sms_suite_admin_gateway_edit($vars, $lang)
             if (field.type === "select") {
                 html += "<select name=\"credentials[" + field.name + "]\" class=\"form-control\">";
                 for (var key in field.options) {
-                    html += "<option value=\"" + key + "\">" + field.options[key] + "</option>";
+                    var defaultVal = field.default || "";
+                    var selected = (key === defaultVal) ? " selected" : "";
+                    html += "<option value=\"" + key + "\"" + selected + ">" + field.options[key] + "</option>";
                 }
                 html += "</select>";
             } else if (field.type === "textarea") {
-                html += "<textarea name=\"credentials[" + field.name + "]\" class=\"form-control\" rows=\"4\"></textarea>";
+                html += "<textarea name=\"credentials[" + field.name + "]\" class=\"form-control\" rows=\"4\">" + (field.default || "") + "</textarea>";
             } else {
                 var inputType = field.type === "password" ? "password" : "text";
-                html += "<input type=\"" + inputType + "\" name=\"credentials[" + field.name + "]\" class=\"form-control\" placeholder=\"" + (field.placeholder || "") + "\">";
+                var defaultVal = field.default || "";
+                html += "<input type=\"" + inputType + "\" name=\"credentials[" + field.name + "]\" class=\"form-control\" value=\"" + defaultVal + "\" placeholder=\"" + (field.placeholder || "") + "\">";
             }
 
             if (field.description) {
@@ -607,6 +679,13 @@ function sms_suite_render_gateway_fields($type, $credentials, $settings)
 
     foreach ($fields as $field) {
         $name = $field['name'];
+
+        // Handle section headers
+        if ($field['type'] === 'section') {
+            echo '<hr><h5 class="text-primary"><i class="fa fa-cog"></i> ' . htmlspecialchars($field['label']) . '</h5>';
+            continue;
+        }
+
         $value = $credentials[$name] ?? $settings[$name] ?? $field['default'] ?? '';
         $required = !empty($field['required']) ? 'required' : '';
 
@@ -645,19 +724,125 @@ function sms_suite_get_all_gateway_fields()
 {
     return [
         'generic_http' => [
-            ['name' => 'api_endpoint', 'label' => 'API Endpoint URL', 'type' => 'text', 'required' => true, 'placeholder' => 'https://api.provider.com/sms/send'],
-            ['name' => 'http_method', 'label' => 'HTTP Method', 'type' => 'select', 'options' => ['GET' => 'GET', 'POST' => 'POST', 'PUT' => 'PUT'], 'default' => 'POST'],
-            ['name' => 'auth_type', 'label' => 'Authentication Type', 'type' => 'select', 'options' => ['none' => 'None', 'basic' => 'Basic Auth', 'bearer' => 'Bearer Token', 'api_key_header' => 'API Key (Header)', 'api_key_query' => 'API Key (Query Param)'], 'default' => 'none'],
-            ['name' => 'auth_username', 'label' => 'Username / API Key', 'type' => 'text'],
-            ['name' => 'auth_password', 'label' => 'Password / Secret', 'type' => 'password'],
-            ['name' => 'content_type', 'label' => 'Content Type', 'type' => 'select', 'options' => ['application/json' => 'JSON', 'application/x-www-form-urlencoded' => 'Form Encoded'], 'default' => 'application/json'],
-            ['name' => 'param_to', 'label' => 'Recipient Parameter', 'type' => 'text', 'default' => 'to'],
-            ['name' => 'param_from', 'label' => 'Sender Parameter', 'type' => 'text', 'default' => 'from'],
-            ['name' => 'param_message', 'label' => 'Message Parameter', 'type' => 'text', 'default' => 'message'],
-            ['name' => 'extra_params', 'label' => 'Extra Parameters', 'type' => 'textarea', 'description' => 'One per line: param=value'],
-            ['name' => 'response_message_id_path', 'label' => 'Message ID Path', 'type' => 'text', 'default' => 'message_id', 'description' => 'JSON path to message ID in response'],
-            ['name' => 'success_codes', 'label' => 'Success HTTP Codes', 'type' => 'text', 'default' => '200,201,202'],
-            ['name' => 'success_keyword', 'label' => 'Success Keyword', 'type' => 'text', 'description' => 'Text that must appear in response'],
+            // Basic Configuration
+            ['name' => 'api_endpoint', 'label' => 'Base URL / API Endpoint', 'type' => 'text', 'required' => true, 'placeholder' => 'https://api.provider.com/sms/send', 'description' => 'Full URL to the SMS API endpoint'],
+            ['name' => 'http_method', 'label' => 'HTTP Request Method', 'type' => 'select', 'options' => ['POST' => 'POST', 'GET' => 'GET', 'PUT' => 'PUT'], 'default' => 'POST'],
+            ['name' => 'success_keyword', 'label' => 'Success Keyword', 'type' => 'text', 'placeholder' => '200', 'description' => 'Text/code that appears in response to indicate success (e.g., 200, success, OK)'],
+
+            // Request Configuration
+            ['name' => '_section_request', 'label' => 'Request Configuration', 'type' => 'section'],
+            ['name' => 'json_encoded', 'label' => 'Enable JSON Encoded POST', 'type' => 'select', 'options' => ['no' => 'No (Form Data)', 'yes' => 'Yes (JSON Body)'], 'default' => 'no'],
+            ['name' => 'content_type', 'label' => 'Content Type', 'type' => 'select', 'options' => [
+                'application/x-www-form-urlencoded' => 'application/x-www-form-urlencoded',
+                'application/json' => 'application/json',
+                'multipart/form-data' => 'multipart/form-data',
+                'text/plain' => 'text/plain',
+            ], 'default' => 'application/x-www-form-urlencoded'],
+            ['name' => 'accept_header', 'label' => 'Content Type Accept', 'type' => 'select', 'options' => [
+                'application/json' => 'application/json',
+                'text/plain' => 'text/plain',
+                'text/xml' => 'text/xml',
+                '*/*' => '*/* (Any)',
+            ], 'default' => 'application/json'],
+            ['name' => 'character_encoding', 'label' => 'Character Encoding', 'type' => 'select', 'options' => [
+                'none' => 'None',
+                'utf-8' => 'UTF-8',
+                'iso-8859-1' => 'ISO-8859-1',
+            ], 'default' => 'none'],
+            ['name' => 'ignore_ssl', 'label' => 'Ignore SSL Certificate Verification', 'type' => 'select', 'options' => ['no' => 'No', 'yes' => 'Yes'], 'default' => 'no', 'description' => 'Enable only for testing or if provider has self-signed cert'],
+
+            // Authentication
+            ['name' => '_section_auth', 'label' => 'Authentication', 'type' => 'section'],
+            ['name' => 'auth_type', 'label' => 'Authorization Type', 'type' => 'select', 'options' => [
+                'params' => 'Authentication via Parameters',
+                'basic' => 'Basic Auth (Header)',
+                'bearer' => 'Bearer Token (Header)',
+                'api_key_header' => 'API Key (Custom Header)',
+                'none' => 'None',
+            ], 'default' => 'params'],
+            ['name' => 'auth_header_name', 'label' => 'API Key Header Name', 'type' => 'text', 'default' => 'Authorization', 'description' => 'For API Key header auth'],
+
+            // Rate Limiting
+            ['name' => '_section_rate', 'label' => 'Rate Limiting', 'type' => 'section'],
+            ['name' => 'rate_limit', 'label' => 'Sending Credit (max messages)', 'type' => 'text', 'default' => '60', 'description' => 'Maximum number of SMS per time period'],
+            ['name' => 'rate_time_value', 'label' => 'Time Base', 'type' => 'text', 'default' => '1'],
+            ['name' => 'rate_time_unit', 'label' => 'Time Unit', 'type' => 'select', 'options' => ['second' => 'Second', 'minute' => 'Minute', 'hour' => 'Hour'], 'default' => 'minute'],
+            ['name' => 'sms_per_request', 'label' => 'SMS Per Single Request', 'type' => 'text', 'default' => '1', 'description' => 'Number of SMS in single API request (for bulk)'],
+            ['name' => 'bulk_delimiter', 'label' => 'Delimiter (for bulk)', 'type' => 'select', 'options' => [',' => 'Comma (,)', ';' => 'Semicolon (;)', '|' => 'Pipe (|)', '\n' => 'New Line'], 'default' => ','],
+
+            // Features
+            ['name' => '_section_features', 'label' => 'Features', 'type' => 'section'],
+            ['name' => 'support_plain', 'label' => 'Plain Text Messages', 'type' => 'select', 'options' => ['yes' => 'Yes', 'no' => 'No'], 'default' => 'yes'],
+            ['name' => 'support_unicode', 'label' => 'Unicode Messages', 'type' => 'select', 'options' => ['yes' => 'Yes', 'no' => 'No'], 'default' => 'yes'],
+            ['name' => 'support_schedule', 'label' => 'Scheduled Messages', 'type' => 'select', 'options' => ['yes' => 'Yes', 'no' => 'No'], 'default' => 'no'],
+
+            // Parameter Mapping
+            ['name' => '_section_params', 'label' => 'Parameter Mapping', 'type' => 'section'],
+            // Username/API Key
+            ['name' => 'param_username_key', 'label' => 'Username/API Key - Parameter Name', 'type' => 'text', 'placeholder' => 'username'],
+            ['name' => 'param_username_value', 'label' => 'Username/API Key - Value', 'type' => 'text', 'placeholder' => 'your_username'],
+            ['name' => 'param_username_location', 'label' => 'Username/API Key - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL'], 'default' => 'body'],
+            // Password
+            ['name' => 'param_password_key', 'label' => 'Password - Parameter Name', 'type' => 'text', 'placeholder' => 'password'],
+            ['name' => 'param_password_value', 'label' => 'Password - Value', 'type' => 'password'],
+            ['name' => 'param_password_location', 'label' => 'Password - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'body'],
+            // Action
+            ['name' => 'param_action_key', 'label' => 'Action - Parameter Name', 'type' => 'text', 'placeholder' => 'action'],
+            ['name' => 'param_action_value', 'label' => 'Action - Value', 'type' => 'text', 'placeholder' => 'send'],
+            ['name' => 'param_action_location', 'label' => 'Action - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'blank'],
+            // Source (Sender ID)
+            ['name' => 'param_source_key', 'label' => 'Source/Sender ID - Parameter Name', 'type' => 'text', 'default' => 'from', 'placeholder' => 'from, sender, source'],
+            ['name' => 'param_source_value', 'label' => 'Source/Sender ID - Default Value', 'type' => 'text', 'description' => 'Default sender ID (can be overridden per message)'],
+            ['name' => 'param_source_location', 'label' => 'Source - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL'], 'default' => 'body'],
+            // Destination (Phone Number)
+            ['name' => 'param_destination_key', 'label' => 'Destination - Parameter Name', 'type' => 'text', 'default' => 'to', 'placeholder' => 'to, msisdn, destination, phone'],
+            // Message
+            ['name' => 'param_message_key', 'label' => 'Message - Parameter Name', 'type' => 'text', 'default' => 'message', 'placeholder' => 'message, text, body, content'],
+            // Unicode
+            ['name' => 'param_unicode_key', 'label' => 'Unicode - Parameter Name', 'type' => 'text', 'placeholder' => 'unicode, encoding, type'],
+            ['name' => 'param_unicode_value', 'label' => 'Unicode - Value (when unicode)', 'type' => 'text', 'placeholder' => '1, true, unicode'],
+            ['name' => 'param_unicode_location', 'label' => 'Unicode - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'blank'],
+            // Type/Route
+            ['name' => 'param_type_key', 'label' => 'Type/Route - Parameter Name', 'type' => 'text', 'placeholder' => 'type, route'],
+            ['name' => 'param_type_value', 'label' => 'Type/Route - Value', 'type' => 'text'],
+            ['name' => 'param_type_location', 'label' => 'Type/Route - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'blank'],
+            // Language
+            ['name' => 'param_language_key', 'label' => 'Language - Parameter Name', 'type' => 'text', 'placeholder' => 'lang, language'],
+            ['name' => 'param_language_value', 'label' => 'Language - Value', 'type' => 'text'],
+            ['name' => 'param_language_location', 'label' => 'Language - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'blank'],
+            // Schedule
+            ['name' => 'param_schedule_key', 'label' => 'Schedule - Parameter Name', 'type' => 'text', 'placeholder' => 'schedule, send_at, datetime'],
+            ['name' => 'param_schedule_format', 'label' => 'Schedule - Date Format', 'type' => 'text', 'default' => 'Y-m-d H:i:s', 'placeholder' => 'Y-m-d H:i:s'],
+            // Custom Values 1-3
+            ['name' => 'param_custom1_key', 'label' => 'Custom Value 1 - Parameter Name', 'type' => 'text'],
+            ['name' => 'param_custom1_value', 'label' => 'Custom Value 1 - Value', 'type' => 'text'],
+            ['name' => 'param_custom1_location', 'label' => 'Custom Value 1 - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'blank'],
+            ['name' => 'param_custom2_key', 'label' => 'Custom Value 2 - Parameter Name', 'type' => 'text'],
+            ['name' => 'param_custom2_value', 'label' => 'Custom Value 2 - Value', 'type' => 'text'],
+            ['name' => 'param_custom2_location', 'label' => 'Custom Value 2 - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'blank'],
+            ['name' => 'param_custom3_key', 'label' => 'Custom Value 3 - Parameter Name', 'type' => 'text'],
+            ['name' => 'param_custom3_value', 'label' => 'Custom Value 3 - Value', 'type' => 'text'],
+            ['name' => 'param_custom3_location', 'label' => 'Custom Value 3 - Location', 'type' => 'select', 'options' => ['body' => 'Request Body', 'url' => 'Add to URL', 'blank' => 'Not Used'], 'default' => 'blank'],
+
+            // Response Handling
+            ['name' => '_section_response', 'label' => 'Response Handling', 'type' => 'section'],
+            ['name' => 'success_codes', 'label' => 'Success HTTP Codes', 'type' => 'text', 'default' => '200,201,202', 'description' => 'Comma-separated HTTP status codes indicating success'],
+            ['name' => 'response_message_id_path', 'label' => 'Message ID Path in Response', 'type' => 'text', 'default' => 'message_id', 'description' => 'JSON path to message ID (e.g., data.id or messages.0.id)'],
+            ['name' => 'phone_format', 'label' => 'Phone Number Format', 'type' => 'select', 'options' => [
+                'as_is' => 'As Is (no modification)',
+                'plus_prefix' => 'With + Prefix',
+                'no_plus' => 'Without + Prefix',
+                'digits_only' => 'Digits Only',
+            ], 'default' => 'as_is'],
+
+            // Balance Check
+            ['name' => '_section_balance', 'label' => 'Balance Check (Optional)', 'type' => 'section'],
+            ['name' => 'balance_endpoint', 'label' => 'Balance Check Endpoint', 'type' => 'text', 'description' => 'URL to check account balance'],
+            ['name' => 'balance_path', 'label' => 'Balance Path in Response', 'type' => 'text', 'default' => 'balance', 'description' => 'JSON path to balance value'],
+
+            // Custom Headers
+            ['name' => '_section_headers', 'label' => 'Custom Headers', 'type' => 'section'],
+            ['name' => 'custom_headers', 'label' => 'Additional Headers', 'type' => 'textarea', 'description' => 'One header per line: Header-Name: Value'],
         ],
         'twilio' => [
             ['name' => 'account_sid', 'label' => 'Account SID', 'type' => 'text', 'required' => true],
@@ -675,6 +860,20 @@ function sms_suite_get_all_gateway_fields()
         'infobip' => [
             ['name' => 'base_url', 'label' => 'Base URL', 'type' => 'text', 'default' => 'https://api.infobip.com'],
             ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+        ],
+        'airtouch' => [
+            ['name' => 'api_endpoint', 'label' => 'API Endpoint URL', 'type' => 'text', 'required' => true, 'default' => 'https://client.airtouch.co.ke:9012/sms/api/', 'description' => 'Airtouch API endpoint (default provided)'],
+            ['name' => 'username', 'label' => 'Username', 'type' => 'text', 'required' => true, 'placeholder' => 'Your Airtouch username'],
+            ['name' => 'password', 'label' => 'Password / API Key', 'type' => 'password', 'required' => true, 'description' => 'Your Airtouch password or API key hash'],
+            ['name' => 'sender_id', 'label' => 'Default Sender ID (ISSN)', 'type' => 'text', 'required' => true, 'placeholder' => 'e.g., XCOBEAN', 'description' => 'Your registered sender ID'],
+            ['name' => 'ignore_ssl', 'label' => 'Ignore SSL Errors', 'type' => 'select', 'options' => ['no' => 'No', 'yes' => 'Yes'], 'default' => 'no', 'description' => 'Enable if you get SSL certificate errors'],
+            ['name' => 'success_keyword', 'label' => 'Success Keyword', 'type' => 'text', 'description' => 'Text indicating success in response (leave blank for HTTP code check)'],
+        ],
+        'africastalking' => [
+            ['name' => 'username', 'label' => 'Username', 'type' => 'text', 'required' => true, 'description' => 'Your Africa\'s Talking username'],
+            ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+            ['name' => 'sender_id', 'label' => 'Sender ID', 'type' => 'text', 'description' => 'Optional: Leave blank to use default'],
+            ['name' => 'environment', 'label' => 'Environment', 'type' => 'select', 'options' => ['production' => 'Production', 'sandbox' => 'Sandbox'], 'default' => 'production'],
         ],
     ];
 }
@@ -697,10 +896,36 @@ function sms_suite_admin_save_gateway($data, $existingId = null)
             return ['success' => false, 'error' => 'Gateway name is required'];
         }
 
+        // Check if table exists first
+        $schema = Capsule::schema();
+        if (!$schema->hasTable('mod_sms_gateways')) {
+            // Try to create the table
+            logActivity('SMS Suite: mod_sms_gateways table does not exist, attempting to create');
+            sms_suite_create_tables_sql();
+
+            // Check again
+            if (!$schema->hasTable('mod_sms_gateways')) {
+                logActivity('SMS Suite: Failed to create mod_sms_gateways table');
+                return ['success' => false, 'error' => 'Database table does not exist. Please deactivate and reactivate the module.'];
+            }
+        }
+
         // Encrypt credentials
         $credentials = $data['credentials'] ?? [];
         $credentialsJson = json_encode($credentials);
         $encryptedCredentials = sms_suite_encrypt($credentialsJson);
+
+        // Log credential info for debugging
+        $credKeys = is_array($credentials) ? array_keys($credentials) : [];
+        logActivity("SMS Suite: Saving gateway - Credentials received: " . count($credKeys) . " fields (" . implode(', ', $credKeys) . ")");
+
+        // Log credential encryption status for debugging
+        if (empty($encryptedCredentials) && !empty($credentialsJson) && $credentialsJson !== '[]') {
+            logActivity('SMS Suite: Warning - credential encryption returned empty');
+        }
+
+        // Log encrypted data length
+        logActivity("SMS Suite: Encrypted data length: " . strlen($encryptedCredentials) . " chars");
 
         // Settings (non-sensitive)
         $settings = [
@@ -724,15 +949,25 @@ function sms_suite_admin_save_gateway($data, $existingId = null)
         if ($existingId) {
             Capsule::table('mod_sms_gateways')->where('id', $existingId)->update($record);
             $id = $existingId;
+            logActivity("SMS Suite: Gateway #{$id} updated: {$name} ({$type})");
         } else {
             $record['created_at'] = date('Y-m-d H:i:s');
             $id = Capsule::table('mod_sms_gateways')->insertGetId($record);
+            logActivity("SMS Suite: New gateway #{$id} created: {$name} ({$type})");
         }
 
         return ['success' => true, 'id' => $id];
 
     } catch (Exception $e) {
-        return ['success' => false, 'error' => $e->getMessage()];
+        $errorMsg = $e->getMessage();
+        logActivity('SMS Suite: Gateway save failed - ' . $errorMsg);
+
+        // Provide more helpful error messages
+        if (strpos($errorMsg, "doesn't exist") !== false || strpos($errorMsg, 'Table') !== false) {
+            return ['success' => false, 'error' => 'Database table error. Please deactivate and reactivate the module to recreate tables. Technical: ' . $errorMsg];
+        }
+
+        return ['success' => false, 'error' => $errorMsg];
     }
 }
 
@@ -938,100 +1173,1509 @@ function sms_suite_admin_sender_ids($vars, $lang)
 }
 
 /**
- * Campaigns page (stub)
+ * Campaigns page - Campaign Management
  */
 function sms_suite_admin_campaigns($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
+    $message = '';
+    $messageType = '';
+
+    // Handle actions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (isset($_POST['delete_campaign'])) {
+            $campaignId = (int)$_POST['campaign_id'];
+            Capsule::table('mod_sms_campaign_recipients')->where('campaign_id', $campaignId)->delete();
+            Capsule::table('mod_sms_campaign_lists')->where('campaign_id', $campaignId)->delete();
+            Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->delete();
+            $message = 'Campaign deleted successfully.';
+            $messageType = 'success';
+        }
+
+        if (isset($_POST['cancel_campaign'])) {
+            Capsule::table('mod_sms_campaigns')->where('id', (int)$_POST['campaign_id'])->update([
+                'status' => 'cancelled',
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $message = 'Campaign cancelled.';
+            $messageType = 'success';
+        }
+    }
+
+    // Filters
+    $filterStatus = $_GET['status'] ?? '';
+    $filterClient = $_GET['client_id'] ?? '';
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $perPage = 20;
+
+    // Build query
+    $query = Capsule::table('mod_sms_campaigns')
+        ->leftJoin('tblclients', 'mod_sms_campaigns.client_id', '=', 'tblclients.id')
+        ->leftJoin('mod_sms_gateways', 'mod_sms_campaigns.gateway_id', '=', 'mod_sms_gateways.id')
+        ->select([
+            'mod_sms_campaigns.*',
+            'tblclients.firstname',
+            'tblclients.lastname',
+            'tblclients.companyname',
+            'mod_sms_gateways.name as gateway_name',
+        ]);
+
+    if (!empty($filterStatus)) {
+        $query->where('mod_sms_campaigns.status', $filterStatus);
+    }
+    if (!empty($filterClient)) {
+        $query->where('mod_sms_campaigns.client_id', (int)$filterClient);
+    }
+
+    $total = $query->count();
+    $campaigns = $query->orderBy('mod_sms_campaigns.created_at', 'desc')
+        ->skip(($page - 1) * $perPage)
+        ->take($perPage)
+        ->get();
+    $totalPages = ceil($total / $perPage);
+
+    // Status counts
+    $statusCounts = Capsule::table('mod_sms_campaigns')
+        ->select('status', Capsule::raw('COUNT(*) as count'))
+        ->groupBy('status')
+        ->pluck('count', 'status');
+
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">' . $lang['campaigns'] . '</h3></div>';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title" style="display: inline-block;"><i class="fa fa-bullhorn"></i> ' . $lang['campaigns'] . '</h3>';
+    echo '<a href="' . $modulelink . '&action=campaign_create" class="btn btn-success btn-sm pull-right"><i class="fa fa-plus"></i> New Campaign</a>';
+    echo '</div>';
     echo '<div class="panel-body">';
-    echo '<div class="alert alert-info">Campaign management will be implemented in Slice 8.</div>';
-    echo '</div>';
-    echo '</div>';
-    echo '</div>';
+
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    // Status filter tabs
+    $statuses = ['draft', 'scheduled', 'queued', 'sending', 'completed', 'failed', 'cancelled'];
+    echo '<ul class="nav nav-pills" style="margin-bottom: 15px;">';
+    $allActive = empty($filterStatus) ? 'active' : '';
+    echo '<li class="' . $allActive . '"><a href="' . $modulelink . '&action=campaigns">All (' . $total . ')</a></li>';
+    foreach ($statuses as $status) {
+        $count = $statusCounts[$status] ?? 0;
+        $active = ($filterStatus === $status) ? 'active' : '';
+        echo '<li class="' . $active . '"><a href="' . $modulelink . '&action=campaigns&status=' . $status . '">' . ucfirst($status) . ' (' . $count . ')</a></li>';
+    }
+    echo '</ul>';
+
+    // Campaigns table
+    echo '<div class="table-responsive">';
+    echo '<table class="table table-striped">';
+    echo '<thead><tr>';
+    echo '<th>Campaign</th>';
+    echo '<th>Client</th>';
+    echo '<th>Recipients</th>';
+    echo '<th>Sent/Delivered/Failed</th>';
+    echo '<th>Schedule</th>';
+    echo '<th>Status</th>';
+    echo '<th>Actions</th>';
+    echo '</tr></thead>';
+    echo '<tbody>';
+
+    foreach ($campaigns as $campaign) {
+        $clientName = trim($campaign->firstname . ' ' . $campaign->lastname);
+        if (empty($clientName)) $clientName = 'Admin';
+
+        // Status badge
+        $statusColors = [
+            'draft' => 'default',
+            'scheduled' => 'info',
+            'queued' => 'warning',
+            'sending' => 'primary',
+            'completed' => 'success',
+            'failed' => 'danger',
+            'cancelled' => 'default',
+            'paused' => 'warning',
+        ];
+        $statusColor = $statusColors[$campaign->status] ?? 'default';
+        $statusBadge = '<span class="label label-' . $statusColor . '">' . ucfirst($campaign->status) . '</span>';
+
+        // Progress
+        $deliveryRate = $campaign->sent_count > 0
+            ? round(($campaign->delivered_count / $campaign->sent_count) * 100) . '%'
+            : '-';
+
+        // Schedule
+        $scheduleText = '-';
+        if ($campaign->schedule_time) {
+            $scheduleText = date('M d, Y H:i', strtotime($campaign->schedule_time));
+            if ($campaign->schedule_type === 'recurring') {
+                $scheduleText .= ' <small>(Recurring)</small>';
+            }
+        }
+
+        echo '<tr>';
+        echo '<td>';
+        echo '<strong>' . htmlspecialchars($campaign->name) . '</strong><br>';
+        echo '<small class="text-muted">' . htmlspecialchars($campaign->sender_id ?? 'Default') . ' | ' . strtoupper($campaign->channel) . '</small>';
+        echo '</td>';
+        echo '<td>' . htmlspecialchars($clientName) . '</td>';
+        echo '<td><span class="badge">' . number_format($campaign->total_recipients) . '</span></td>';
+        echo '<td>';
+        echo '<span class="text-primary">' . number_format($campaign->sent_count) . '</span> / ';
+        echo '<span class="text-success">' . number_format($campaign->delivered_count) . '</span> / ';
+        echo '<span class="text-danger">' . number_format($campaign->failed_count) . '</span>';
+        echo '</td>';
+        echo '<td><small>' . $scheduleText . '</small></td>';
+        echo '<td>' . $statusBadge . '</td>';
+        echo '<td>';
+
+        // Actions based on status
+        echo '<a href="' . $modulelink . '&action=campaign_view&id=' . $campaign->id . '" class="btn btn-xs btn-info" title="View"><i class="fa fa-eye"></i></a> ';
+
+        if (in_array($campaign->status, ['draft', 'scheduled'])) {
+            echo '<a href="' . $modulelink . '&action=campaign_edit&id=' . $campaign->id . '" class="btn btn-xs btn-primary" title="Edit"><i class="fa fa-edit"></i></a> ';
+        }
+
+        if (in_array($campaign->status, ['scheduled', 'queued', 'sending'])) {
+            echo '<form method="post" style="display:inline;"><input type="hidden" name="campaign_id" value="' . $campaign->id . '">';
+            echo '<button type="submit" name="cancel_campaign" class="btn btn-xs btn-warning" title="Cancel" onclick="return confirm(\'Cancel this campaign?\')"><i class="fa fa-stop"></i></button></form> ';
+        }
+
+        if (in_array($campaign->status, ['draft', 'completed', 'failed', 'cancelled'])) {
+            echo '<form method="post" style="display:inline;"><input type="hidden" name="campaign_id" value="' . $campaign->id . '">';
+            echo '<button type="submit" name="delete_campaign" class="btn btn-xs btn-danger" title="Delete" onclick="return confirm(\'Delete this campaign? This cannot be undone.\')"><i class="fa fa-trash"></i></button></form>';
+        }
+
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    if (count($campaigns) == 0) {
+        echo '<tr><td colspan="7" class="text-center text-muted">No campaigns found.</td></tr>';
+    }
+
+    echo '</tbody></table></div>';
+
+    // Pagination
+    if ($totalPages > 1) {
+        echo '<nav><ul class="pagination">';
+        for ($i = 1; $i <= $totalPages; $i++) {
+            $active = ($i == $page) ? 'active' : '';
+            echo '<li class="' . $active . '"><a href="' . $modulelink . '&action=campaigns&page=' . $i . '&status=' . urlencode($filterStatus) . '">' . $i . '</a></li>';
+        }
+        echo '</ul></nav>';
+    }
+
+    echo '</div></div></div>';
 }
 
 /**
- * Messages page (stub)
+ * Campaign Create/Edit page
  */
-function sms_suite_admin_messages($vars, $lang)
+function sms_suite_admin_campaign_edit($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
+    $campaignId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+    $campaign = null;
+    $message = '';
+    $messageType = '';
+
+    if ($campaignId > 0) {
+        $campaign = Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->first();
+    }
+
+    // Get contact groups
+    $groups = Capsule::table('mod_sms_contact_groups')
+        ->where('status', 1)
+        ->orderBy('name')
+        ->get();
+
+    // Get gateways
+    $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
+
+    // Get sender IDs
+    $senderIds = Capsule::table('mod_sms_sender_ids')->where('status', 'active')->orderBy('sender_id')->get();
+
+    // Handle form submission
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_campaign'])) {
+        $data = [
+            'client_id' => 0, // Admin campaign
+            'name' => trim($_POST['name']),
+            'channel' => $_POST['channel'] ?? 'sms',
+            'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
+            'sender_id' => $_POST['sender_id'] ?: null,
+            'message' => $_POST['message'],
+            'status' => $_POST['action_type'] === 'schedule' ? 'scheduled' : 'draft',
+            'schedule_time' => !empty($_POST['schedule_time']) ? $_POST['schedule_time'] : null,
+            'schedule_type' => $_POST['schedule_type'] ?? 'onetime',
+            'updated_at' => date('Y-m-d H:i:s'),
+        ];
+
+        if ($campaignId > 0) {
+            Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->update($data);
+            $message = 'Campaign updated.';
+        } else {
+            $data['created_at'] = date('Y-m-d H:i:s');
+            $data['total_recipients'] = 0;
+            $data['sent_count'] = 0;
+            $data['delivered_count'] = 0;
+            $data['failed_count'] = 0;
+            $campaignId = Capsule::table('mod_sms_campaigns')->insertGetId($data);
+            $message = 'Campaign created.';
+        }
+
+        // Update contact groups
+        Capsule::table('mod_sms_campaign_lists')->where('campaign_id', $campaignId)->delete();
+        if (!empty($_POST['group_ids'])) {
+            $totalRecipients = 0;
+            foreach ($_POST['group_ids'] as $groupId) {
+                Capsule::table('mod_sms_campaign_lists')->insert([
+                    'campaign_id' => $campaignId,
+                    'group_id' => (int)$groupId,
+                    'created_at' => date('Y-m-d H:i:s'),
+                ]);
+                $groupCount = Capsule::table('mod_sms_contacts')
+                    ->where('group_id', (int)$groupId)
+                    ->where('status', 'subscribed')
+                    ->count();
+                $totalRecipients += $groupCount;
+            }
+            Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->update(['total_recipients' => $totalRecipients]);
+        }
+
+        $messageType = 'success';
+        $campaign = Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->first();
+    }
+
+    // Get selected groups
+    $selectedGroups = [];
+    if ($campaignId > 0) {
+        $selectedGroups = Capsule::table('mod_sms_campaign_lists')
+            ->where('campaign_id', $campaignId)
+            ->pluck('group_id')
+            ->toArray();
+    }
+
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">' . $lang['messages'] . '</h3></div>';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-bullhorn"></i> ' . ($campaign ? 'Edit Campaign' : 'Create Campaign') . '</h3></div>';
     echo '<div class="panel-body">';
 
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    echo '<form method="post" class="form-horizontal">';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-2 control-label">Campaign Name *</label>';
+    echo '<div class="col-sm-6"><input type="text" name="name" class="form-control" value="' . htmlspecialchars($campaign->name ?? '') . '" required></div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-2 control-label">Channel</label>';
+    echo '<div class="col-sm-3"><select name="channel" class="form-control">';
+    echo '<option value="sms"' . (($campaign->channel ?? 'sms') === 'sms' ? ' selected' : '') . '>SMS</option>';
+    echo '<option value="whatsapp"' . (($campaign->channel ?? '') === 'whatsapp' ? ' selected' : '') . '>WhatsApp</option>';
+    echo '</select></div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-2 control-label">Gateway</label>';
+    echo '<div class="col-sm-4"><select name="gateway_id" class="form-control"><option value="">Default Gateway</option>';
+    foreach ($gateways as $gw) {
+        $sel = (($campaign->gateway_id ?? '') == $gw->id) ? 'selected' : '';
+        echo '<option value="' . $gw->id . '" ' . $sel . '>' . htmlspecialchars($gw->name) . '</option>';
+    }
+    echo '</select></div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-2 control-label">Sender ID</label>';
+    echo '<div class="col-sm-3"><select name="sender_id" class="form-control"><option value="">Default</option>';
+    foreach ($senderIds as $sid) {
+        $sel = (($campaign->sender_id ?? '') == $sid->sender_id) ? 'selected' : '';
+        echo '<option value="' . htmlspecialchars($sid->sender_id) . '" ' . $sel . '>' . htmlspecialchars($sid->sender_id) . '</option>';
+    }
+    echo '</select></div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-2 control-label">Contact Groups *</label>';
+    echo '<div class="col-sm-6">';
+    foreach ($groups as $group) {
+        $checked = in_array($group->id, $selectedGroups) ? 'checked' : '';
+        echo '<div class="checkbox"><label><input type="checkbox" name="group_ids[]" value="' . $group->id . '" ' . $checked . '> ';
+        echo htmlspecialchars($group->name) . ' <small class="text-muted">(' . number_format($group->contact_count) . ' contacts)</small></label></div>';
+    }
+    if (count($groups) == 0) {
+        echo '<p class="text-muted">No contact groups available. <a href="' . $modulelink . '&action=contacts">Create a group first</a>.</p>';
+    }
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-2 control-label">Message *</label>';
+    echo '<div class="col-sm-8">';
+    echo '<textarea name="message" class="form-control" rows="5" required>' . htmlspecialchars($campaign->message ?? '') . '</textarea>';
+    echo '<small class="text-muted">Variables: {first_name}, {last_name}, {phone}, {email}</small>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-2 control-label">Schedule</label>';
+    echo '<div class="col-sm-4">';
+    echo '<input type="datetime-local" name="schedule_time" class="form-control" value="' . ($campaign->schedule_time ? date('Y-m-d\TH:i', strtotime($campaign->schedule_time)) : '') . '">';
+    echo '<small class="text-muted">Leave blank to save as draft</small>';
+    echo '</div>';
+    echo '<div class="col-sm-2">';
+    echo '<select name="schedule_type" class="form-control">';
+    echo '<option value="onetime"' . (($campaign->schedule_type ?? 'onetime') === 'onetime' ? ' selected' : '') . '>One-time</option>';
+    echo '<option value="recurring"' . (($campaign->schedule_type ?? '') === 'recurring' ? ' selected' : '') . '>Recurring</option>';
+    echo '</select>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<hr>';
+    echo '<div class="form-group">';
+    echo '<div class="col-sm-offset-2 col-sm-8">';
+    echo '<button type="submit" name="save_campaign" value="1" class="btn btn-primary"><i class="fa fa-save"></i> Save as Draft</button> ';
+    echo '<input type="hidden" name="action_type" id="action_type" value="draft">';
+    echo '<button type="submit" name="save_campaign" value="1" class="btn btn-success" onclick="document.getElementById(\'action_type\').value=\'schedule\'"><i class="fa fa-clock-o"></i> Save & Schedule</button> ';
+    echo '<a href="' . $modulelink . '&action=campaigns" class="btn btn-default">Cancel</a>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '</form>';
+    echo '</div></div></div>';
+}
+
+/**
+ * Campaign View page
+ */
+function sms_suite_admin_campaign_view($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $campaignId = (int)$_GET['id'];
+
+    $campaign = Capsule::table('mod_sms_campaigns')
+        ->leftJoin('tblclients', 'mod_sms_campaigns.client_id', '=', 'tblclients.id')
+        ->leftJoin('mod_sms_gateways', 'mod_sms_campaigns.gateway_id', '=', 'mod_sms_gateways.id')
+        ->select([
+            'mod_sms_campaigns.*',
+            'tblclients.firstname',
+            'tblclients.lastname',
+            'mod_sms_gateways.name as gateway_name',
+        ])
+        ->where('mod_sms_campaigns.id', $campaignId)
+        ->first();
+
+    if (!$campaign) {
+        echo '<div class="alert alert-danger">Campaign not found.</div>';
+        echo '<a href="' . $modulelink . '&action=campaigns" class="btn btn-default">Back to Campaigns</a>';
+        return;
+    }
+
+    // Get recipient groups
+    $groups = Capsule::table('mod_sms_campaign_lists')
+        ->leftJoin('mod_sms_contact_groups', 'mod_sms_campaign_lists.group_id', '=', 'mod_sms_contact_groups.id')
+        ->where('campaign_id', $campaignId)
+        ->select('mod_sms_contact_groups.name', 'mod_sms_contact_groups.contact_count')
+        ->get();
+
+    // Get recent messages for this campaign
     $messages = Capsule::table('mod_sms_messages')
+        ->where('campaign_id', $campaignId)
         ->orderBy('created_at', 'desc')
         ->limit(50)
         ->get();
 
-    if (count($messages) > 0) {
-        echo '<table class="table table-striped">';
-        echo '<thead><tr><th>To</th><th>From</th><th>Message</th><th>Status</th><th>Segments</th><th>Cost</th><th>Date</th></tr></thead>';
-        echo '<tbody>';
-        foreach ($messages as $msg) {
-            $statusClass = sms_suite_status_class($msg->status);
-            $msgPreview = strlen($msg->message) > 50 ? substr($msg->message, 0, 50) . '...' : $msg->message;
-            echo '<tr>';
-            echo '<td>' . htmlspecialchars($msg->to_number) . '</td>';
-            echo '<td>' . htmlspecialchars($msg->sender_id) . '</td>';
-            echo '<td>' . htmlspecialchars($msgPreview) . '</td>';
-            echo '<td><span class="label label-' . $statusClass . '">' . ucfirst($msg->status) . '</span></td>';
-            echo '<td>' . $msg->segments . '</td>';
-            echo '<td>' . number_format($msg->cost, 4) . '</td>';
-            echo '<td>' . $msg->created_at . '</td>';
-            echo '</tr>';
+    // Status colors
+    $statusColors = [
+        'draft' => 'default', 'scheduled' => 'info', 'queued' => 'warning',
+        'sending' => 'primary', 'completed' => 'success', 'failed' => 'danger', 'cancelled' => 'default'
+    ];
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title"><i class="fa fa-bullhorn"></i> Campaign: ' . htmlspecialchars($campaign->name) . '</h3>';
+    echo '</div>';
+    echo '<div class="panel-body">';
+
+    // Campaign details
+    echo '<div class="row">';
+    echo '<div class="col-md-6">';
+    echo '<table class="table table-bordered">';
+    echo '<tr><td width="30%"><strong>Status</strong></td><td><span class="label label-' . ($statusColors[$campaign->status] ?? 'default') . '">' . ucfirst($campaign->status) . '</span></td></tr>';
+    echo '<tr><td><strong>Channel</strong></td><td>' . strtoupper($campaign->channel) . '</td></tr>';
+    echo '<tr><td><strong>Gateway</strong></td><td>' . htmlspecialchars($campaign->gateway_name ?? 'Default') . '</td></tr>';
+    echo '<tr><td><strong>Sender ID</strong></td><td>' . htmlspecialchars($campaign->sender_id ?? 'Default') . '</td></tr>';
+    echo '<tr><td><strong>Scheduled</strong></td><td>' . ($campaign->schedule_time ? date('M d, Y H:i', strtotime($campaign->schedule_time)) : 'Not scheduled') . '</td></tr>';
+    echo '<tr><td><strong>Created</strong></td><td>' . date('M d, Y H:i', strtotime($campaign->created_at)) . '</td></tr>';
+    echo '</table>';
+    echo '</div>';
+
+    echo '<div class="col-md-6">';
+    echo '<div class="row text-center">';
+    echo '<div class="col-xs-3"><div class="panel panel-info"><div class="panel-body"><h3>' . number_format($campaign->total_recipients) . '</h3>Recipients</div></div></div>';
+    echo '<div class="col-xs-3"><div class="panel panel-primary"><div class="panel-body"><h3>' . number_format($campaign->sent_count) . '</h3>Sent</div></div></div>';
+    echo '<div class="col-xs-3"><div class="panel panel-success"><div class="panel-body"><h3>' . number_format($campaign->delivered_count) . '</h3>Delivered</div></div></div>';
+    echo '<div class="col-xs-3"><div class="panel panel-danger"><div class="panel-body"><h3>' . number_format($campaign->failed_count) . '</h3>Failed</div></div></div>';
+    echo '</div>';
+    $deliveryRate = $campaign->sent_count > 0 ? round(($campaign->delivered_count / $campaign->sent_count) * 100, 1) : 0;
+    echo '<div class="progress" style="height: 25px;">';
+    echo '<div class="progress-bar progress-bar-success" style="width: ' . $deliveryRate . '%">' . $deliveryRate . '% Delivered</div>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+
+    // Message content
+    echo '<hr><h4>Message Content</h4>';
+    echo '<div class="well">' . nl2br(htmlspecialchars($campaign->message)) . '</div>';
+
+    // Target groups
+    if (count($groups) > 0) {
+        echo '<h4>Target Groups</h4>';
+        echo '<ul>';
+        foreach ($groups as $g) {
+            echo '<li>' . htmlspecialchars($g->name) . ' (' . number_format($g->contact_count) . ' contacts)</li>';
         }
-        echo '</tbody>';
-        echo '</table>';
-    } else {
-        echo '<p class="text-muted">No messages yet.</p>';
+        echo '</ul>';
     }
 
+    // Recent messages
+    if (count($messages) > 0) {
+        echo '<hr><h4>Recent Messages (Last 50)</h4>';
+        echo '<div class="table-responsive"><table class="table table-sm table-striped">';
+        echo '<thead><tr><th>To</th><th>Status</th><th>Segments</th><th>Cost</th><th>Sent At</th></tr></thead><tbody>';
+        foreach ($messages as $msg) {
+            $msgStatus = $msg->status === 'delivered' ? '<span class="label label-success">Delivered</span>'
+                : ($msg->status === 'failed' ? '<span class="label label-danger">Failed</span>'
+                : '<span class="label label-default">' . ucfirst($msg->status) . '</span>');
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars($msg->to_number) . '</td>';
+            echo '<td>' . $msgStatus . '</td>';
+            echo '<td>' . $msg->segments . '</td>';
+            echo '<td>' . number_format($msg->cost, 4) . '</td>';
+            echo '<td>' . date('M d H:i', strtotime($msg->created_at)) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table></div>';
+    }
+
+    echo '<hr>';
+    echo '<a href="' . $modulelink . '&action=campaigns" class="btn btn-default"><i class="fa fa-arrow-left"></i> Back to Campaigns</a>';
+
+    echo '</div></div></div>';
+}
+
+/**
+ * Messages page
+ */
+function sms_suite_admin_messages($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    // Get filter values
+    $filterStatus = $_GET['status'] ?? '';
+    $filterGateway = $_GET['gateway_id'] ?? '';
+    $filterClient = $_GET['client_id'] ?? '';
+    $filterDateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-7 days'));
+    $filterDateTo = $_GET['date_to'] ?? date('Y-m-d');
+    $filterSearch = $_GET['search'] ?? '';
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $perPage = 50;
+
+    // Get gateways for filter dropdown
+    $gateways = Capsule::table('mod_sms_gateways')->orderBy('name')->get();
+
+    // Build query
+    $query = Capsule::table('mod_sms_messages')
+        ->leftJoin('mod_sms_gateways', 'mod_sms_messages.gateway_id', '=', 'mod_sms_gateways.id')
+        ->leftJoin('tblclients', 'mod_sms_messages.client_id', '=', 'tblclients.id')
+        ->select([
+            'mod_sms_messages.*',
+            'mod_sms_gateways.name as gateway_name',
+            'tblclients.firstname',
+            'tblclients.lastname',
+            'tblclients.email as client_email',
+        ]);
+
+    // Apply filters
+    if (!empty($filterStatus)) {
+        $query->where('mod_sms_messages.status', $filterStatus);
+    }
+    if (!empty($filterGateway)) {
+        $query->where('mod_sms_messages.gateway_id', $filterGateway);
+    }
+    if (!empty($filterClient)) {
+        $query->where('mod_sms_messages.client_id', $filterClient);
+    }
+    if (!empty($filterDateFrom)) {
+        $query->whereDate('mod_sms_messages.created_at', '>=', $filterDateFrom);
+    }
+    if (!empty($filterDateTo)) {
+        $query->whereDate('mod_sms_messages.created_at', '<=', $filterDateTo);
+    }
+    if (!empty($filterSearch)) {
+        $query->where(function($q) use ($filterSearch) {
+            $q->where('mod_sms_messages.to_number', 'like', "%{$filterSearch}%")
+              ->orWhere('mod_sms_messages.message', 'like', "%{$filterSearch}%")
+              ->orWhere('mod_sms_messages.sender_id', 'like', "%{$filterSearch}%");
+        });
+    }
+
+    // Get counts by status
+    $statusCounts = Capsule::table('mod_sms_messages')
+        ->selectRaw('status, COUNT(*) as count')
+        ->whereDate('created_at', '>=', $filterDateFrom)
+        ->whereDate('created_at', '<=', $filterDateTo)
+        ->groupBy('status')
+        ->pluck('count', 'status')
+        ->toArray();
+
+    $totalCount = array_sum($statusCounts);
+    $deliveredCount = $statusCounts['delivered'] ?? 0;
+    $failedCount = $statusCounts['failed'] ?? 0;
+    $pendingCount = ($statusCounts['queued'] ?? 0) + ($statusCounts['sending'] ?? 0) + ($statusCounts['sent'] ?? 0);
+
+    // Paginate
+    $total = (clone $query)->count();
+    $messages = $query->orderBy('mod_sms_messages.created_at', 'desc')
+        ->offset(($page - 1) * $perPage)
+        ->limit($perPage)
+        ->get();
+
+    $totalPages = ceil($total / $perPage);
+
+    // Statistics cards
+    echo '<div class="row" style="margin-bottom: 20px;">';
+    echo '<div class="col-md-3"><div class="panel panel-info"><div class="panel-body text-center">';
+    echo '<h3 style="margin:0;">' . number_format($totalCount) . '</h3><small>Total Messages</small>';
+    echo '</div></div></div>';
+    echo '<div class="col-md-3"><div class="panel panel-success"><div class="panel-body text-center">';
+    echo '<h3 style="margin:0;">' . number_format($deliveredCount) . '</h3><small>Delivered</small>';
+    echo '</div></div></div>';
+    echo '<div class="col-md-3"><div class="panel panel-danger"><div class="panel-body text-center">';
+    echo '<h3 style="margin:0;">' . number_format($failedCount) . '</h3><small>Failed</small>';
+    echo '</div></div></div>';
+    echo '<div class="col-md-3"><div class="panel panel-warning"><div class="panel-body text-center">';
+    echo '<h3 style="margin:0;">' . number_format($pendingCount) . '</h3><small>Pending/Sending</small>';
+    echo '</div></div></div>';
+    echo '</div>';
+
+    // Filter form
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-filter"></i> Filters & Search</h3></div>';
+    echo '<div class="panel-body">';
+    echo '<form method="get" class="form-inline">';
+    echo '<input type="hidden" name="module" value="sms_suite">';
+    echo '<input type="hidden" name="action" value="messages">';
+
+    // Status filter
+    echo '<div class="form-group" style="margin-right: 10px;">';
+    echo '<select name="status" class="form-control">';
+    echo '<option value="">All Status</option>';
+    $statuses = ['queued', 'sending', 'sent', 'delivered', 'failed', 'rejected', 'expired'];
+    foreach ($statuses as $status) {
+        $selected = ($filterStatus === $status) ? 'selected' : '';
+        $count = $statusCounts[$status] ?? 0;
+        echo '<option value="' . $status . '" ' . $selected . '>' . ucfirst($status) . ' (' . $count . ')</option>';
+    }
+    echo '</select></div>';
+
+    // Gateway filter
+    echo '<div class="form-group" style="margin-right: 10px;">';
+    echo '<select name="gateway_id" class="form-control">';
+    echo '<option value="">All Gateways</option>';
+    foreach ($gateways as $gw) {
+        $selected = ($filterGateway == $gw->id) ? 'selected' : '';
+        echo '<option value="' . $gw->id . '" ' . $selected . '>' . htmlspecialchars($gw->name) . '</option>';
+    }
+    echo '</select></div>';
+
+    // Date range
+    echo '<div class="form-group" style="margin-right: 10px;">';
+    echo '<input type="date" name="date_from" class="form-control" value="' . $filterDateFrom . '">';
+    echo ' to ';
+    echo '<input type="date" name="date_to" class="form-control" value="' . $filterDateTo . '">';
+    echo '</div>';
+
+    // Search
+    echo '<div class="form-group" style="margin-right: 10px;">';
+    echo '<input type="text" name="search" class="form-control" placeholder="Search phone/message..." value="' . htmlspecialchars($filterSearch) . '">';
+    echo '</div>';
+
+    echo '<button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> Filter</button>';
+    echo ' <a href="' . $modulelink . '&action=messages" class="btn btn-default">Reset</a>';
+    echo '</form>';
+    echo '</div></div>';
+
+    // Messages table
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title" style="display:inline-block;"><i class="fa fa-list"></i> ' . $lang['messages'] . ' (' . number_format($total) . ' results)</h3>';
+    echo '<div class="pull-right">';
+    echo '<a href="' . $modulelink . '&action=messages&export=csv&' . http_build_query($_GET) . '" class="btn btn-xs btn-info"><i class="fa fa-download"></i> Export CSV</a>';
     echo '</div>';
     echo '</div>';
+    echo '<div class="panel-body" style="padding:0;">';
+
+    if (count($messages) > 0) {
+        echo '<table class="table table-striped table-hover" style="margin:0;">';
+        echo '<thead><tr>';
+        echo '<th width="50">ID</th>';
+        echo '<th>Recipient</th>';
+        echo '<th>Sender</th>';
+        echo '<th>Message</th>';
+        echo '<th width="100">Status</th>';
+        echo '<th>Gateway</th>';
+        echo '<th width="80">Segments</th>';
+        echo '<th width="120">Date</th>';
+        echo '<th width="80">Actions</th>';
+        echo '</tr></thead>';
+        echo '<tbody>';
+
+        foreach ($messages as $msg) {
+            $statusClass = sms_suite_status_class($msg->status);
+            $msgPreview = strlen($msg->message) > 40 ? substr($msg->message, 0, 40) . '...' : $msg->message;
+            $hasError = !empty($msg->error);
+            $rowClass = $hasError ? 'danger' : '';
+
+            echo '<tr class="' . $rowClass . '">';
+            echo '<td><small>' . $msg->id . '</small></td>';
+            echo '<td><code>' . htmlspecialchars($msg->to_number) . '</code></td>';
+            echo '<td>' . htmlspecialchars($msg->sender_id ?: '-') . '</td>';
+            echo '<td title="' . htmlspecialchars($msg->message) . '">' . htmlspecialchars($msgPreview) . '</td>';
+            echo '<td>';
+            echo '<span class="label label-' . $statusClass . '">' . ucfirst($msg->status) . '</span>';
+            if ($hasError) {
+                echo ' <i class="fa fa-exclamation-triangle text-danger" title="Has error"></i>';
+            }
+            echo '</td>';
+            echo '<td><small>' . htmlspecialchars($msg->gateway_name ?: 'N/A') . '</small></td>';
+            echo '<td>' . $msg->segments . '</td>';
+            echo '<td><small>' . date('M j, H:i', strtotime($msg->created_at)) . '</small></td>';
+            echo '<td>';
+            echo '<button type="button" class="btn btn-xs btn-info" onclick="viewMessageDetails(' . $msg->id . ')" title="View Details"><i class="fa fa-eye"></i></button> ';
+            if ($msg->status === 'failed') {
+                echo '<button type="button" class="btn btn-xs btn-warning" onclick="retryMessage(' . $msg->id . ')" title="Retry"><i class="fa fa-refresh"></i></button>';
+            }
+            echo '</td>';
+            echo '</tr>';
+
+            // Show error row if exists
+            if ($hasError) {
+                echo '<tr class="danger"><td colspan="9" style="padding: 5px 15px; background: #f2dede;">';
+                echo '<small><strong><i class="fa fa-exclamation-circle"></i> Error:</strong> ' . htmlspecialchars($msg->error) . '</small>';
+                echo '</td></tr>';
+            }
+        }
+
+        echo '</tbody></table>';
+
+        // Pagination
+        if ($totalPages > 1) {
+            echo '<div class="panel-footer">';
+            echo '<nav><ul class="pagination" style="margin:0;">';
+            for ($i = 1; $i <= $totalPages; $i++) {
+                $active = ($i === $page) ? 'active' : '';
+                $pageUrl = $modulelink . '&action=messages&page=' . $i . '&status=' . urlencode($filterStatus) . '&gateway_id=' . $filterGateway . '&date_from=' . $filterDateFrom . '&date_to=' . $filterDateTo . '&search=' . urlencode($filterSearch);
+                echo '<li class="' . $active . '"><a href="' . $pageUrl . '">' . $i . '</a></li>';
+            }
+            echo '</ul></nav>';
+            echo '</div>';
+        }
+    } else {
+        echo '<div class="text-center" style="padding: 40px;"><p class="text-muted"><i class="fa fa-inbox fa-3x"></i><br><br>No messages found matching your criteria.</p></div>';
+    }
+
+    echo '</div></div>';
+
+    // Message detail modal
+    echo '
+    <div class="modal fade" id="messageDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    <h4 class="modal-title"><i class="fa fa-envelope"></i> Message Details</h4>
+                </div>
+                <div class="modal-body" id="messageDetailContent">
+                    <div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>';
+
+    // JavaScript for viewing details
+    echo '
+    <script>
+    function viewMessageDetails(msgId) {
+        jQuery("#messageDetailContent").html("<div class=\"text-center\"><i class=\"fa fa-spinner fa-spin fa-2x\"></i> Loading...</div>");
+        jQuery("#messageDetailModal").modal("show");
+
+        jQuery.ajax({
+            url: "addonmodules.php?module=sms_suite&action=ajax_message_detail&id=" + msgId,
+            success: function(data) {
+                jQuery("#messageDetailContent").html(data);
+            },
+            error: function() {
+                jQuery("#messageDetailContent").html("<div class=\"alert alert-danger\">Failed to load message details.</div>");
+            }
+        });
+    }
+
+    function retryMessage(msgId) {
+        if (!confirm("Retry sending this message?")) return;
+
+        jQuery.ajax({
+            url: "addonmodules.php?module=sms_suite&action=ajax_retry_message&id=" + msgId,
+            method: "POST",
+            success: function(data) {
+                alert(data.message || "Message queued for retry");
+                location.reload();
+            },
+            error: function() {
+                alert("Failed to retry message");
+            }
+        });
+    }
+    </script>';
+
     echo '</div>';
 }
 
 /**
- * Templates page (stub)
+ * Templates page - Notification Template Management
  */
 function sms_suite_admin_templates($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
+    $message = '';
+    $messageType = '';
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (isset($_POST['save_template'])) {
+            $data = [
+                'name' => trim($_POST['name']),
+                'category' => $_POST['category'] ?? 'general',
+                'type' => $_POST['type'] ?? 'sms',
+                'trigger_hook' => $_POST['trigger_hook'] ?? null,
+                'content' => $_POST['content'],
+                'variables' => $_POST['variables'] ?? null,
+                'status' => isset($_POST['status']) ? 1 : 0,
+                'send_to_client' => isset($_POST['send_to_client']) ? 1 : 0,
+                'send_to_admin' => isset($_POST['send_to_admin']) ? 1 : 0,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            if (!empty($_POST['template_id'])) {
+                Capsule::table('mod_sms_notification_templates')->where('id', (int)$_POST['template_id'])->update($data);
+                $message = 'Template updated successfully.';
+            } else {
+                $data['created_at'] = date('Y-m-d H:i:s');
+                Capsule::table('mod_sms_notification_templates')->insert($data);
+                $message = 'Template created successfully.';
+            }
+            $messageType = 'success';
+        }
+
+        if (isset($_POST['delete_template'])) {
+            Capsule::table('mod_sms_notification_templates')->where('id', (int)$_POST['template_id'])->delete();
+            $message = 'Template deleted.';
+            $messageType = 'success';
+        }
+    }
+
+    // Get templates
+    $templates = Capsule::table('mod_sms_notification_templates')->orderBy('category')->orderBy('name')->get();
+
+    // Available WHMCS hooks for triggers
+    $availableHooks = [
+        'ClientAdd' => 'New Client Registration',
+        'ClientLogin' => 'Client Login',
+        'InvoiceCreated' => 'Invoice Created',
+        'InvoicePaid' => 'Invoice Paid',
+        'InvoicePaymentReminder' => 'Invoice Payment Reminder',
+        'InvoiceCancelled' => 'Invoice Cancelled',
+        'OrderPaid' => 'Order Paid',
+        'AfterModuleCreate' => 'Service Activated',
+        'AfterModuleSuspend' => 'Service Suspended',
+        'AfterModuleUnsuspend' => 'Service Unsuspended',
+        'AfterModuleTerminate' => 'Service Terminated',
+        'TicketOpen' => 'Ticket Opened',
+        'TicketAdminReply' => 'Ticket Admin Reply',
+        'TicketStatusChange' => 'Ticket Status Changed',
+        'DomainRegister' => 'Domain Registered',
+        'DomainTransferCompleted' => 'Domain Transfer Complete',
+        'DomainRenewal' => 'Domain Renewed',
+        'DomainExpiryNotice' => 'Domain Expiry Notice',
+    ];
+
+    // Template categories
+    $categories = ['general' => 'General', 'billing' => 'Billing', 'support' => 'Support', 'services' => 'Services', 'domains' => 'Domains', 'marketing' => 'Marketing'];
+
+    // Available variables
+    $variableGroups = [
+        'Client' => ['{client_name}', '{client_firstname}', '{client_lastname}', '{client_email}', '{client_phone}', '{client_company}'],
+        'Invoice' => ['{invoice_id}', '{invoice_num}', '{invoice_total}', '{invoice_due_date}', '{invoice_status}'],
+        'Service' => ['{service_name}', '{service_domain}', '{service_status}', '{service_next_due}'],
+        'Ticket' => ['{ticket_id}', '{ticket_subject}', '{ticket_status}', '{ticket_department}'],
+        'Domain' => ['{domain_name}', '{domain_expiry}', '{domain_status}'],
+        'System' => ['{company_name}', '{whmcs_url}', '{date}', '{time}'],
+    ];
+
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">' . $lang['templates'] . '</h3></div>';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title" style="display: inline-block;"><i class="fa fa-file-text"></i> ' . $lang['templates'] . '</h3>';
+    echo '<button class="btn btn-success btn-sm pull-right" onclick="openTemplateModal()"><i class="fa fa-plus"></i> New Template</button>';
+    echo '</div>';
     echo '<div class="panel-body">';
-    echo '<div class="alert alert-info">Template management will be implemented in Slice 11.</div>';
+
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    // Templates table
+    echo '<div class="table-responsive">';
+    echo '<table class="table table-striped">';
+    echo '<thead><tr><th>Name</th><th>Category</th><th>Trigger</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>';
+    echo '<tbody>';
+
+    foreach ($templates as $tpl) {
+        $statusLabel = $tpl->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>';
+        $triggerName = $availableHooks[$tpl->trigger_hook] ?? ($tpl->trigger_hook ?: 'Manual');
+
+        echo '<tr>';
+        echo '<td><strong>' . htmlspecialchars($tpl->name) . '</strong></td>';
+        echo '<td>' . ucfirst($tpl->category) . '</td>';
+        echo '<td><small>' . htmlspecialchars($triggerName) . '</small></td>';
+        echo '<td>' . strtoupper($tpl->type) . '</td>';
+        echo '<td>' . $statusLabel . '</td>';
+        echo '<td>';
+        echo '<button class="btn btn-xs btn-primary" onclick=\'editTemplate(' . json_encode($tpl) . ')\'><i class="fa fa-edit"></i></button> ';
+        echo '<button class="btn btn-xs btn-danger" onclick="deleteTemplate(' . $tpl->id . ')"><i class="fa fa-trash"></i></button>';
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    if (count($templates) == 0) {
+        echo '<tr><td colspan="6" class="text-center text-muted">No templates found. Create your first notification template.</td></tr>';
+    }
+
+    echo '</tbody></table></div>';
+
+    // Variables Reference
+    echo '<hr><h4>Available Variables</h4>';
+    echo '<div class="row">';
+    foreach ($variableGroups as $group => $vars) {
+        echo '<div class="col-md-2"><strong>' . $group . '</strong><br>';
+        foreach ($vars as $v) {
+            echo '<code style="font-size: 10px;">' . $v . '</code><br>';
+        }
+        echo '</div>';
+    }
     echo '</div>';
+
+    echo '</div></div>';
+
+    // Template Modal
+    echo '<div class="modal fade" id="templateModal" tabindex="-1">';
+    echo '<div class="modal-dialog modal-lg"><div class="modal-content">';
+    echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
+    echo '<h4 class="modal-title" id="templateModalTitle">New Template</h4></div>';
+    echo '<form method="post">';
+    echo '<div class="modal-body">';
+    echo '<input type="hidden" name="template_id" id="tpl_id">';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-6"><div class="form-group"><label>Template Name *</label>';
+    echo '<input type="text" name="name" id="tpl_name" class="form-control" required></div></div>';
+    echo '<div class="col-md-3"><div class="form-group"><label>Category</label>';
+    echo '<select name="category" id="tpl_category" class="form-control">';
+    foreach ($categories as $k => $v) {
+        echo '<option value="' . $k . '">' . $v . '</option>';
+    }
+    echo '</select></div></div>';
+    echo '<div class="col-md-3"><div class="form-group"><label>Type</label>';
+    echo '<select name="type" id="tpl_type" class="form-control">';
+    echo '<option value="sms">SMS</option><option value="whatsapp">WhatsApp</option>';
+    echo '</select></div></div>';
     echo '</div>';
+
+    echo '<div class="form-group"><label>Trigger Hook (WHMCS Event)</label>';
+    echo '<select name="trigger_hook" id="tpl_trigger" class="form-control"><option value="">Manual Only</option>';
+    foreach ($availableHooks as $hook => $label) {
+        echo '<option value="' . $hook . '">' . $label . ' (' . $hook . ')</option>';
+    }
+    echo '</select></div>';
+
+    echo '<div class="form-group"><label>Message Content *</label>';
+    echo '<textarea name="content" id="tpl_content" class="form-control" rows="5" required placeholder="Use variables like {client_name}, {invoice_total}, etc."></textarea>';
+    echo '<small class="text-muted">Character count: <span id="charCount">0</span> | SMS segments: <span id="segmentCount">1</span></small></div>';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-4"><div class="checkbox"><label><input type="checkbox" name="status" id="tpl_status" value="1" checked> Active</label></div></div>';
+    echo '<div class="col-md-4"><div class="checkbox"><label><input type="checkbox" name="send_to_client" id="tpl_client" value="1" checked> Send to Client</label></div></div>';
+    echo '<div class="col-md-4"><div class="checkbox"><label><input type="checkbox" name="send_to_admin" id="tpl_admin" value="1"> Send to Admin</label></div></div>';
+    echo '</div>';
+
+    echo '</div>';
+    echo '<div class="modal-footer">';
+    echo '<button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>';
+    echo '<button type="submit" name="save_template" class="btn btn-primary">Save Template</button>';
+    echo '</div></form></div></div></div>';
+
+    // Delete form
+    echo '<form method="post" id="deleteForm"><input type="hidden" name="template_id" id="delete_id"><input type="hidden" name="delete_template" value="1"></form>';
+
+    // JavaScript
+    echo '<script>
+    function openTemplateModal() {
+        document.getElementById("templateModalTitle").textContent = "New Template";
+        document.getElementById("tpl_id").value = "";
+        document.getElementById("tpl_name").value = "";
+        document.getElementById("tpl_category").value = "general";
+        document.getElementById("tpl_type").value = "sms";
+        document.getElementById("tpl_trigger").value = "";
+        document.getElementById("tpl_content").value = "";
+        document.getElementById("tpl_status").checked = true;
+        document.getElementById("tpl_client").checked = true;
+        document.getElementById("tpl_admin").checked = false;
+        $("#templateModal").modal("show");
+    }
+
+    function editTemplate(tpl) {
+        document.getElementById("templateModalTitle").textContent = "Edit Template";
+        document.getElementById("tpl_id").value = tpl.id;
+        document.getElementById("tpl_name").value = tpl.name;
+        document.getElementById("tpl_category").value = tpl.category;
+        document.getElementById("tpl_type").value = tpl.type;
+        document.getElementById("tpl_trigger").value = tpl.trigger_hook || "";
+        document.getElementById("tpl_content").value = tpl.content;
+        document.getElementById("tpl_status").checked = tpl.status == 1;
+        document.getElementById("tpl_client").checked = tpl.send_to_client == 1;
+        document.getElementById("tpl_admin").checked = tpl.send_to_admin == 1;
+        updateCharCount();
+        $("#templateModal").modal("show");
+    }
+
+    function deleteTemplate(id) {
+        if (confirm("Are you sure you want to delete this template?")) {
+            document.getElementById("delete_id").value = id;
+            document.getElementById("deleteForm").submit();
+        }
+    }
+
+    function updateCharCount() {
+        var content = document.getElementById("tpl_content").value;
+        var len = content.length;
+        document.getElementById("charCount").textContent = len;
+        var segments = len <= 160 ? 1 : Math.ceil(len / 153);
+        document.getElementById("segmentCount").textContent = segments;
+    }
+
+    document.getElementById("tpl_content").addEventListener("input", updateCharCount);
+    </script>';
+
     echo '</div>';
 }
 
 /**
- * Automation page (stub)
+ * Automation page - SMS Automation Rules
  */
 function sms_suite_admin_automation($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
+    $message = '';
+    $messageType = '';
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (isset($_POST['save_automation'])) {
+            $data = [
+                'name' => trim($_POST['name']),
+                'trigger_type' => $_POST['trigger_type'],
+                'trigger_config' => json_encode($_POST['trigger_config'] ?? []),
+                'message_template' => $_POST['message_template'],
+                'sender_id' => $_POST['sender_id'] ?: null,
+                'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
+                'status' => $_POST['status'] ?? 'active',
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            if (!empty($_POST['automation_id'])) {
+                Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->update($data);
+                $message = 'Automation updated successfully.';
+            } else {
+                $data['created_at'] = date('Y-m-d H:i:s');
+                $data['run_count'] = 0;
+                Capsule::table('mod_sms_automations')->insert($data);
+                $message = 'Automation created successfully.';
+            }
+            $messageType = 'success';
+        }
+
+        if (isset($_POST['delete_automation'])) {
+            Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->delete();
+            $message = 'Automation deleted.';
+            $messageType = 'success';
+        }
+
+        if (isset($_POST['toggle_status'])) {
+            $auto = Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->first();
+            $newStatus = $auto->status === 'active' ? 'inactive' : 'active';
+            Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->update(['status' => $newStatus]);
+            $message = 'Automation ' . ($newStatus === 'active' ? 'activated' : 'deactivated') . '.';
+            $messageType = 'success';
+        }
+    }
+
+    // Get automations
+    $automations = Capsule::table('mod_sms_automations')
+        ->leftJoin('mod_sms_gateways', 'mod_sms_automations.gateway_id', '=', 'mod_sms_gateways.id')
+        ->select('mod_sms_automations.*', 'mod_sms_gateways.name as gateway_name')
+        ->orderBy('mod_sms_automations.name')
+        ->get();
+
+    // Get gateways
+    $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
+
+    // Available trigger types
+    $triggerTypes = [
+        'whmcs_hook' => ['name' => 'WHMCS Event Hook', 'description' => 'Triggered by WHMCS system events'],
+        'invoice_overdue' => ['name' => 'Invoice Overdue', 'description' => 'When invoice becomes overdue by X days'],
+        'service_expiry' => ['name' => 'Service Expiry Warning', 'description' => 'X days before service expires'],
+        'domain_expiry' => ['name' => 'Domain Expiry Warning', 'description' => 'X days before domain expires'],
+        'credit_low' => ['name' => 'Low Credit Balance', 'description' => 'When credit balance falls below threshold'],
+        'birthday' => ['name' => 'Client Birthday', 'description' => 'On client birthday (requires date of birth field)'],
+        'scheduled' => ['name' => 'Scheduled Time', 'description' => 'Run at specific times/dates'],
+    ];
+
+    // WHMCS hooks
+    $whmcsHooks = [
+        'ClientAdd' => 'New Client Registration',
+        'ClientLogin' => 'Client Login',
+        'InvoiceCreated' => 'Invoice Created',
+        'InvoicePaid' => 'Invoice Paid',
+        'InvoiceUnpaid' => 'Invoice Unpaid',
+        'OrderPaid' => 'Order Paid',
+        'AfterModuleCreate' => 'Service Activated',
+        'AfterModuleSuspend' => 'Service Suspended',
+        'AfterModuleUnsuspend' => 'Service Unsuspended',
+        'AfterModuleTerminate' => 'Service Terminated',
+        'TicketOpen' => 'Ticket Opened',
+        'TicketAdminReply' => 'Admin Replied to Ticket',
+        'TicketUserReply' => 'Client Replied to Ticket',
+    ];
+
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">' . $lang['automation'] . '</h3></div>';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title" style="display: inline-block;"><i class="fa fa-magic"></i> ' . $lang['automation'] . '</h3>';
+    echo '<button class="btn btn-success btn-sm pull-right" onclick="openAutomationModal()"><i class="fa fa-plus"></i> New Automation</button>';
+    echo '</div>';
     echo '<div class="panel-body">';
-    echo '<div class="alert alert-info">Automation triggers will be implemented in Slice 11.</div>';
+
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    // Automations table
+    echo '<div class="table-responsive">';
+    echo '<table class="table table-striped">';
+    echo '<thead><tr><th>Name</th><th>Trigger</th><th>Gateway</th><th>Run Count</th><th>Last Run</th><th>Status</th><th>Actions</th></tr></thead>';
+    echo '<tbody>';
+
+    foreach ($automations as $auto) {
+        $statusLabel = $auto->status === 'active'
+            ? '<span class="label label-success">Active</span>'
+            : '<span class="label label-default">Inactive</span>';
+        $triggerName = $triggerTypes[$auto->trigger_type]['name'] ?? $auto->trigger_type;
+        $lastRun = $auto->last_run ? date('M d, Y H:i', strtotime($auto->last_run)) : 'Never';
+
+        echo '<tr>';
+        echo '<td><strong>' . htmlspecialchars($auto->name) . '</strong></td>';
+        echo '<td>' . htmlspecialchars($triggerName) . '</td>';
+        echo '<td>' . htmlspecialchars($auto->gateway_name ?? 'Default') . '</td>';
+        echo '<td><span class="badge">' . number_format($auto->run_count) . '</span></td>';
+        echo '<td><small>' . $lastRun . '</small></td>';
+        echo '<td>' . $statusLabel . '</td>';
+        echo '<td>';
+        echo '<button class="btn btn-xs btn-primary" onclick=\'editAutomation(' . json_encode($auto) . ')\'><i class="fa fa-edit"></i></button> ';
+        echo '<form method="post" style="display:inline;"><input type="hidden" name="automation_id" value="' . $auto->id . '">';
+        echo '<button type="submit" name="toggle_status" class="btn btn-xs btn-warning"><i class="fa fa-power-off"></i></button></form> ';
+        echo '<button class="btn btn-xs btn-danger" onclick="deleteAutomation(' . $auto->id . ')"><i class="fa fa-trash"></i></button>';
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    if (count($automations) == 0) {
+        echo '<tr><td colspan="7" class="text-center text-muted">No automations configured. Create your first automation rule.</td></tr>';
+    }
+
+    echo '</tbody></table></div>';
+
+    // Recent automation logs
+    $recentLogs = Capsule::table('mod_sms_automation_logs')
+        ->leftJoin('mod_sms_automations', 'mod_sms_automation_logs.automation_id', '=', 'mod_sms_automations.id')
+        ->select('mod_sms_automation_logs.*', 'mod_sms_automations.name as automation_name')
+        ->orderBy('mod_sms_automation_logs.created_at', 'desc')
+        ->limit(10)
+        ->get();
+
+    if (count($recentLogs) > 0) {
+        echo '<hr><h4>Recent Automation Activity</h4>';
+        echo '<table class="table table-sm">';
+        echo '<thead><tr><th>Automation</th><th>Status</th><th>Error</th><th>Date</th></tr></thead><tbody>';
+        foreach ($recentLogs as $log) {
+            $logStatus = $log->status === 'sent'
+                ? '<span class="label label-success">Sent</span>'
+                : '<span class="label label-danger">' . ucfirst($log->status) . '</span>';
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars($log->automation_name ?? 'Unknown') . '</td>';
+            echo '<td>' . $logStatus . '</td>';
+            echo '<td><small>' . htmlspecialchars($log->error ?: '-') . '</small></td>';
+            echo '<td><small>' . date('M d H:i', strtotime($log->created_at)) . '</small></td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
+
+    echo '</div></div>';
+
+    // Automation Modal
+    echo '<div class="modal fade" id="automationModal" tabindex="-1">';
+    echo '<div class="modal-dialog modal-lg"><div class="modal-content">';
+    echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
+    echo '<h4 class="modal-title" id="automationModalTitle">New Automation</h4></div>';
+    echo '<form method="post">';
+    echo '<div class="modal-body">';
+    echo '<input type="hidden" name="automation_id" id="auto_id">';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-8"><div class="form-group"><label>Automation Name *</label>';
+    echo '<input type="text" name="name" id="auto_name" class="form-control" required></div></div>';
+    echo '<div class="col-md-4"><div class="form-group"><label>Status</label>';
+    echo '<select name="status" id="auto_status" class="form-control">';
+    echo '<option value="active">Active</option><option value="inactive">Inactive</option>';
+    echo '</select></div></div>';
     echo '</div>';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-6"><div class="form-group"><label>Trigger Type *</label>';
+    echo '<select name="trigger_type" id="auto_trigger" class="form-control" onchange="showTriggerConfig()">';
+    foreach ($triggerTypes as $key => $type) {
+        echo '<option value="' . $key . '">' . $type['name'] . '</option>';
+    }
+    echo '</select></div></div>';
+    echo '<div class="col-md-6"><div class="form-group"><label>Gateway</label>';
+    echo '<select name="gateway_id" id="auto_gateway" class="form-control"><option value="">Default Gateway</option>';
+    foreach ($gateways as $gw) {
+        echo '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . '</option>';
+    }
+    echo '</select></div></div>';
     echo '</div>';
+
+    // Trigger config section (dynamic)
+    echo '<div id="triggerConfigSection">';
+    echo '<div class="form-group" id="hookSelect" style="display:none;"><label>WHMCS Hook</label>';
+    echo '<select name="trigger_config[hook]" id="auto_hook" class="form-control">';
+    foreach ($whmcsHooks as $hook => $label) {
+        echo '<option value="' . $hook . '">' . $label . '</option>';
+    }
+    echo '</select></div>';
+    echo '<div class="form-group" id="daysInput" style="display:none;"><label>Days Before/After</label>';
+    echo '<input type="number" name="trigger_config[days]" id="auto_days" class="form-control" value="3" min="1"></div>';
+    echo '<div class="form-group" id="thresholdInput" style="display:none;"><label>Credit Threshold</label>';
+    echo '<input type="number" name="trigger_config[threshold]" id="auto_threshold" class="form-control" value="100" min="1"></div>';
+    echo '</div>';
+
+    echo '<div class="form-group"><label>Sender ID</label>';
+    echo '<input type="text" name="sender_id" id="auto_sender" class="form-control" placeholder="Leave blank for default"></div>';
+
+    echo '<div class="form-group"><label>Message Template *</label>';
+    echo '<textarea name="message_template" id="auto_message" class="form-control" rows="4" required placeholder="Use variables like {client_name}, {invoice_total}, etc."></textarea></div>';
+
+    echo '</div>';
+    echo '<div class="modal-footer">';
+    echo '<button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>';
+    echo '<button type="submit" name="save_automation" class="btn btn-primary">Save Automation</button>';
+    echo '</div></form></div></div></div>';
+
+    // Delete form
+    echo '<form method="post" id="deleteAutoForm"><input type="hidden" name="automation_id" id="delete_auto_id"><input type="hidden" name="delete_automation" value="1"></form>';
+
+    // JavaScript
+    echo '<script>
+    function showTriggerConfig() {
+        var type = document.getElementById("auto_trigger").value;
+        document.getElementById("hookSelect").style.display = (type === "whmcs_hook") ? "block" : "none";
+        document.getElementById("daysInput").style.display = (["invoice_overdue", "service_expiry", "domain_expiry"].includes(type)) ? "block" : "none";
+        document.getElementById("thresholdInput").style.display = (type === "credit_low") ? "block" : "none";
+    }
+
+    function openAutomationModal() {
+        document.getElementById("automationModalTitle").textContent = "New Automation";
+        document.getElementById("auto_id").value = "";
+        document.getElementById("auto_name").value = "";
+        document.getElementById("auto_trigger").value = "whmcs_hook";
+        document.getElementById("auto_status").value = "active";
+        document.getElementById("auto_gateway").value = "";
+        document.getElementById("auto_sender").value = "";
+        document.getElementById("auto_message").value = "";
+        showTriggerConfig();
+        $("#automationModal").modal("show");
+    }
+
+    function editAutomation(auto) {
+        document.getElementById("automationModalTitle").textContent = "Edit Automation";
+        document.getElementById("auto_id").value = auto.id;
+        document.getElementById("auto_name").value = auto.name;
+        document.getElementById("auto_trigger").value = auto.trigger_type;
+        document.getElementById("auto_status").value = auto.status;
+        document.getElementById("auto_gateway").value = auto.gateway_id || "";
+        document.getElementById("auto_sender").value = auto.sender_id || "";
+        document.getElementById("auto_message").value = auto.message_template;
+
+        var config = {};
+        try { config = JSON.parse(auto.trigger_config || "{}"); } catch(e) {}
+        if (config.hook) document.getElementById("auto_hook").value = config.hook;
+        if (config.days) document.getElementById("auto_days").value = config.days;
+        if (config.threshold) document.getElementById("auto_threshold").value = config.threshold;
+
+        showTriggerConfig();
+        $("#automationModal").modal("show");
+    }
+
+    function deleteAutomation(id) {
+        if (confirm("Are you sure you want to delete this automation?")) {
+            document.getElementById("delete_auto_id").value = id;
+            document.getElementById("deleteAutoForm").submit();
+        }
+    }
+
+    showTriggerConfig();
+    </script>';
+
     echo '</div>';
 }
 
 /**
- * Reports page (stub)
+ * Reports page - SMS Analytics and Statistics
  */
 function sms_suite_admin_reports($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
+
+    // Date range filter
+    $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
+    $dateTo = $_GET['date_to'] ?? date('Y-m-d');
+    $gatewayFilter = $_GET['gateway_id'] ?? '';
+
+    // Get gateways for filter
+    $gateways = Capsule::table('mod_sms_gateways')->orderBy('name')->get();
+
+    // Build base query conditions (with table prefix for JOINs)
+    $dateCondition = function ($query) use ($dateFrom, $dateTo) {
+        $query->whereDate('mod_sms_messages.created_at', '>=', $dateFrom)
+              ->whereDate('mod_sms_messages.created_at', '<=', $dateTo);
+    };
+
+    // Overall Statistics
+    $totalMessages = Capsule::table('mod_sms_messages')->where($dateCondition)->count();
+    $sentMessages = Capsule::table('mod_sms_messages')->where($dateCondition)->where('status', 'sent')->count();
+    $deliveredMessages = Capsule::table('mod_sms_messages')->where($dateCondition)->where('status', 'delivered')->count();
+    $failedMessages = Capsule::table('mod_sms_messages')->where($dateCondition)->where('status', 'failed')->count();
+    $totalCost = Capsule::table('mod_sms_messages')->where($dateCondition)->sum('cost');
+    $totalSegments = Capsule::table('mod_sms_messages')->where($dateCondition)->sum('segments');
+
+    // Delivery rate
+    $deliveryRate = $totalMessages > 0 ? round(($deliveredMessages / $totalMessages) * 100, 1) : 0;
+
+    // Messages by status
+    $statusStats = Capsule::table('mod_sms_messages')
+        ->select('status', Capsule::raw('COUNT(*) as count'))
+        ->where($dateCondition)
+        ->groupBy('status')
+        ->get();
+
+    // Messages by gateway
+    $gatewayStats = Capsule::table('mod_sms_messages')
+        ->leftJoin('mod_sms_gateways', 'mod_sms_messages.gateway_id', '=', 'mod_sms_gateways.id')
+        ->select('mod_sms_gateways.name', Capsule::raw('COUNT(*) as count'), Capsule::raw('SUM(mod_sms_messages.cost) as total_cost'))
+        ->where($dateCondition)
+        ->groupBy('mod_sms_messages.gateway_id', 'mod_sms_gateways.name')
+        ->get();
+
+    // Daily message volume (last 30 days)
+    $dailyStats = Capsule::table('mod_sms_messages')
+        ->select(Capsule::raw('DATE(mod_sms_messages.created_at) as date'), Capsule::raw('COUNT(*) as count'))
+        ->where($dateCondition)
+        ->groupBy(Capsule::raw('DATE(mod_sms_messages.created_at)'))
+        ->orderBy('date')
+        ->get();
+
+    // Top clients by volume
+    $topClients = Capsule::table('mod_sms_messages')
+        ->leftJoin('tblclients', 'mod_sms_messages.client_id', '=', 'tblclients.id')
+        ->select(
+            'mod_sms_messages.client_id',
+            'tblclients.firstname',
+            'tblclients.lastname',
+            'tblclients.companyname',
+            Capsule::raw('COUNT(*) as message_count'),
+            Capsule::raw('SUM(mod_sms_messages.cost) as total_cost')
+        )
+        ->where($dateCondition)
+        ->groupBy('mod_sms_messages.client_id', 'tblclients.firstname', 'tblclients.lastname', 'tblclients.companyname')
+        ->orderBy('message_count', 'desc')
+        ->limit(10)
+        ->get();
+
+    // Top destinations (countries)
+    $topDestinations = Capsule::table('mod_sms_messages')
+        ->select(Capsule::raw('LEFT(to_number, 3) as prefix'), Capsule::raw('COUNT(*) as count'))
+        ->where($dateCondition)
+        ->groupBy(Capsule::raw('LEFT(to_number, 3)'))
+        ->orderBy('count', 'desc')
+        ->limit(10)
+        ->get();
+
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">' . $lang['reports'] . '</h3></div>';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-bar-chart"></i> ' . $lang['reports'] . '</h3></div>';
     echo '<div class="panel-body">';
-    echo '<div class="alert alert-info">Reports will be implemented in Slice 10.</div>';
+
+    // Date filter form
+    echo '<form method="get" class="form-inline" style="margin-bottom: 20px;">';
+    echo '<input type="hidden" name="module" value="sms_suite">';
+    echo '<input type="hidden" name="action" value="reports">';
+    echo '<div class="form-group"><label>From:</label> <input type="date" name="date_from" class="form-control" value="' . $dateFrom . '"></div> ';
+    echo '<div class="form-group"><label>To:</label> <input type="date" name="date_to" class="form-control" value="' . $dateTo . '"></div> ';
+    echo '<div class="form-group"><label>Gateway:</label> <select name="gateway_id" class="form-control"><option value="">All Gateways</option>';
+    foreach ($gateways as $gw) {
+        $sel = ($gatewayFilter == $gw->id) ? 'selected' : '';
+        echo '<option value="' . $gw->id . '" ' . $sel . '>' . htmlspecialchars($gw->name) . '</option>';
+    }
+    echo '</select></div> ';
+    echo '<button type="submit" class="btn btn-primary"><i class="fa fa-filter"></i> Filter</button>';
+    echo '</form>';
+
+    // Summary Cards
+    echo '<div class="row">';
+    echo '<div class="col-md-2"><div class="panel panel-info"><div class="panel-heading">Total Messages</div>';
+    echo '<div class="panel-body text-center"><h2>' . number_format($totalMessages) . '</h2></div></div></div>';
+    echo '<div class="col-md-2"><div class="panel panel-success"><div class="panel-heading">Delivered</div>';
+    echo '<div class="panel-body text-center"><h2>' . number_format($deliveredMessages) . '</h2></div></div></div>';
+    echo '<div class="col-md-2"><div class="panel panel-danger"><div class="panel-heading">Failed</div>';
+    echo '<div class="panel-body text-center"><h2>' . number_format($failedMessages) . '</h2></div></div></div>';
+    echo '<div class="col-md-2"><div class="panel panel-warning"><div class="panel-heading">Delivery Rate</div>';
+    echo '<div class="panel-body text-center"><h2>' . $deliveryRate . '%</h2></div></div></div>';
+    echo '<div class="col-md-2"><div class="panel panel-default"><div class="panel-heading">Total Segments</div>';
+    echo '<div class="panel-body text-center"><h2>' . number_format($totalSegments) . '</h2></div></div></div>';
+    echo '<div class="col-md-2"><div class="panel panel-primary"><div class="panel-heading">Total Cost</div>';
+    echo '<div class="panel-body text-center"><h2>' . number_format($totalCost, 2) . '</h2></div></div></div>';
     echo '</div>';
+
+    // Charts row
+    echo '<div class="row">';
+
+    // Daily Volume Chart
+    echo '<div class="col-md-8">';
+    echo '<div class="panel panel-default"><div class="panel-heading"><h4>Daily Message Volume</h4></div>';
+    echo '<div class="panel-body"><canvas id="dailyChart" height="100"></canvas></div></div>';
     echo '</div>';
+
+    // Status Breakdown
+    echo '<div class="col-md-4">';
+    echo '<div class="panel panel-default"><div class="panel-heading"><h4>Status Breakdown</h4></div>';
+    echo '<div class="panel-body"><canvas id="statusChart" height="200"></canvas></div></div>';
+    echo '</div>';
+
+    echo '</div>';
+
+    // Tables row
+    echo '<div class="row">';
+
+    // Top Clients
+    echo '<div class="col-md-6">';
+    echo '<div class="panel panel-default"><div class="panel-heading"><h4>Top 10 Clients by Volume</h4></div>';
+    echo '<div class="panel-body"><table class="table table-striped table-sm">';
+    echo '<thead><tr><th>Client</th><th>Messages</th><th>Cost</th></tr></thead><tbody>';
+    foreach ($topClients as $client) {
+        $clientName = trim($client->firstname . ' ' . $client->lastname);
+        if (empty($clientName)) $clientName = 'Client #' . $client->client_id;
+        echo '<tr><td>' . htmlspecialchars($clientName) . '</td>';
+        echo '<td>' . number_format($client->message_count) . '</td>';
+        echo '<td>' . number_format($client->total_cost, 2) . '</td></tr>';
+    }
+    echo '</tbody></table></div></div>';
+    echo '</div>';
+
+    // Gateway Performance
+    echo '<div class="col-md-6">';
+    echo '<div class="panel panel-default"><div class="panel-heading"><h4>Gateway Performance</h4></div>';
+    echo '<div class="panel-body"><table class="table table-striped table-sm">';
+    echo '<thead><tr><th>Gateway</th><th>Messages</th><th>Cost</th></tr></thead><tbody>';
+    foreach ($gatewayStats as $gw) {
+        $gwName = $gw->name ?? 'Unknown';
+        echo '<tr><td>' . htmlspecialchars($gwName) . '</td>';
+        echo '<td>' . number_format($gw->count) . '</td>';
+        echo '<td>' . number_format($gw->total_cost ?? 0, 2) . '</td></tr>';
+    }
+    echo '</tbody></table></div></div>';
+    echo '</div>';
+
+    echo '</div>';
+
+    echo '</div></div>';
+
+    // Chart.js
+    $dailyLabels = [];
+    $dailyData = [];
+    foreach ($dailyStats as $day) {
+        $dailyLabels[] = date('M d', strtotime($day->date));
+        $dailyData[] = $day->count;
+    }
+
+    $statusLabels = [];
+    $statusData = [];
+    $statusColors = ['delivered' => '#27ae60', 'sent' => '#3498db', 'failed' => '#e74c3c', 'queued' => '#f39c12', 'pending' => '#95a5a6'];
+    foreach ($statusStats as $stat) {
+        $statusLabels[] = ucfirst($stat->status);
+        $statusData[] = $stat->count;
+    }
+
+    echo '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>';
+    echo '<script>
+    new Chart(document.getElementById("dailyChart"), {
+        type: "line",
+        data: {
+            labels: ' . json_encode($dailyLabels) . ',
+            datasets: [{
+                label: "Messages",
+                data: ' . json_encode($dailyData) . ',
+                borderColor: "#3498db",
+                backgroundColor: "rgba(52, 152, 219, 0.1)",
+                fill: true,
+                tension: 0.3
+            }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+
+    new Chart(document.getElementById("statusChart"), {
+        type: "doughnut",
+        data: {
+            labels: ' . json_encode($statusLabels) . ',
+            datasets: [{
+                data: ' . json_encode($statusData) . ',
+                backgroundColor: ["#27ae60", "#3498db", "#e74c3c", "#f39c12", "#95a5a6"]
+            }]
+        },
+        options: { responsive: true }
+    });
+    </script>';
+
     echo '</div>';
 }
 
@@ -1050,16 +2694,263 @@ function sms_suite_admin_settings($vars, $lang)
 }
 
 /**
- * Clients page (stub)
+ * Clients page - Per-client SMS settings
  */
 function sms_suite_admin_clients($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
+    $message = '';
+    $messageType = '';
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (isset($_POST['save_client_settings'])) {
+            $clientId = (int)$_POST['client_id'];
+            $settings = [
+                'billing_mode' => $_POST['billing_mode'] ?? 'per_segment',
+                'default_gateway_id' => !empty($_POST['default_gateway_id']) ? (int)$_POST['default_gateway_id'] : null,
+                'assigned_sender_id' => $_POST['assigned_sender_id'] ?? null,
+                'monthly_limit' => !empty($_POST['monthly_limit']) ? (int)$_POST['monthly_limit'] : null,
+                'api_enabled' => isset($_POST['api_enabled']) ? 1 : 0,
+                'accept_sms' => isset($_POST['accept_sms']) ? 1 : 0,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            $existing = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
+            if ($existing) {
+                Capsule::table('mod_sms_settings')->where('client_id', $clientId)->update($settings);
+            } else {
+                $settings['client_id'] = $clientId;
+                $settings['created_at'] = date('Y-m-d H:i:s');
+                Capsule::table('mod_sms_settings')->insert($settings);
+            }
+            $message = 'Client settings saved successfully.';
+            $messageType = 'success';
+        }
+
+        if (isset($_POST['add_credits'])) {
+            $clientId = (int)$_POST['client_id'];
+            $credits = (int)$_POST['credits'];
+            $description = $_POST['description'] ?? 'Admin credit adjustment';
+
+            // Update or create credit balance
+            $balance = Capsule::table('mod_sms_credit_balance')->where('client_id', $clientId)->first();
+            if ($balance) {
+                Capsule::table('mod_sms_credit_balance')->where('client_id', $clientId)->update([
+                    'total_credits' => $balance->total_credits + $credits,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+                $newBalance = $balance->total_credits + $credits - $balance->used_credits;
+            } else {
+                Capsule::table('mod_sms_credit_balance')->insert([
+                    'client_id' => $clientId,
+                    'total_credits' => max(0, $credits),
+                    'used_credits' => 0,
+                    'created_at' => date('Y-m-d H:i:s'),
+                ]);
+                $newBalance = max(0, $credits);
+            }
+
+            // Log transaction
+            Capsule::table('mod_sms_credit_transactions')->insert([
+                'client_id' => $clientId,
+                'type' => $credits > 0 ? 'admin_add' : 'admin_deduct',
+                'credits' => $credits,
+                'balance_after' => $newBalance,
+                'description' => $description,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $message = 'Credits adjusted successfully. New balance: ' . $newBalance;
+            $messageType = 'success';
+        }
+    }
+
+    // Get search/filter
+    $search = $_GET['search'] ?? '';
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $perPage = 25;
+
+    // Build query
+    $query = Capsule::table('tblclients')
+        ->leftJoin('mod_sms_settings', 'tblclients.id', '=', 'mod_sms_settings.client_id')
+        ->leftJoin('mod_sms_credit_balance', 'tblclients.id', '=', 'mod_sms_credit_balance.client_id')
+        ->select([
+            'tblclients.id',
+            'tblclients.firstname',
+            'tblclients.lastname',
+            'tblclients.companyname',
+            'tblclients.email',
+            'tblclients.phonenumber',
+            'mod_sms_settings.billing_mode',
+            'mod_sms_settings.api_enabled',
+            'mod_sms_settings.accept_sms',
+            'mod_sms_settings.monthly_limit',
+            'mod_sms_settings.monthly_used',
+            Capsule::raw('COALESCE(mod_sms_credit_balance.total_credits, 0) - COALESCE(mod_sms_credit_balance.used_credits, 0) as credit_balance'),
+        ]);
+
+    if (!empty($search)) {
+        $query->where(function ($q) use ($search) {
+            $q->where('tblclients.firstname', 'LIKE', "%{$search}%")
+              ->orWhere('tblclients.lastname', 'LIKE', "%{$search}%")
+              ->orWhere('tblclients.email', 'LIKE', "%{$search}%")
+              ->orWhere('tblclients.companyname', 'LIKE', "%{$search}%");
+        });
+    }
+
+    $total = $query->count();
+    $clients = $query->orderBy('tblclients.firstname')->skip(($page - 1) * $perPage)->take($perPage)->get();
+    $totalPages = ceil($total / $perPage);
+
+    // Get gateways for dropdown
+    $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
+
+    // Get sender IDs for dropdown
+    $senderIds = Capsule::table('mod_sms_sender_ids')->where('status', 'active')->orderBy('sender_id')->get();
+
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">Client Settings</h3></div>';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-users"></i> Client SMS Settings</h3></div>';
     echo '<div class="panel-body">';
-    echo '<div class="alert alert-info">Per-client settings will be implemented in Slice 6.</div>';
+
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    // Search form
+    echo '<form method="get" class="form-inline" style="margin-bottom: 15px;">';
+    echo '<input type="hidden" name="module" value="sms_suite">';
+    echo '<input type="hidden" name="action" value="clients">';
+    echo '<div class="form-group">';
+    echo '<input type="text" name="search" class="form-control" placeholder="Search clients..." value="' . htmlspecialchars($search) . '">';
+    echo '</div> ';
+    echo '<button type="submit" class="btn btn-default"><i class="fa fa-search"></i> Search</button>';
+    echo '</form>';
+
+    echo '<div class="table-responsive">';
+    echo '<table class="table table-striped table-hover">';
+    echo '<thead><tr>';
+    echo '<th>Client</th>';
+    echo '<th>Email</th>';
+    echo '<th>Phone</th>';
+    echo '<th>Credits</th>';
+    echo '<th>Billing Mode</th>';
+    echo '<th>API</th>';
+    echo '<th>SMS Opt-in</th>';
+    echo '<th>Actions</th>';
+    echo '</tr></thead>';
+    echo '<tbody>';
+
+    foreach ($clients as $client) {
+        $name = trim($client->firstname . ' ' . $client->lastname);
+        if (!empty($client->companyname)) {
+            $name .= ' (' . $client->companyname . ')';
+        }
+        $apiStatus = $client->api_enabled ? '<span class="label label-success">Yes</span>' : '<span class="label label-default">No</span>';
+        $smsStatus = $client->accept_sms ? '<span class="label label-success">Yes</span>' : '<span class="label label-warning">No</span>';
+        $creditBalance = $client->credit_balance ?? 0;
+
+        echo '<tr>';
+        echo '<td><strong>' . htmlspecialchars($name) . '</strong></td>';
+        echo '<td>' . htmlspecialchars($client->email) . '</td>';
+        echo '<td>' . htmlspecialchars($client->phonenumber) . '</td>';
+        echo '<td><span class="badge">' . number_format($creditBalance) . '</span></td>';
+        echo '<td>' . ucfirst(str_replace('_', ' ', $client->billing_mode ?? 'per_segment')) . '</td>';
+        echo '<td>' . $apiStatus . '</td>';
+        echo '<td>' . $smsStatus . '</td>';
+        echo '<td>';
+        echo '<button class="btn btn-xs btn-primary" onclick="editClient(' . $client->id . ')"><i class="fa fa-edit"></i></button> ';
+        echo '<button class="btn btn-xs btn-success" onclick="addCredits(' . $client->id . ')"><i class="fa fa-plus"></i></button>';
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    if (count($clients) == 0) {
+        echo '<tr><td colspan="8" class="text-center text-muted">No clients found.</td></tr>';
+    }
+
+    echo '</tbody></table>';
     echo '</div>';
+
+    // Pagination
+    if ($totalPages > 1) {
+        echo '<nav><ul class="pagination">';
+        for ($i = 1; $i <= $totalPages; $i++) {
+            $active = ($i == $page) ? 'active' : '';
+            echo '<li class="' . $active . '"><a href="' . $modulelink . '&action=clients&page=' . $i . '&search=' . urlencode($search) . '">' . $i . '</a></li>';
+        }
+        echo '</ul></nav>';
+    }
+
+    echo '</div></div>';
+
+    // Edit Client Modal
+    echo '<div class="modal fade" id="editClientModal" tabindex="-1">';
+    echo '<div class="modal-dialog"><div class="modal-content">';
+    echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
+    echo '<h4 class="modal-title">Edit Client SMS Settings</h4></div>';
+    echo '<form method="post">';
+    echo '<div class="modal-body">';
+    echo '<input type="hidden" name="client_id" id="edit_client_id">';
+    echo '<div class="form-group"><label>Billing Mode</label>';
+    echo '<select name="billing_mode" id="edit_billing_mode" class="form-control">';
+    echo '<option value="per_message">Per Message</option>';
+    echo '<option value="per_segment">Per Segment</option>';
+    echo '<option value="wallet">Wallet</option>';
+    echo '<option value="plan">Plan/Package</option>';
+    echo '</select></div>';
+    echo '<div class="form-group"><label>Default Gateway</label>';
+    echo '<select name="default_gateway_id" id="edit_gateway" class="form-control"><option value="">-- Use System Default --</option>';
+    foreach ($gateways as $gw) {
+        echo '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . '</option>';
+    }
+    echo '</select></div>';
+    echo '<div class="form-group"><label>Assigned Sender ID</label>';
+    echo '<select name="assigned_sender_id" id="edit_sender" class="form-control"><option value="">-- None --</option>';
+    foreach ($senderIds as $sid) {
+        echo '<option value="' . htmlspecialchars($sid->sender_id) . '">' . htmlspecialchars($sid->sender_id) . '</option>';
+    }
+    echo '</select></div>';
+    echo '<div class="form-group"><label>Monthly Limit (0 = unlimited)</label>';
+    echo '<input type="number" name="monthly_limit" id="edit_limit" class="form-control" min="0"></div>';
+    echo '<div class="checkbox"><label><input type="checkbox" name="api_enabled" id="edit_api" value="1"> API Access Enabled</label></div>';
+    echo '<div class="checkbox"><label><input type="checkbox" name="accept_sms" id="edit_sms" value="1"> SMS Notifications Enabled</label></div>';
     echo '</div>';
+    echo '<div class="modal-footer">';
+    echo '<button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>';
+    echo '<button type="submit" name="save_client_settings" class="btn btn-primary">Save Settings</button>';
+    echo '</div></form></div></div></div>';
+
+    // Add Credits Modal
+    echo '<div class="modal fade" id="addCreditsModal" tabindex="-1">';
+    echo '<div class="modal-dialog"><div class="modal-content">';
+    echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
+    echo '<h4 class="modal-title">Adjust Client Credits</h4></div>';
+    echo '<form method="post">';
+    echo '<div class="modal-body">';
+    echo '<input type="hidden" name="client_id" id="credit_client_id">';
+    echo '<div class="form-group"><label>Credits to Add/Remove</label>';
+    echo '<input type="number" name="credits" class="form-control" placeholder="Enter positive to add, negative to remove" required></div>';
+    echo '<div class="form-group"><label>Description</label>';
+    echo '<input type="text" name="description" class="form-control" placeholder="Reason for adjustment"></div>';
+    echo '</div>';
+    echo '<div class="modal-footer">';
+    echo '<button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>';
+    echo '<button type="submit" name="add_credits" class="btn btn-success">Adjust Credits</button>';
+    echo '</div></form></div></div></div>';
+
+    // JavaScript
+    echo '<script>
+    function editClient(id) {
+        document.getElementById("edit_client_id").value = id;
+        $("#editClientModal").modal("show");
+    }
+    function addCredits(id) {
+        document.getElementById("credit_client_id").value = id;
+        $("#addCreditsModal").modal("show");
+    }
+    </script>';
+
     echo '</div>';
 }
 
@@ -1107,47 +2998,160 @@ function sms_suite_admin_webhooks($vars, $lang)
  */
 function sms_suite_admin_diagnostics($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
+    $repairMessage = '';
+    $repairType = '';
+    $autoRepaired = false;
+
+    // Auto-repair: Check for missing tables and create them automatically
+    $diagnosis = sms_suite_diagnose_tables();
+    if (count($diagnosis['missing']) > 0) {
+        // Automatically attempt repair
+        $result = sms_suite_repair_tables();
+        $autoRepaired = true;
+        if ($result['success']) {
+            $repairMessage = 'Auto-repair completed: ' . $result['repaired'] . ' missing tables were created automatically.';
+            $repairType = 'success';
+        } else {
+            $repairMessage = 'Auto-repair attempted but some tables could not be created: ' . implode(', ', $result['still_missing']);
+            $repairType = 'warning';
+        }
+        // Re-diagnose after repair
+        $diagnosis = sms_suite_diagnose_tables();
+    }
+
+    // Handle manual repair action
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['repair_database'])) {
+        $result = sms_suite_repair_tables();
+        if ($result['success']) {
+            $repairMessage = 'Database repair completed successfully. All tables are now available.';
+            $repairType = 'success';
+        } else {
+            $repairMessage = 'Database repair completed with issues. Still missing: ' . implode(', ', $result['still_missing']);
+            $repairType = 'warning';
+        }
+        // Re-diagnose after repair
+        $diagnosis = sms_suite_diagnose_tables();
+    }
+
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">Diagnostics</h3></div>';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-stethoscope"></i> Diagnostics</h3></div>';
     echo '<div class="panel-body">';
+
+    if ($repairMessage) {
+        echo '<div class="alert alert-' . $repairType . '">';
+        if ($autoRepaired) {
+            echo '<i class="fa fa-magic"></i> <strong>Auto-Repair:</strong> ';
+        }
+        echo htmlspecialchars($repairMessage) . '</div>';
+    }
 
     // PHP version
     echo '<h4>Environment</h4>';
     echo '<table class="table table-bordered">';
     echo '<tr><td width="30%">PHP Version</td><td>' . PHP_VERSION . '</td></tr>';
     echo '<tr><td>Module Version</td><td>' . SMS_SUITE_VERSION . '</td></tr>';
-    echo '<tr><td>WHMCS Version</td><td>' . $GLOBALS['CONFIG']['Version'] . '</td></tr>';
+    echo '<tr><td>WHMCS Version</td><td>' . ($GLOBALS['CONFIG']['Version'] ?? 'Unknown') . '</td></tr>';
     echo '</table>';
+
+    // Database Tables Status
+    echo '<h4><i class="fa fa-database"></i> Database Tables</h4>';
+
+    echo '<table class="table table-bordered">';
+    echo '<tr><td width="30%">Tables Checked</td><td>' . $diagnosis['total_checked'] . '</td></tr>';
+    echo '<tr><td>Tables Found</td><td><span class="text-success"><i class="fa fa-check"></i> ' . count($diagnosis['existing']) . '</span></td></tr>';
+    echo '<tr><td>Tables Missing</td><td>';
+    if (count($diagnosis['missing']) > 0) {
+        echo '<span class="text-danger"><i class="fa fa-warning"></i> ' . count($diagnosis['missing']) . '</span>';
+        echo '<br><small class="text-muted">' . implode(', ', $diagnosis['missing']) . '</small>';
+    } else {
+        echo '<span class="text-success"><i class="fa fa-check"></i> 0</span>';
+    }
+    echo '</td></tr>';
+    echo '</table>';
+
+    if (count($diagnosis['missing']) > 0) {
+        echo '<div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> Some tables are missing. Click repair to create them.</div>';
+    } else {
+        echo '<div class="alert alert-success"><i class="fa fa-check-circle"></i> All required database tables are present and operational.</div>';
+    }
+
+    // Always show repair button - it also updates column schemas
+    echo '<form method="post" style="margin-top:10px;">';
+    echo '<button type="submit" name="repair_database" class="btn btn-warning">';
+    echo '<i class="fa fa-wrench"></i> Repair / Update Database Schema';
+    echo '</button>';
+    echo ' <small class="text-muted">Creates missing tables and adds any missing columns to existing tables.</small>';
+    echo '</form>';
+    echo '<br>';
 
     // Cron status
     echo '<h4>Cron Status</h4>';
-    $cronTasks = Capsule::table('mod_sms_cron_status')->get();
+    try {
+        $cronTasks = Capsule::table('mod_sms_cron_status')->get();
 
-    if (count($cronTasks) > 0) {
-        echo '<table class="table table-bordered">';
-        echo '<thead><tr><th>Task</th><th>Last Run</th><th>Running</th></tr></thead>';
-        echo '<tbody>';
-        foreach ($cronTasks as $task) {
-            $runningLabel = $task->is_running ? '<span class="label label-warning">Yes</span>' : '<span class="label label-default">No</span>';
-            echo '<tr>';
-            echo '<td>' . htmlspecialchars($task->task) . '</td>';
-            echo '<td>' . ($task->last_run ?: 'Never') . '</td>';
-            echo '<td>' . $runningLabel . '</td>';
-            echo '</tr>';
+        if (count($cronTasks) > 0) {
+            echo '<table class="table table-bordered">';
+            echo '<thead><tr><th>Task</th><th>Last Run</th><th>Running</th></tr></thead>';
+            echo '<tbody>';
+            foreach ($cronTasks as $task) {
+                $runningLabel = $task->is_running ? '<span class="label label-warning">Yes</span>' : '<span class="label label-default">No</span>';
+                echo '<tr>';
+                echo '<td>' . htmlspecialchars($task->task) . '</td>';
+                echo '<td>' . ($task->last_run ?: 'Never') . '</td>';
+                echo '<td>' . $runningLabel . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody>';
+            echo '</table>';
+        } else {
+            echo '<p class="text-muted">No cron tasks have run yet.</p>';
         }
-        echo '</tbody>';
-        echo '</table>';
+    } catch (Exception $e) {
+        echo '<p class="text-warning">Cron status table not available.</p>';
     }
 
     // Queue status
     echo '<h4>Queue Status</h4>';
-    $queuedMessages = Capsule::table('mod_sms_messages')->where('status', 'queued')->count();
-    $pendingCampaigns = Capsule::table('mod_sms_campaigns')->whereIn('status', ['scheduled', 'queued'])->count();
+    try {
+        $queuedMessages = Capsule::table('mod_sms_messages')->where('status', 'queued')->count();
+        $pendingCampaigns = Capsule::table('mod_sms_campaigns')->whereIn('status', ['scheduled', 'queued'])->count();
 
-    echo '<table class="table table-bordered">';
-    echo '<tr><td width="30%">Queued Messages</td><td>' . $queuedMessages . '</td></tr>';
-    echo '<tr><td>Pending Campaigns</td><td>' . $pendingCampaigns . '</td></tr>';
-    echo '</table>';
+        echo '<table class="table table-bordered">';
+        echo '<tr><td width="30%">Queued Messages</td><td>' . $queuedMessages . '</td></tr>';
+        echo '<tr><td>Pending Campaigns</td><td>' . $pendingCampaigns . '</td></tr>';
+        echo '</table>';
+    } catch (Exception $e) {
+        echo '<p class="text-warning">Queue status not available. Please repair database tables first.</p>';
+    }
+
+    // Activity Log
+    echo '<h4>Recent Activity Log</h4>';
+    try {
+        $logs = Capsule::table('tblactivitylog')
+            ->where('description', 'LIKE', 'SMS Suite%')
+            ->orderBy('id', 'desc')
+            ->limit(10)
+            ->get();
+
+        if (count($logs) > 0) {
+            echo '<table class="table table-bordered table-sm">';
+            echo '<thead><tr><th>Date</th><th>Description</th></tr></thead>';
+            echo '<tbody>';
+            foreach ($logs as $log) {
+                echo '<tr>';
+                echo '<td style="width: 150px;"><small>' . $log->date . '</small></td>';
+                echo '<td><small>' . htmlspecialchars($log->description) . '</small></td>';
+                echo '</tr>';
+            }
+            echo '</tbody>';
+            echo '</table>';
+        } else {
+            echo '<p class="text-muted">No recent SMS Suite activity logged.</p>';
+        }
+    } catch (Exception $e) {
+        echo '<p class="text-muted">Activity log not available.</p>';
+    }
 
     echo '</div>';
     echo '</div>';
@@ -2423,6 +4427,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
 
 /**
  * Sender ID Pool Management Page
+ * Manual workflow: Admin creates Sender IDs after telco approval, then assigns to clients
  */
 function sms_suite_admin_sender_id_pool($vars, $lang)
 {
@@ -2435,9 +4440,11 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
         $action = $_POST['form_action'] ?? '';
 
         if ($action === 'create') {
-            $result = \SMSSuite\Billing\BillingService::addSenderIdToPool([
+            // Add to pool with network info
+            $poolData = [
                 'sender_id' => SecurityHelper::sanitize($_POST['sender_id']),
                 'type' => $_POST['type'] ?? 'alphanumeric',
+                'network' => $_POST['network'] ?? 'all',
                 'description' => SecurityHelper::sanitize($_POST['description']),
                 'gateway_id' => (int)$_POST['gateway_id'],
                 'country_codes' => !empty($_POST['country_codes']) ? explode(',', $_POST['country_codes']) : null,
@@ -2446,8 +4453,13 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                 'price_yearly' => (float)($_POST['price_yearly'] ?? 0),
                 'requires_approval' => isset($_POST['requires_approval']),
                 'is_shared' => isset($_POST['is_shared']),
+                'telco_status' => $_POST['telco_status'] ?? 'approved',
+                'telco_approved_date' => !empty($_POST['telco_approved_date']) ? $_POST['telco_approved_date'] : null,
+                'telco_reference' => SecurityHelper::sanitize($_POST['telco_reference'] ?? ''),
                 'status' => $_POST['status'] ?? 'active',
-            ]);
+            ];
+
+            $result = sms_suite_add_sender_id_to_pool_extended($poolData);
 
             if ($result['success']) {
                 echo '<div class="alert alert-success">Sender ID added to pool successfully.</div>';
@@ -2455,9 +4467,10 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                 echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
             }
         } elseif ($action === 'update') {
-            $result = \SMSSuite\Billing\BillingService::updateSenderIdPool((int)$_POST['pool_id'], [
+            $updateData = [
                 'sender_id' => SecurityHelper::sanitize($_POST['sender_id']),
                 'type' => $_POST['type'] ?? 'alphanumeric',
+                'network' => $_POST['network'] ?? 'all',
                 'description' => SecurityHelper::sanitize($_POST['description']),
                 'gateway_id' => (int)$_POST['gateway_id'],
                 'country_codes' => !empty($_POST['country_codes']) ? explode(',', $_POST['country_codes']) : null,
@@ -2466,8 +4479,13 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                 'price_yearly' => (float)($_POST['price_yearly'] ?? 0),
                 'requires_approval' => isset($_POST['requires_approval']),
                 'is_shared' => isset($_POST['is_shared']),
+                'telco_status' => $_POST['telco_status'] ?? 'approved',
+                'telco_approved_date' => !empty($_POST['telco_approved_date']) ? $_POST['telco_approved_date'] : null,
+                'telco_reference' => SecurityHelper::sanitize($_POST['telco_reference'] ?? ''),
                 'status' => $_POST['status'] ?? 'active',
-            ]);
+            ];
+
+            $result = sms_suite_update_sender_id_pool_extended((int)$_POST['pool_id'], $updateData);
 
             if ($result['success']) {
                 echo '<div class="alert alert-success">Sender ID updated successfully.</div>';
@@ -2482,44 +4500,77 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
             } else {
                 echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
             }
+        } elseif ($action === 'assign_to_client') {
+            // Assign sender ID from pool to a client
+            $result = sms_suite_assign_sender_id_to_client(
+                (int)$_POST['client_id'],
+                (int)$_POST['pool_id'],
+                $_POST['network'] ?? 'all',
+                !empty($_POST['expires_at']) ? $_POST['expires_at'] : null
+            );
+
+            if ($result['success']) {
+                echo '<div class="alert alert-success">Sender ID assigned to client successfully.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+            }
         }
     }
 
-    // Get all sender IDs in pool
-    $pool = \SMSSuite\Billing\BillingService::getSenderIdPool();
+    // Get all sender IDs in pool with extended info
+    $pool = Capsule::table('mod_sms_sender_id_pool as p')
+        ->leftJoin('mod_sms_gateways as g', 'p.gateway_id', '=', 'g.id')
+        ->select(['p.*', 'g.name as gateway_name'])
+        ->orderBy('p.sender_id')
+        ->orderBy('p.network')
+        ->get();
 
     // Get gateways for dropdown
     $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->get();
 
+    // Get clients for assignment dropdown
+    $clients = sms_suite_get_clients_dropdown();
+
+    // Count assignments per pool item
+    $assignmentCounts = Capsule::table('mod_sms_client_sender_ids')
+        ->whereNotNull('pool_id')
+        ->where('status', 'active')
+        ->selectRaw('pool_id, COUNT(*) as count')
+        ->groupBy('pool_id')
+        ->pluck('count', 'pool_id')
+        ->toArray();
+
     echo '<div class="panel panel-default">
         <div class="panel-heading">
             <h3 class="panel-title">
-                <i class="fa fa-id-card"></i> Sender ID Pool
+                <i class="fa fa-id-card"></i> Sender ID Pool (Manual Telco Management)
                 <button class="btn btn-success btn-sm pull-right" data-toggle="modal" data-target="#createSenderIdModal">
                     <i class="fa fa-plus"></i> Add Sender ID
                 </button>
             </h3>
         </div>
         <div class="panel-body">
-            <p class="text-muted">Manage available Sender IDs that can be assigned to clients. Each Sender ID is mapped to a specific gateway.</p>
+            <div class="alert alert-info">
+                <i class="fa fa-info-circle"></i> <strong>Workflow:</strong> After receiving telco approval (Safaricom/Airtel/Telkom), add the Sender ID here, then assign it to clients.
+            </div>
 
             <table class="table table-striped">
                 <thead>
                     <tr>
                         <th>Sender ID</th>
+                        <th>Network</th>
                         <th>Type</th>
                         <th>Gateway</th>
-                        <th>Setup Fee</th>
-                        <th>Monthly</th>
-                        <th>Yearly</th>
+                        <th>Telco Status</th>
+                        <th>Assigned</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>';
 
-    if (empty($pool)) {
-        echo '<tr><td colspan="8" class="text-center text-muted">No sender IDs in pool. Add sender IDs that clients can request or be assigned.</td></tr>';
+    if (count($pool) === 0) {
+        echo '<tr><td colspan="8" class="text-center text-muted">No sender IDs in pool. Add sender IDs after telco approval.</td></tr>';
     } else {
         foreach ($pool as $item) {
             $statusLabel = match($item->status) {
@@ -2529,26 +4580,50 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                 default => '<span class="label label-default">' . ucfirst($item->status) . '</span>',
             };
 
+            $networkLabel = match($item->network ?? 'all') {
+                'safaricom' => '<span class="label label-success">Safaricom</span>',
+                'airtel' => '<span class="label label-danger">Airtel</span>',
+                'telkom' => '<span class="label label-info">Telkom</span>',
+                default => '<span class="label label-default">All Networks</span>',
+            };
+
+            $telcoLabel = match($item->telco_status ?? 'approved') {
+                'approved' => '<span class="label label-success">Approved</span>',
+                'pending' => '<span class="label label-warning">Pending</span>',
+                'rejected' => '<span class="label label-danger">Rejected</span>',
+                default => '<span class="label label-default">' . ucfirst($item->telco_status ?? 'Unknown') . '</span>',
+            };
+
+            $assignedCount = $assignmentCounts[$item->id] ?? 0;
+
             echo '<tr>
                 <td>
                     <strong>' . htmlspecialchars($item->sender_id) . '</strong>
-                    ' . ($item->is_shared ? '<span class="label label-info" title="Can be used by multiple clients">Shared</span>' : '') . '
+                    ' . ($item->is_shared ? '<span class="label label-info" title="Shared">S</span>' : '') . '
                     <br><small class="text-muted">' . htmlspecialchars($item->description ?? '') . '</small>
+                    ' . ($item->telco_reference ? '<br><small class="text-muted">Ref: ' . htmlspecialchars($item->telco_reference) . '</small>' : '') . '
                 </td>
+                <td>' . $networkLabel . '</td>
                 <td>' . ucfirst($item->type) . '</td>
-                <td>' . htmlspecialchars($item->gateway_name ?? 'Unknown') . '</td>
-                <td>$' . number_format($item->price_setup, 2) . '</td>
-                <td>$' . number_format($item->price_monthly, 2) . '</td>
-                <td>$' . number_format($item->price_yearly, 2) . '</td>
+                <td>' . htmlspecialchars($item->gateway_name ?? 'Not Set') . '</td>
+                <td>' . $telcoLabel . '
+                    ' . ($item->telco_approved_date ? '<br><small>' . date('M j, Y', strtotime($item->telco_approved_date)) . '</small>' : '') . '
+                </td>
+                <td>
+                    <span class="badge">' . $assignedCount . '</span> clients
+                </td>
                 <td>' . $statusLabel . '</td>
                 <td>
-                    <button class="btn btn-xs btn-primary" onclick=\'editPoolItem(' . json_encode($item) . ')\'>
+                    <button class="btn btn-xs btn-success" onclick=\'openAssignModal(' . $item->id . ', "' . htmlspecialchars($item->sender_id) . '", "' . ($item->network ?? 'all') . '")\' title="Assign to Client">
+                        <i class="fa fa-user-plus"></i>
+                    </button>
+                    <button class="btn btn-xs btn-primary" onclick=\'editPoolItem(' . json_encode($item) . ')\' title="Edit">
                         <i class="fa fa-edit"></i>
                     </button>
                     <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this Sender ID from pool?\');">
                         <input type="hidden" name="form_action" value="delete">
                         <input type="hidden" name="pool_id" value="' . $item->id . '">
-                        <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
+                        <button type="submit" class="btn btn-xs btn-danger" title="Delete"><i class="fa fa-trash"></i></button>
                     </form>
                 </td>
             </tr>';
@@ -2563,23 +4638,43 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
         $gatewayOptions .= '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . '</option>';
     }
 
+    // Client options for assignment modal
+    $clientOptions = '';
+    foreach ($clients as $c) {
+        $clientName = trim($c->firstname . ' ' . $c->lastname);
+        if ($c->companyname) {
+            $clientName .= ' (' . $c->companyname . ')';
+        }
+        $clientOptions .= '<option value="' . $c->id . '">' . htmlspecialchars($clientName) . ' - ' . htmlspecialchars($c->email) . '</option>';
+    }
+
     // Create Sender ID Modal
     echo '<div class="modal fade" id="createSenderIdModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <form method="post">
                     <input type="hidden" name="form_action" value="create">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
-                        <h4 class="modal-title"><i class="fa fa-plus"></i> Add Sender ID to Pool</h4>
+                        <h4 class="modal-title"><i class="fa fa-plus"></i> Add Sender ID (After Telco Approval)</h4>
                     </div>
                     <div class="modal-body">
                         <div class="row">
-                            <div class="col-md-8">
+                            <div class="col-md-4">
                                 <div class="form-group">
                                     <label>Sender ID <span class="text-danger">*</span></label>
                                     <input type="text" name="sender_id" class="form-control" required maxlength="11" placeholder="e.g., MYCOMPANY">
-                                    <p class="help-block">Max 11 characters for alphanumeric</p>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Network <span class="text-danger">*</span></label>
+                                    <select name="network" class="form-control" required>
+                                        <option value="all">All Networks</option>
+                                        <option value="safaricom">Safaricom</option>
+                                        <option value="airtel">Airtel</option>
+                                        <option value="telkom">Telkom</option>
+                                    </select>
                                 </div>
                             </div>
                             <div class="col-md-4">
@@ -2594,8 +4689,8 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                             </div>
                         </div>
                         <div class="form-group">
-                            <label>Description</label>
-                            <textarea name="description" class="form-control" rows="2" placeholder="Internal notes..."></textarea>
+                            <label>Description / Notes</label>
+                            <textarea name="description" class="form-control" rows="2" placeholder="Internal notes about this sender ID..."></textarea>
                         </div>
                         <div class="form-group">
                             <label>Gateway <span class="text-danger">*</span></label>
@@ -2603,15 +4698,37 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                                 <option value="">-- Select Gateway --</option>
                                 ' . $gatewayOptions . '
                             </select>
-                            <p class="help-block">Messages using this Sender ID will be sent through this gateway</p>
                         </div>
-                        <div class="form-group">
-                            <label>Country Codes</label>
-                            <input type="text" name="country_codes" class="form-control" placeholder="e.g., US,GB,CA">
-                            <p class="help-block">Comma-separated list of allowed countries (leave empty for all)</p>
-                        </div>
+
                         <hr>
-                        <h5>Pricing</h5>
+                        <h5><i class="fa fa-building"></i> Telco Approval Details</h5>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Telco Status</label>
+                                    <select name="telco_status" class="form-control">
+                                        <option value="approved" selected>Approved</option>
+                                        <option value="pending">Pending Approval</option>
+                                        <option value="rejected">Rejected</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Approval Date</label>
+                                    <input type="date" name="telco_approved_date" class="form-control" value="' . date('Y-m-d') . '">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Telco Reference #</label>
+                                    <input type="text" name="telco_reference" class="form-control" placeholder="e.g., SAF-2024-001">
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr>
+                        <h5><i class="fa fa-dollar"></i> Pricing (Optional)</h5>
                         <div class="row">
                             <div class="col-md-4">
                                 <div class="form-group">
@@ -2641,10 +4758,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                                 </div>
                             </div>
                         </div>
-                        <hr>
-                        <div class="checkbox">
-                            <label><input type="checkbox" name="requires_approval" value="1" checked> Requires Telco Approval</label>
-                        </div>
+
                         <div class="checkbox">
                             <label><input type="checkbox" name="is_shared" value="1"> Shared (can be used by multiple clients)</label>
                         </div>
@@ -2659,7 +4773,58 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-success">Add to Pool</button>
+                        <button type="submit" class="btn btn-success"><i class="fa fa-plus"></i> Add to Pool</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Assign to Client Modal
+    echo '<div class="modal fade" id="assignSenderIdModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="assign_to_client">
+                    <input type="hidden" name="pool_id" id="assign_pool_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-user-plus"></i> Assign Sender ID to Client</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <strong>Sender ID:</strong> <span id="assign_sender_id_display"></span>
+                            <br><strong>Network:</strong> <span id="assign_network_display"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Select Client <span class="text-danger">*</span></label>
+                            <select name="client_id" class="form-control" required id="assign_client_select">
+                                <option value="">-- Select Client --</option>
+                                ' . $clientOptions . '
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Network</label>
+                            <select name="network" id="assign_network_select" class="form-control">
+                                <option value="all">All Networks</option>
+                                <option value="safaricom">Safaricom Only</option>
+                                <option value="airtel">Airtel Only</option>
+                                <option value="telkom">Telkom Only</option>
+                            </select>
+                            <p class="help-block">Restrict this assignment to a specific network</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Expiry Date (Optional)</label>
+                            <input type="date" name="expires_at" class="form-control">
+                            <p class="help-block">Leave empty for no expiry</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success"><i class="fa fa-user-plus"></i> Assign to Client</button>
                     </div>
                 </form>
             </div>
@@ -2668,7 +4833,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
 
     // Edit Sender ID Modal
     echo '<div class="modal fade" id="editPoolModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <form method="post">
                     <input type="hidden" name="form_action" value="update">
@@ -2679,10 +4844,21 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                     </div>
                     <div class="modal-body">
                         <div class="row">
-                            <div class="col-md-8">
+                            <div class="col-md-4">
                                 <div class="form-group">
                                     <label>Sender ID <span class="text-danger">*</span></label>
                                     <input type="text" name="sender_id" id="edit_pool_sender_id" class="form-control" required maxlength="11">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Network</label>
+                                    <select name="network" id="edit_pool_network" class="form-control">
+                                        <option value="all">All Networks</option>
+                                        <option value="safaricom">Safaricom</option>
+                                        <option value="airtel">Airtel</option>
+                                        <option value="telkom">Telkom</option>
+                                    </select>
                                 </div>
                             </div>
                             <div class="col-md-4">
@@ -2706,11 +4882,36 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                                 ' . $gatewayOptions . '
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label>Country Codes</label>
-                            <input type="text" name="country_codes" id="edit_pool_countries" class="form-control">
-                        </div>
+
                         <hr>
+                        <h5>Telco Approval</h5>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Telco Status</label>
+                                    <select name="telco_status" id="edit_pool_telco_status" class="form-control">
+                                        <option value="approved">Approved</option>
+                                        <option value="pending">Pending</option>
+                                        <option value="rejected">Rejected</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Approval Date</label>
+                                    <input type="date" name="telco_approved_date" id="edit_pool_telco_date" class="form-control">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Reference #</label>
+                                    <input type="text" name="telco_reference" id="edit_pool_telco_ref" class="form-control">
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr>
+                        <h5>Pricing</h5>
                         <div class="row">
                             <div class="col-md-4">
                                 <div class="form-group">
@@ -2741,10 +4942,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                             </div>
                         </div>
                         <div class="checkbox">
-                            <label><input type="checkbox" name="requires_approval" id="edit_pool_approval" value="1"> Requires Telco Approval</label>
-                        </div>
-                        <div class="checkbox">
-                            <label><input type="checkbox" name="is_shared" id="edit_pool_shared" value="1"> Shared</label>
+                            <label><input type="checkbox" name="is_shared" id="edit_pool_shared" value="1"> Shared (can be used by multiple clients)</label>
                         </div>
                         <div class="form-group">
                             <label>Status</label>
@@ -2767,19 +4965,219 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
     function editPoolItem(item) {
         document.getElementById("edit_pool_id").value = item.id;
         document.getElementById("edit_pool_sender_id").value = item.sender_id;
+        document.getElementById("edit_pool_network").value = item.network || "all";
         document.getElementById("edit_pool_type").value = item.type;
         document.getElementById("edit_pool_desc").value = item.description || "";
         document.getElementById("edit_pool_gateway").value = item.gateway_id;
-        document.getElementById("edit_pool_countries").value = item.country_codes ? JSON.parse(item.country_codes).join(",") : "";
+        document.getElementById("edit_pool_telco_status").value = item.telco_status || "approved";
+        document.getElementById("edit_pool_telco_date").value = item.telco_approved_date || "";
+        document.getElementById("edit_pool_telco_ref").value = item.telco_reference || "";
         document.getElementById("edit_pool_setup").value = item.price_setup || 0;
         document.getElementById("edit_pool_monthly").value = item.price_monthly || 0;
         document.getElementById("edit_pool_yearly").value = item.price_yearly || 0;
-        document.getElementById("edit_pool_approval").checked = item.requires_approval == 1;
         document.getElementById("edit_pool_shared").checked = item.is_shared == 1;
         document.getElementById("edit_pool_status").value = item.status;
         jQuery("#editPoolModal").modal("show");
     }
+
+    function openAssignModal(poolId, senderId, network) {
+        document.getElementById("assign_pool_id").value = poolId;
+        document.getElementById("assign_sender_id_display").textContent = senderId;
+        document.getElementById("assign_network_display").textContent = network === "all" ? "All Networks" : network.charAt(0).toUpperCase() + network.slice(1);
+        document.getElementById("assign_network_select").value = network;
+        jQuery("#assignSenderIdModal").modal("show");
+    }
     </script>';
+}
+
+/**
+ * Add Sender ID to pool with extended fields (network, telco status)
+ */
+function sms_suite_add_sender_id_to_pool_extended(array $data): array
+{
+    try {
+        // Check if sender ID already exists for this network
+        $existing = Capsule::table('mod_sms_sender_id_pool')
+            ->where('sender_id', $data['sender_id'])
+            ->where('network', $data['network'] ?? 'all')
+            ->first();
+
+        if ($existing) {
+            return ['success' => false, 'error' => 'Sender ID already exists for this network'];
+        }
+
+        $poolId = Capsule::table('mod_sms_sender_id_pool')->insertGetId([
+            'sender_id' => $data['sender_id'],
+            'type' => $data['type'] ?? 'alphanumeric',
+            'network' => $data['network'] ?? 'all',
+            'description' => $data['description'] ?? null,
+            'gateway_id' => $data['gateway_id'],
+            'country_codes' => isset($data['country_codes']) ? json_encode($data['country_codes']) : null,
+            'price_setup' => $data['price_setup'] ?? 0,
+            'price_monthly' => $data['price_monthly'] ?? 0,
+            'price_yearly' => $data['price_yearly'] ?? 0,
+            'requires_approval' => $data['requires_approval'] ?? true,
+            'is_shared' => $data['is_shared'] ?? false,
+            'telco_status' => $data['telco_status'] ?? 'approved',
+            'telco_approved_date' => $data['telco_approved_date'] ?? null,
+            'telco_reference' => $data['telco_reference'] ?? null,
+            'status' => $data['status'] ?? 'active',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return ['success' => true, 'pool_id' => $poolId];
+
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+/**
+ * Update Sender ID in pool with extended fields
+ */
+function sms_suite_update_sender_id_pool_extended(int $poolId, array $data): array
+{
+    try {
+        if (isset($data['country_codes']) && is_array($data['country_codes'])) {
+            $data['country_codes'] = json_encode($data['country_codes']);
+        }
+
+        $data['updated_at'] = date('Y-m-d H:i:s');
+
+        Capsule::table('mod_sms_sender_id_pool')
+            ->where('id', $poolId)
+            ->update($data);
+
+        return ['success' => true];
+
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+/**
+ * Assign Sender ID from pool to a client (manual assignment by admin)
+ */
+function sms_suite_assign_sender_id_to_client(int $clientId, int $poolId, string $network = 'all', ?string $expiresAt = null): array
+{
+    try {
+        // Get pool item
+        $poolItem = Capsule::table('mod_sms_sender_id_pool')
+            ->where('id', $poolId)
+            ->first();
+
+        if (!$poolItem) {
+            return ['success' => false, 'error' => 'Sender ID not found in pool'];
+        }
+
+        // Check if already assigned to this client for this network
+        $existing = Capsule::table('mod_sms_client_sender_ids')
+            ->where('client_id', $clientId)
+            ->where('sender_id', $poolItem->sender_id)
+            ->where('network', $network)
+            ->where('status', 'active')
+            ->first();
+
+        if ($existing) {
+            return ['success' => false, 'error' => 'Sender ID already assigned to this client for this network'];
+        }
+
+        // Check if non-shared and already assigned to another client
+        if (!$poolItem->is_shared) {
+            $otherAssignment = Capsule::table('mod_sms_client_sender_ids')
+                ->where('pool_id', $poolId)
+                ->where('client_id', '!=', $clientId)
+                ->where('network', $network)
+                ->where('status', 'active')
+                ->first();
+
+            if ($otherAssignment) {
+                return ['success' => false, 'error' => 'This Sender ID is not shared and is already assigned to another client'];
+            }
+        }
+
+        // Create assignment
+        $assignmentId = Capsule::table('mod_sms_client_sender_ids')->insertGetId([
+            'client_id' => $clientId,
+            'pool_id' => $poolId,
+            'sender_id' => $poolItem->sender_id,
+            'type' => $poolItem->type,
+            'network' => $network,
+            'gateway_id' => $poolItem->gateway_id,
+            'status' => 'active',
+            'expires_at' => $expiresAt,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // Check if client has a default sender ID, if not make this one default
+        $hasDefault = Capsule::table('mod_sms_client_sender_ids')
+            ->where('client_id', $clientId)
+            ->where('is_default', true)
+            ->where('status', 'active')
+            ->where('id', '!=', $assignmentId)
+            ->exists();
+
+        if (!$hasDefault) {
+            Capsule::table('mod_sms_client_sender_ids')
+                ->where('id', $assignmentId)
+                ->update(['is_default' => true]);
+
+            // Update client settings
+            Capsule::table('mod_sms_settings')->updateOrInsert(
+                ['client_id' => $clientId],
+                [
+                    'assigned_sender_id' => $poolItem->sender_id,
+                    'assigned_gateway_id' => $poolItem->gateway_id,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]
+            );
+        }
+
+        logActivity("SMS Suite: Sender ID '{$poolItem->sender_id}' assigned to client #{$clientId} for {$network} network");
+
+        return ['success' => true, 'assignment_id' => $assignmentId];
+
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+/**
+ * Get clients for dropdown (used in assignment modal)
+ */
+function sms_suite_get_clients_dropdown(): array
+{
+    return Capsule::table('tblclients')
+        ->select(['id', 'firstname', 'lastname', 'companyname', 'email'])
+        ->orderBy('firstname')
+        ->orderBy('lastname')
+        ->limit(500)
+        ->get()
+        ->toArray();
+}
+
+/**
+ * Get client's assigned sender IDs with details
+ */
+function sms_suite_get_client_sender_ids_detailed(int $clientId): array
+{
+    return Capsule::table('mod_sms_client_sender_ids as csi')
+        ->leftJoin('mod_sms_sender_id_pool as p', 'csi.pool_id', '=', 'p.id')
+        ->leftJoin('mod_sms_gateways as g', 'csi.gateway_id', '=', 'g.id')
+        ->where('csi.client_id', $clientId)
+        ->select([
+            'csi.*',
+            'p.description as pool_description',
+            'p.telco_status',
+            'p.telco_reference',
+            'g.name as gateway_name',
+        ])
+        ->orderBy('csi.is_default', 'desc')
+        ->orderBy('csi.created_at', 'desc')
+        ->get()
+        ->toArray();
 }
 
 // ============================================================
@@ -2868,9 +5266,8 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
                     <tr>
                         <th>Client</th>
                         <th>Sender ID</th>
-                        <th>Type</th>
-                        <th>Gateway</th>
-                        <th>Billing</th>
+                        <th>Company / Use Case</th>
+                        <th>Documents</th>
                         <th>Status</th>
                         <th>Requested</th>
                         <th>Actions</th>
@@ -2879,7 +5276,7 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
                 <tbody>';
 
     if (empty($requests)) {
-        echo '<tr><td colspan="8" class="text-center text-muted">No requests found.</td></tr>';
+        echo '<tr><td colspan="7" class="text-center text-muted">No requests found.</td></tr>';
     } else {
         foreach ($requests as $req) {
             $statusLabel = match($req->status) {
@@ -2896,29 +5293,47 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
                 $clientName .= ' (' . $req->companyname . ')';
             }
 
-            $billingInfo = ucfirst($req->billing_cycle);
-            if ($req->setup_fee > 0 || $req->recurring_fee > 0) {
-                $billingInfo .= '<br><small>Setup: $' . number_format($req->setup_fee, 2) . ', Recurring: $' . number_format($req->recurring_fee, 2) . '</small>';
-            }
+            // Count documents
+            $docCount = 0;
+            $docs = [];
+            if (!empty($req->doc_certificate)) { $docCount++; $docs['Certificate'] = $req->doc_certificate; }
+            if (!empty($req->doc_vat_cert)) { $docCount++; $docs['VAT Cert'] = $req->doc_vat_cert; }
+            if (!empty($req->doc_authorization)) { $docCount++; $docs['Authorization'] = $req->doc_authorization; }
+            if (!empty($req->doc_other)) { $docCount++; $docs['KYC/Other'] = $req->doc_other; }
 
             echo '<tr>
                 <td>
                     <a href="clientssummary.php?userid=' . $req->client_id . '" target="_blank">' . htmlspecialchars($clientName) . '</a>
                     <br><small class="text-muted">' . htmlspecialchars($req->email ?? '') . '</small>
                 </td>
-                <td><strong>' . htmlspecialchars($req->sender_id) . '</strong></td>
-                <td>' . ucfirst($req->type) . '</td>
-                <td>' . htmlspecialchars($req->gateway_name ?? 'Not assigned') . '</td>
-                <td>' . $billingInfo . '</td>
+                <td>
+                    <strong>' . htmlspecialchars($req->sender_id) . '</strong>
+                    <br><small class="text-muted">' . ucfirst($req->type) . '</small>
+                </td>
+                <td>
+                    <strong>' . htmlspecialchars($req->company_name ?? '-') . '</strong>
+                    <br><small class="text-muted">' . htmlspecialchars(substr($req->use_case ?? '', 0, 50)) . (strlen($req->use_case ?? '') > 50 ? '...' : '') . '</small>
+                </td>
+                <td>';
+
+            if ($docCount > 0) {
+                echo '<button class="btn btn-xs btn-info" onclick=\'showDocumentsModal(' . $req->id . ', ' . json_encode($docs) . ', ' . $req->client_id . ')\'>';
+                echo '<i class="fa fa-file"></i> ' . $docCount . ' docs</button>';
+            } else {
+                echo '<span class="text-muted">No docs</span>';
+            }
+
+            echo '</td>
                 <td>' . $statusLabel . '</td>
                 <td>' . date('M d, Y', strtotime($req->created_at)) . '</td>
                 <td>';
 
             if ($req->status === 'pending') {
-                echo '<button class="btn btn-xs btn-success" onclick=\'showApproveModal(' . json_encode($req) . ')\'><i class="fa fa-check"></i> Approve</button> ';
-                echo '<button class="btn btn-xs btn-danger" onclick=\'showRejectModal(' . $req->id . ')\'><i class="fa fa-times"></i> Reject</button>';
+                echo '<button class="btn btn-xs btn-success" onclick=\'showApproveModal(' . json_encode($req) . ')\'><i class="fa fa-check"></i></button> ';
+                echo '<button class="btn btn-xs btn-danger" onclick=\'showRejectModal(' . $req->id . ')\'><i class="fa fa-times"></i></button> ';
+                echo '<button class="btn btn-xs btn-default" onclick=\'showDetailsModal(' . json_encode($req) . ')\'><i class="fa fa-eye"></i></button>';
             } elseif ($req->status === 'approved' && $req->invoice_id) {
-                echo '<a href="invoices.php?action=edit&id=' . $req->invoice_id . '" class="btn btn-xs btn-info" target="_blank"><i class="fa fa-file-text"></i> Invoice #' . $req->invoice_id . '</a>';
+                echo '<a href="invoices.php?action=edit&id=' . $req->invoice_id . '" class="btn btn-xs btn-info" target="_blank"><i class="fa fa-file-text"></i> #' . $req->invoice_id . '</a>';
             } elseif ($req->admin_notes) {
                 echo '<span class="text-muted" title="' . htmlspecialchars($req->admin_notes) . '"><i class="fa fa-comment"></i></span>';
             }
@@ -3023,6 +5438,51 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
             </div>
         </div>
     </div>
+    <!-- Documents Modal -->
+    <div class="modal fade" id="documentsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    <h4 class="modal-title"><i class="fa fa-file"></i> Uploaded Documents</h4>
+                </div>
+                <div class="modal-body">
+                    <div id="documentsContent"></div>
+                    <div class="alert alert-info">
+                        <i class="fa fa-info-circle"></i> Click on document names to download. Review documents before approving the Sender ID request for telco submission.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Details Modal -->
+    <div class="modal fade" id="detailsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    <h4 class="modal-title"><i class="fa fa-info-circle"></i> Request Details</h4>
+                </div>
+                <div class="modal-body">
+                    <table class="table table-bordered">
+                        <tr><th width="150">Sender ID</th><td id="detail_sender_id"></td></tr>
+                        <tr><th>Type</th><td id="detail_type"></td></tr>
+                        <tr><th>Company Name</th><td id="detail_company"></td></tr>
+                        <tr><th>Use Case</th><td id="detail_use_case"></td></tr>
+                        <tr><th>Submitted</th><td id="detail_created"></td></tr>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
     function showApproveModal(req) {
         document.getElementById("approve_request_id").value = req.id;
@@ -3037,6 +5497,36 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
     function showRejectModal(requestId) {
         document.getElementById("reject_request_id").value = requestId;
         jQuery("#rejectModal").modal("show");
+    }
+
+    function showDocumentsModal(requestId, docs, clientId) {
+        var html = "<table class=\"table table-striped\">";
+        html += "<thead><tr><th>Document Type</th><th>Actions</th></tr></thead><tbody>";
+
+        for (var docType in docs) {
+            if (docs.hasOwnProperty(docType) && docs[docType]) {
+                var path = docs[docType];
+                var downloadUrl = "addonmodules.php?module=sms_suite&action=download_doc&path=" + encodeURIComponent(path);
+                html += "<tr>";
+                html += "<td><i class=\"fa fa-file-pdf-o text-danger\"></i> <strong>" + docType + "</strong></td>";
+                html += "<td><a href=\"" + downloadUrl + "\" class=\"btn btn-sm btn-primary\" target=\"_blank\"><i class=\"fa fa-download\"></i> Download</a> ";
+                html += "<a href=\"" + downloadUrl + "&view=1\" class=\"btn btn-sm btn-info\" target=\"_blank\"><i class=\"fa fa-eye\"></i> View</a></td>";
+                html += "</tr>";
+            }
+        }
+
+        html += "</tbody></table>";
+        document.getElementById("documentsContent").innerHTML = html;
+        jQuery("#documentsModal").modal("show");
+    }
+
+    function showDetailsModal(req) {
+        document.getElementById("detail_sender_id").textContent = req.sender_id || "-";
+        document.getElementById("detail_type").textContent = req.type || "-";
+        document.getElementById("detail_company").textContent = req.company_name || "-";
+        document.getElementById("detail_use_case").textContent = req.use_case || "-";
+        document.getElementById("detail_created").textContent = req.created_at || "-";
+        jQuery("#detailsModal").modal("show");
     }
     </script>';
 }
@@ -3358,4 +5848,921 @@ function sms_suite_admin_billing_rates($vars, $lang)
             </div>
         </div>
     </div>';
+}
+
+/**
+ * AJAX: Get message details
+ */
+function sms_suite_ajax_message_detail()
+{
+    header('Content-Type: text/html; charset=utf-8');
+
+    $msgId = (int)($_GET['id'] ?? 0);
+    if (!$msgId) {
+        echo '<div class="alert alert-danger">Invalid message ID</div>';
+        exit;
+    }
+
+    $msg = Capsule::table('mod_sms_messages')
+        ->leftJoin('mod_sms_gateways', 'mod_sms_messages.gateway_id', '=', 'mod_sms_gateways.id')
+        ->leftJoin('tblclients', 'mod_sms_messages.client_id', '=', 'tblclients.id')
+        ->leftJoin('mod_sms_campaigns', 'mod_sms_messages.campaign_id', '=', 'mod_sms_campaigns.id')
+        ->select([
+            'mod_sms_messages.*',
+            'mod_sms_gateways.name as gateway_name',
+            'mod_sms_gateways.type as gateway_type',
+            'tblclients.firstname',
+            'tblclients.lastname',
+            'tblclients.email as client_email',
+            'mod_sms_campaigns.name as campaign_name',
+        ])
+        ->where('mod_sms_messages.id', $msgId)
+        ->first();
+
+    if (!$msg) {
+        echo '<div class="alert alert-danger">Message not found</div>';
+        exit;
+    }
+
+    $statusClass = sms_suite_status_class($msg->status);
+
+    // Parse gateway response if exists
+    $gatewayResponse = '';
+    if (!empty($msg->gateway_response)) {
+        $decoded = json_decode($msg->gateway_response, true);
+        if ($decoded) {
+            $gatewayResponse = '<pre style="max-height:200px; overflow:auto; font-size:11px;">' . htmlspecialchars(json_encode($decoded, JSON_PRETTY_PRINT)) . '</pre>';
+        } else {
+            $gatewayResponse = '<pre style="max-height:200px; overflow:auto; font-size:11px;">' . htmlspecialchars($msg->gateway_response) . '</pre>';
+        }
+    }
+
+    echo '<div class="row">';
+
+    // Left column - Basic info
+    echo '<div class="col-md-6">';
+    echo '<h5><i class="fa fa-info-circle"></i> Message Information</h5>';
+    echo '<table class="table table-condensed">';
+    echo '<tr><th width="120">Message ID:</th><td>' . $msg->id . '</td></tr>';
+    echo '<tr><th>Provider ID:</th><td><code>' . htmlspecialchars($msg->provider_message_id ?: 'N/A') . '</code></td></tr>';
+    echo '<tr><th>Status:</th><td><span class="label label-' . $statusClass . '">' . ucfirst($msg->status) . '</span></td></tr>';
+    echo '<tr><th>To:</th><td><code>' . htmlspecialchars($msg->to_number) . '</code></td></tr>';
+    echo '<tr><th>From:</th><td>' . htmlspecialchars($msg->sender_id ?: 'Default') . '</td></tr>';
+    echo '<tr><th>Channel:</th><td>' . ucfirst($msg->channel ?? 'sms') . '</td></tr>';
+    echo '<tr><th>Encoding:</th><td>' . ($msg->encoding ?? 'GSM7') . '</td></tr>';
+    echo '<tr><th>Segments:</th><td>' . $msg->segments . '</td></tr>';
+    echo '<tr><th>Cost:</th><td>$' . number_format($msg->cost, 4) . '</td></tr>';
+    echo '</table>';
+    echo '</div>';
+
+    // Right column - Gateway/Client info
+    echo '<div class="col-md-6">';
+    echo '<h5><i class="fa fa-server"></i> Delivery Details</h5>';
+    echo '<table class="table table-condensed">';
+    echo '<tr><th width="120">Gateway:</th><td>' . htmlspecialchars($msg->gateway_name ?: 'N/A') . ' <small class="text-muted">(' . ($msg->gateway_type ?? 'unknown') . ')</small></td></tr>';
+    if (!empty($msg->firstname)) {
+        echo '<tr><th>Client:</th><td>' . htmlspecialchars($msg->firstname . ' ' . $msg->lastname) . ' <small class="text-muted">(' . htmlspecialchars($msg->client_email) . ')</small></td></tr>';
+    }
+    if (!empty($msg->campaign_name)) {
+        echo '<tr><th>Campaign:</th><td>' . htmlspecialchars($msg->campaign_name) . '</td></tr>';
+    }
+    echo '<tr><th>Created:</th><td>' . $msg->created_at . '</td></tr>';
+    if (!empty($msg->sent_at)) {
+        echo '<tr><th>Sent:</th><td>' . $msg->sent_at . '</td></tr>';
+    }
+    if (!empty($msg->delivered_at)) {
+        echo '<tr><th>Delivered:</th><td>' . $msg->delivered_at . '</td></tr>';
+    }
+    echo '</table>';
+    echo '</div>';
+
+    echo '</div>';
+
+    // Message content
+    echo '<hr>';
+    echo '<h5><i class="fa fa-comment"></i> Message Content</h5>';
+    echo '<div class="well" style="word-wrap:break-word;">' . nl2br(htmlspecialchars($msg->message)) . '</div>';
+
+    // Error details (if any)
+    if (!empty($msg->error)) {
+        echo '<div class="alert alert-danger">';
+        echo '<h5><i class="fa fa-exclamation-triangle"></i> Error Details</h5>';
+        echo '<p><strong>Error Message:</strong></p>';
+        echo '<pre style="background:#f5f5f5; padding:10px; border-radius:4px;">' . htmlspecialchars($msg->error) . '</pre>';
+        echo '</div>';
+    }
+
+    // Gateway response
+    if (!empty($gatewayResponse)) {
+        echo '<div class="panel panel-default">';
+        echo '<div class="panel-heading"><h5 class="panel-title" style="margin:0;"><i class="fa fa-code"></i> Gateway Response (Debug)</h5></div>';
+        echo '<div class="panel-body" style="padding:10px;">' . $gatewayResponse . '</div>';
+        echo '</div>';
+    }
+
+    // Timeline
+    echo '<h5><i class="fa fa-clock-o"></i> Message Timeline</h5>';
+    echo '<ul class="list-unstyled">';
+    echo '<li><i class="fa fa-plus-circle text-info"></i> <strong>Created:</strong> ' . $msg->created_at . '</li>';
+    if (!empty($msg->sent_at)) {
+        echo '<li><i class="fa fa-paper-plane text-primary"></i> <strong>Sent to Gateway:</strong> ' . $msg->sent_at . '</li>';
+    }
+    if (!empty($msg->delivered_at)) {
+        echo '<li><i class="fa fa-check-circle text-success"></i> <strong>Delivered:</strong> ' . $msg->delivered_at . '</li>';
+    }
+    if ($msg->status === 'failed' && !empty($msg->updated_at)) {
+        echo '<li><i class="fa fa-times-circle text-danger"></i> <strong>Failed:</strong> ' . $msg->updated_at . '</li>';
+    }
+    echo '</ul>';
+
+    exit;
+}
+
+/**
+ * AJAX: Retry failed message
+ */
+function sms_suite_ajax_retry_message()
+{
+    header('Content-Type: application/json');
+
+    $msgId = (int)($_GET['id'] ?? 0);
+    if (!$msgId) {
+        echo json_encode(['success' => false, 'message' => 'Invalid message ID']);
+        exit;
+    }
+
+    $msg = Capsule::table('mod_sms_messages')
+        ->where('id', $msgId)
+        ->first();
+
+    if (!$msg) {
+        echo json_encode(['success' => false, 'message' => 'Message not found']);
+        exit;
+    }
+
+    if ($msg->status !== 'failed') {
+        echo json_encode(['success' => false, 'message' => 'Only failed messages can be retried']);
+        exit;
+    }
+
+    // Reset message to queued status for retry
+    Capsule::table('mod_sms_messages')
+        ->where('id', $msgId)
+        ->update([
+            'status' => 'queued',
+            'error' => null,
+            'provider_message_id' => null,
+            'sent_at' => null,
+            'delivered_at' => null,
+            'gateway_response' => null,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+    logActivity('SMS Suite: Message #' . $msgId . ' queued for retry');
+
+    echo json_encode(['success' => true, 'message' => 'Message queued for retry. It will be processed shortly.']);
+    exit;
+}
+
+/**
+ * Network Prefixes Management Page
+ */
+function sms_suite_admin_network_prefixes($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $action = $_POST['form_action'] ?? '';
+
+        if ($action === 'create') {
+            try {
+                Capsule::table('mod_sms_network_prefixes')->insert([
+                    'country_code' => SecurityHelper::sanitize($_POST['country_code']),
+                    'country_name' => SecurityHelper::sanitize($_POST['country_name']),
+                    'prefix' => SecurityHelper::sanitize($_POST['prefix']),
+                    'operator' => SecurityHelper::sanitize($_POST['operator']),
+                    'operator_code' => SecurityHelper::sanitize($_POST['operator_code'] ?? ''),
+                    'network_type' => $_POST['network_type'] ?? 'mobile',
+                    'mcc' => SecurityHelper::sanitize($_POST['mcc'] ?? ''),
+                    'mnc' => SecurityHelper::sanitize($_POST['mnc'] ?? ''),
+                    'status' => (int)($_POST['status'] ?? 1),
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+                echo '<div class="alert alert-success">Network prefix added successfully.</div>';
+            } catch (\Exception $e) {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+            }
+        } elseif ($action === 'update') {
+            try {
+                Capsule::table('mod_sms_network_prefixes')
+                    ->where('id', (int)$_POST['prefix_id'])
+                    ->update([
+                        'country_code' => SecurityHelper::sanitize($_POST['country_code']),
+                        'country_name' => SecurityHelper::sanitize($_POST['country_name']),
+                        'prefix' => SecurityHelper::sanitize($_POST['prefix']),
+                        'operator' => SecurityHelper::sanitize($_POST['operator']),
+                        'operator_code' => SecurityHelper::sanitize($_POST['operator_code'] ?? ''),
+                        'network_type' => $_POST['network_type'] ?? 'mobile',
+                        'mcc' => SecurityHelper::sanitize($_POST['mcc'] ?? ''),
+                        'mnc' => SecurityHelper::sanitize($_POST['mnc'] ?? ''),
+                        'status' => (int)($_POST['status'] ?? 1),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                echo '<div class="alert alert-success">Network prefix updated successfully.</div>';
+            } catch (\Exception $e) {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+            }
+        } elseif ($action === 'delete') {
+            try {
+                Capsule::table('mod_sms_network_prefixes')
+                    ->where('id', (int)$_POST['prefix_id'])
+                    ->delete();
+                echo '<div class="alert alert-success">Network prefix deleted.</div>';
+            } catch (\Exception $e) {
+                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+            }
+        } elseif ($action === 'bulk_import') {
+            $imported = 0;
+            $skipped = 0;
+            $errors = [];
+
+            $importData = $_POST['import_data'] ?? '';
+            $lines = array_filter(array_map('trim', explode("\n", $importData)));
+
+            foreach ($lines as $line) {
+                // Skip comments and headers
+                if (empty($line) || $line[0] === '#' || stripos($line, 'country_code') === 0) {
+                    continue;
+                }
+
+                // Parse CSV line: country_code,country_name,prefix,operator,operator_code,network_type,mcc,mnc
+                $parts = str_getcsv($line);
+                if (count($parts) < 4) {
+                    $skipped++;
+                    continue;
+                }
+
+                try {
+                    Capsule::table('mod_sms_network_prefixes')->insertOrIgnore([
+                        'country_code' => trim($parts[0]),
+                        'country_name' => trim($parts[1] ?? ''),
+                        'prefix' => trim($parts[2]),
+                        'operator' => trim($parts[3]),
+                        'operator_code' => trim($parts[4] ?? ''),
+                        'network_type' => trim($parts[5] ?? 'mobile'),
+                        'mcc' => trim($parts[6] ?? ''),
+                        'mnc' => trim($parts[7] ?? ''),
+                        'status' => 1,
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $imported++;
+                } catch (\Exception $e) {
+                    // Check if it's a duplicate
+                    if (strpos($e->getMessage(), 'Duplicate') !== false || strpos($e->getMessage(), '1062') !== false) {
+                        $skipped++;
+                    } else {
+                        $errors[] = "Line: $line - " . $e->getMessage();
+                    }
+                }
+            }
+
+            if ($imported > 0) {
+                echo '<div class="alert alert-success">Imported ' . $imported . ' prefixes successfully. Skipped ' . $skipped . ' duplicates/invalid lines.</div>';
+            }
+            if (!empty($errors)) {
+                echo '<div class="alert alert-warning">Some errors occurred:<br>' . implode('<br>', array_slice($errors, 0, 5)) . '</div>';
+            }
+        } elseif ($action === 'import_kenya') {
+            // Pre-built Kenya prefixes
+            $kenyaPrefixes = sms_suite_get_kenya_prefixes();
+            $imported = 0;
+            $skipped = 0;
+
+            foreach ($kenyaPrefixes as $prefix) {
+                try {
+                    Capsule::table('mod_sms_network_prefixes')->insertOrIgnore([
+                        'country_code' => '254',
+                        'country_name' => 'Kenya',
+                        'prefix' => $prefix['prefix'],
+                        'operator' => $prefix['operator'],
+                        'operator_code' => $prefix['operator_code'] ?? '',
+                        'network_type' => 'mobile',
+                        'mcc' => '639',
+                        'mnc' => $prefix['mnc'] ?? '',
+                        'status' => 1,
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $imported++;
+                } catch (\Exception $e) {
+                    $skipped++;
+                }
+            }
+
+            echo '<div class="alert alert-success">Imported ' . $imported . ' Kenya prefixes. Skipped ' . $skipped . ' duplicates.</div>';
+        }
+    }
+
+    // Get filter parameters
+    $filterCountry = $_GET['filter_country'] ?? '';
+    $filterOperator = $_GET['filter_operator'] ?? '';
+
+    // Build query
+    $query = Capsule::table('mod_sms_network_prefixes');
+
+    if (!empty($filterCountry)) {
+        $query->where('country_code', $filterCountry);
+    }
+    if (!empty($filterOperator)) {
+        $query->where('operator', 'like', '%' . $filterOperator . '%');
+    }
+
+    $prefixes = $query->orderBy('country_code')
+        ->orderBy('operator')
+        ->orderBy('prefix')
+        ->get();
+
+    // Get distinct countries for filter
+    $countries = Capsule::table('mod_sms_network_prefixes')
+        ->select(['country_code', 'country_name'])
+        ->distinct()
+        ->orderBy('country_name')
+        ->get();
+
+    // Get distinct operators for filter
+    $operators = Capsule::table('mod_sms_network_prefixes')
+        ->select('operator')
+        ->distinct()
+        ->orderBy('operator')
+        ->pluck('operator')
+        ->toArray();
+
+    // Statistics
+    $totalPrefixes = Capsule::table('mod_sms_network_prefixes')->count();
+    $countryCount = Capsule::table('mod_sms_network_prefixes')->distinct('country_code')->count('country_code');
+    $operatorCount = Capsule::table('mod_sms_network_prefixes')->distinct('operator')->count('operator');
+
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                <i class="fa fa-globe"></i> Network Prefixes Management
+                <div class="btn-group pull-right">
+                    <button class="btn btn-success btn-sm" data-toggle="modal" data-target="#createPrefixModal">
+                        <i class="fa fa-plus"></i> Add Prefix
+                    </button>
+                    <button class="btn btn-info btn-sm" data-toggle="modal" data-target="#importModal">
+                        <i class="fa fa-upload"></i> Bulk Import
+                    </button>
+                    <form method="post" style="display:inline;">
+                        <input type="hidden" name="form_action" value="import_kenya">
+                        <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm(\'Import all Kenya (254) network prefixes?\');">
+                            <i class="fa fa-flag"></i> Import Kenya Prefixes
+                        </button>
+                    </form>
+                </div>
+            </h3>
+        </div>
+        <div class="panel-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="well text-center">
+                        <h4>' . number_format($totalPrefixes) . '</h4>
+                        <small>Total Prefixes</small>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="well text-center">
+                        <h4>' . number_format($countryCount) . '</h4>
+                        <small>Countries</small>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="well text-center">
+                        <h4>' . number_format($operatorCount) . '</h4>
+                        <small>Operators</small>
+                    </div>
+                </div>
+            </div>
+
+            <form method="get" class="form-inline" style="margin-bottom:15px;">
+                <input type="hidden" name="module" value="sms_suite">
+                <input type="hidden" name="action" value="network_prefixes">
+                <div class="form-group">
+                    <label>Country:</label>
+                    <select name="filter_country" class="form-control input-sm">
+                        <option value="">All Countries</option>';
+
+    foreach ($countries as $c) {
+        $selected = ($filterCountry === $c->country_code) ? 'selected' : '';
+        echo '<option value="' . htmlspecialchars($c->country_code) . '" ' . $selected . '>+' . htmlspecialchars($c->country_code) . ' ' . htmlspecialchars($c->country_name) . '</option>';
+    }
+
+    echo '</select>
+                </div>
+                <div class="form-group">
+                    <label>Operator:</label>
+                    <select name="filter_operator" class="form-control input-sm">
+                        <option value="">All Operators</option>';
+
+    foreach ($operators as $op) {
+        $selected = ($filterOperator === $op) ? 'selected' : '';
+        echo '<option value="' . htmlspecialchars($op) . '" ' . $selected . '>' . htmlspecialchars($op) . '</option>';
+    }
+
+    echo '</select>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+                <a href="' . $modulelink . '&action=network_prefixes" class="btn btn-default btn-sm">Reset</a>
+            </form>
+
+            <table class="table table-striped table-condensed">
+                <thead>
+                    <tr>
+                        <th>Country</th>
+                        <th>Prefix</th>
+                        <th>Operator</th>
+                        <th>Code</th>
+                        <th>Type</th>
+                        <th>MCC/MNC</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+    if (count($prefixes) === 0) {
+        echo '<tr><td colspan="8" class="text-center text-muted">No prefixes found. Use "Import Kenya Prefixes" to get started.</td></tr>';
+    } else {
+        foreach ($prefixes as $p) {
+            $statusLabel = $p->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>';
+
+            // Color code operators
+            $operatorClass = '';
+            $opLower = strtolower($p->operator);
+            if (strpos($opLower, 'safaricom') !== false) {
+                $operatorClass = 'text-success';
+            } elseif (strpos($opLower, 'airtel') !== false) {
+                $operatorClass = 'text-danger';
+            } elseif (strpos($opLower, 'telkom') !== false) {
+                $operatorClass = 'text-info';
+            }
+
+            echo '<tr>
+                <td><strong>+' . htmlspecialchars($p->country_code) . '</strong> <small class="text-muted">' . htmlspecialchars($p->country_name) . '</small></td>
+                <td><code>' . htmlspecialchars($p->prefix) . '</code></td>
+                <td class="' . $operatorClass . '"><strong>' . htmlspecialchars($p->operator) . '</strong></td>
+                <td><small>' . htmlspecialchars($p->operator_code) . '</small></td>
+                <td>' . ucfirst($p->network_type) . '</td>
+                <td><small>' . htmlspecialchars($p->mcc) . '/' . htmlspecialchars($p->mnc) . '</small></td>
+                <td>' . $statusLabel . '</td>
+                <td>
+                    <button class="btn btn-xs btn-primary" onclick=\'editPrefix(' . json_encode($p) . ')\' title="Edit">
+                        <i class="fa fa-edit"></i>
+                    </button>
+                    <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this prefix?\');">
+                        <input type="hidden" name="form_action" value="delete">
+                        <input type="hidden" name="prefix_id" value="' . $p->id . '">
+                        <button type="submit" class="btn btn-xs btn-danger" title="Delete"><i class="fa fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>';
+        }
+    }
+
+    echo '</tbody></table>
+        </div>
+    </div>';
+
+    // Create Prefix Modal
+    echo '<div class="modal fade" id="createPrefixModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="create">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-plus"></i> Add Network Prefix</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Country Code <span class="text-danger">*</span></label>
+                                    <input type="text" name="country_code" class="form-control" required maxlength="5" placeholder="e.g., 254">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Country Name</label>
+                                    <input type="text" name="country_name" class="form-control" placeholder="e.g., Kenya">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Prefix <span class="text-danger">*</span></label>
+                                    <input type="text" name="prefix" class="form-control" required maxlength="10" placeholder="e.g., 7XX">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Operator <span class="text-danger">*</span></label>
+                                    <input type="text" name="operator" class="form-control" required placeholder="e.g., Safaricom">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Operator Code</label>
+                                    <input type="text" name="operator_code" class="form-control" placeholder="e.g., safaricom">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Network Type</label>
+                                    <select name="network_type" class="form-control">
+                                        <option value="mobile">Mobile</option>
+                                        <option value="fixed">Fixed</option>
+                                        <option value="voip">VoIP</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>MCC</label>
+                                    <input type="text" name="mcc" class="form-control" maxlength="5" placeholder="e.g., 639">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>MNC</label>
+                                    <input type="text" name="mnc" class="form-control" maxlength="5" placeholder="e.g., 02">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Status</label>
+                                    <select name="status" class="form-control">
+                                        <option value="1">Active</option>
+                                        <option value="0">Inactive</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">Add Prefix</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Edit Prefix Modal
+    echo '<div class="modal fade" id="editPrefixModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="update">
+                    <input type="hidden" name="prefix_id" id="edit_prefix_id">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-edit"></i> Edit Network Prefix</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Country Code <span class="text-danger">*</span></label>
+                                    <input type="text" name="country_code" id="edit_country_code" class="form-control" required maxlength="5">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Country Name</label>
+                                    <input type="text" name="country_name" id="edit_country_name" class="form-control">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Prefix <span class="text-danger">*</span></label>
+                                    <input type="text" name="prefix" id="edit_prefix" class="form-control" required maxlength="10">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Operator <span class="text-danger">*</span></label>
+                                    <input type="text" name="operator" id="edit_operator" class="form-control" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Operator Code</label>
+                                    <input type="text" name="operator_code" id="edit_operator_code" class="form-control">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Network Type</label>
+                                    <select name="network_type" id="edit_network_type" class="form-control">
+                                        <option value="mobile">Mobile</option>
+                                        <option value="fixed">Fixed</option>
+                                        <option value="voip">VoIP</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>MCC</label>
+                                    <input type="text" name="mcc" id="edit_mcc" class="form-control" maxlength="5">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>MNC</label>
+                                    <input type="text" name="mnc" id="edit_mnc" class="form-control" maxlength="5">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label>Status</label>
+                                    <select name="status" id="edit_status" class="form-control">
+                                        <option value="1">Active</option>
+                                        <option value="0">Inactive</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // Import Modal
+    echo '<div class="modal fade" id="importModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="bulk_import">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-upload"></i> Bulk Import Network Prefixes</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <strong>CSV Format:</strong> country_code,country_name,prefix,operator,operator_code,network_type,mcc,mnc<br>
+                            <strong>Example:</strong> 254,Kenya,7XX,Safaricom,safaricom,mobile,639,02
+                        </div>
+                        <div class="form-group">
+                            <label>Paste CSV Data (one prefix per line)</label>
+                            <textarea name="import_data" class="form-control" rows="15" placeholder="254,Kenya,700,Safaricom,safaricom,mobile,639,02
+254,Kenya,701,Safaricom,safaricom,mobile,639,02
+254,Kenya,722,Safaricom,safaricom,mobile,639,02"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">Import Prefixes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // JavaScript for edit modal
+    echo '<script>
+    function editPrefix(data) {
+        document.getElementById("edit_prefix_id").value = data.id;
+        document.getElementById("edit_country_code").value = data.country_code;
+        document.getElementById("edit_country_name").value = data.country_name || "";
+        document.getElementById("edit_prefix").value = data.prefix;
+        document.getElementById("edit_operator").value = data.operator;
+        document.getElementById("edit_operator_code").value = data.operator_code || "";
+        document.getElementById("edit_network_type").value = data.network_type || "mobile";
+        document.getElementById("edit_mcc").value = data.mcc || "";
+        document.getElementById("edit_mnc").value = data.mnc || "";
+        document.getElementById("edit_status").value = data.status;
+        $("#editPrefixModal").modal("show");
+    }
+    </script>';
+}
+
+/**
+ * Download document handler for admin
+ */
+function sms_suite_admin_download_document()
+{
+    // Security check - only admins can access
+    if (empty($_SESSION['adminid'])) {
+        die('Unauthorized access');
+    }
+
+    $path = $_GET['path'] ?? '';
+    $viewOnly = isset($_GET['view']);
+
+    if (empty($path)) {
+        die('No document specified');
+    }
+
+    // Sanitize path - prevent directory traversal
+    $path = str_replace(['..', '\\'], ['', '/'], $path);
+
+    // Build full path
+    $basePath = realpath(__DIR__ . '/../');
+    $fullPath = $basePath . '/' . $path;
+
+    // Verify the file is within the allowed directory
+    $realFullPath = realpath($fullPath);
+    if ($realFullPath === false || strpos($realFullPath, $basePath) !== 0) {
+        die('Invalid document path');
+    }
+
+    if (!file_exists($realFullPath)) {
+        die('Document not found');
+    }
+
+    // Get file info
+    $filename = basename($realFullPath);
+    $finfo = new \finfo(FILEINFO_MIME_TYPE);
+    $mimeType = $finfo->file($realFullPath);
+
+    // Only allow safe file types
+    $allowedTypes = [
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/jpg',
+    ];
+
+    if (!in_array($mimeType, $allowedTypes)) {
+        die('Invalid file type');
+    }
+
+    // Set headers
+    header('Content-Type: ' . $mimeType);
+    header('Content-Length: ' . filesize($realFullPath));
+
+    if ($viewOnly) {
+        // Display inline for viewing
+        header('Content-Disposition: inline; filename="' . $filename . '"');
+    } else {
+        // Force download
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+    }
+
+    // Output file
+    readfile($realFullPath);
+    exit;
+}
+
+/**
+ * Get Kenya mobile network prefixes
+ */
+function sms_suite_get_kenya_prefixes(): array
+{
+    return [
+        // Safaricom
+        ['prefix' => '700', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '701', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '702', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '703', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '704', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '705', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '706', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '707', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '708', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '709', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '710', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '711', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '712', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '713', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '714', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '715', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '716', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '717', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '718', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '719', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '720', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '721', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '722', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '723', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '724', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '725', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '726', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '727', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '728', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '729', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '740', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '741', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '742', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '743', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '745', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '746', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '748', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '757', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '758', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '759', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '768', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '769', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '790', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '791', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '792', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '793', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '794', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '795', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '796', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '797', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '798', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '799', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '110', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '111', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '112', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '113', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '114', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+        ['prefix' => '115', 'operator' => 'Safaricom', 'operator_code' => 'safaricom', 'mnc' => '02'],
+
+        // Airtel Kenya
+        ['prefix' => '730', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '731', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '732', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '733', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '734', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '735', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '736', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '737', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '738', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '739', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '750', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '751', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '752', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '753', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '754', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '755', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '756', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '780', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '781', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '782', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '783', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '784', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '785', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '786', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '787', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '788', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '789', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '100', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '101', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '102', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '103', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '104', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '105', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+        ['prefix' => '106', 'operator' => 'Airtel Kenya', 'operator_code' => 'airtel', 'mnc' => '03'],
+
+        // Telkom Kenya
+        ['prefix' => '770', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '771', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '772', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '773', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '774', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '775', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '776', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '777', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '778', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+        ['prefix' => '779', 'operator' => 'Telkom Kenya', 'operator_code' => 'telkom', 'mnc' => '07'],
+
+        // Faiba 4G (Jamii Telecom)
+        ['prefix' => '747', 'operator' => 'Faiba 4G', 'operator_code' => 'faiba', 'mnc' => '04'],
+
+        // Equitel (Finserve)
+        ['prefix' => '763', 'operator' => 'Equitel', 'operator_code' => 'equitel', 'mnc' => '05'],
+        ['prefix' => '764', 'operator' => 'Equitel', 'operator_code' => 'equitel', 'mnc' => '05'],
+        ['prefix' => '765', 'operator' => 'Equitel', 'operator_code' => 'equitel', 'mnc' => '05'],
+        ['prefix' => '766', 'operator' => 'Equitel', 'operator_code' => 'equitel', 'mnc' => '05'],
+
+        // Mobile Pay
+        ['prefix' => '760', 'operator' => 'Mobile Pay', 'operator_code' => 'mobilepay', 'mnc' => ''],
+        ['prefix' => '761', 'operator' => 'Mobile Pay', 'operator_code' => 'mobilepay', 'mnc' => ''],
+        ['prefix' => '762', 'operator' => 'Mobile Pay', 'operator_code' => 'mobilepay', 'mnc' => ''],
+
+        // Homeland Media
+        ['prefix' => '767', 'operator' => 'Homeland Media', 'operator_code' => 'homeland', 'mnc' => ''],
+    ];
 }
