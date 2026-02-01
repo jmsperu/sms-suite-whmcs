@@ -249,6 +249,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [x] Better input validation throughout
 - [x] Secure JSON encoding for JavaScript contexts
 
+#### Gateway Enhancements
+- [x] Fixed missing `getRequiredFields()` in all gateway classes
+- [x] Added `httpPost()` and `httpGet()` helpers to AbstractGateway
+- [x] SMPP Gateway with full protocol support (SMPP 3.4)
+- [x] Added TextlocalIndia, TextlocalUK, Kaleyra, Fast2SMS gateways
+- [x] All 50+ gateway drivers now have proper required fields defined
+
+#### Internal WHMCS Notifications
+- [x] `lib/Core/NotificationService.php` - SMS counterparts to WHMCS emails
+- [x] 30+ notification types mapped to WHMCS email templates
+- [x] Categories: client, order, invoice, quote, domain, service, ticket
+- [x] Admin SMS notifications for key events (new orders, tickets, logins)
+- [x] Client SMS opt-in/opt-out preferences
+- [x] EmailPreSend hook for automatic SMS alongside emails
+- [x] Configurable templates per notification type
+
+#### SMS Verification System
+- [x] `lib/Core/VerificationService.php` - Token-based verification
+- [x] Client account verification via SMS
+- [x] Order verification (before/after checkout)
+- [x] Two-factor authentication support
+- [x] Configurable token length (numeric, alpha, alphanumeric)
+- [x] Token expiry and max attempts limits
+- [x] Rate limiting to prevent abuse
+- [x] Verification audit logging
+
+#### Database Schema Updates
+- [x] `mod_sms_notification_templates` - SMS templates for email counterparts
+- [x] `mod_sms_admin_notifications` - Admin notification preferences
+- [x] `mod_sms_verification_tokens` - Hashed token storage
+- [x] `mod_sms_client_verification` - Client verification status
+- [x] `mod_sms_order_verification` - Order verification status
+- [x] `mod_sms_verification_templates` - Custom verification messages
+- [x] `mod_sms_verification_logs` - Verification audit log
+- [x] Added `accept_sms`, `accept_marketing_sms`, `enabled_notifications` to settings
+
 #### Remaining
 - [ ] Compatibility testing (WHMCS 8.x versions)
 - [ ] Final packaging
