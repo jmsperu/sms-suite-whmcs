@@ -261,4 +261,98 @@ abstract class AbstractGateway implements GatewayInterface
 
         return $phone;
     }
+
+    /**
+     * Convenience method for POST requests
+     *
+     * @param string $url
+     * @param array|string $data
+     * @param array $headers
+     * @param bool $json Send as JSON
+     * @return array ['http_code' => int, 'body' => string]
+     */
+    protected function httpPost(string $url, $data = [], array $headers = [], bool $json = false): array
+    {
+        $ch = curl_init();
+
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+
+        // Build headers
+        $headerList = [];
+        foreach ($headers as $key => $value) {
+            $headerList[] = "{$key}: {$value}";
+        }
+        if (!empty($headerList)) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headerList);
+        }
+
+        // Set body
+        if ($json && is_array($data)) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        } elseif (is_array($data)) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+        } else {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+        }
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+
+        curl_close($ch);
+
+        // Log errors
+        if ($error || $httpCode >= 400) {
+            logActivity("SMS Suite Gateway Error: {$this->getType()} - {$error} (HTTP {$httpCode})");
+        }
+
+        return [
+            'http_code' => $httpCode,
+            'body' => $response,
+            'error' => $error,
+        ];
+    }
+
+    /**
+     * Convenience method for GET requests
+     *
+     * @param string $url
+     * @param array $headers
+     * @return array ['http_code' => int, 'body' => string]
+     */
+    protected function httpGet(string $url, array $headers = []): array
+    {
+        $ch = curl_init();
+
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+
+        $headerList = [];
+        foreach ($headers as $key => $value) {
+            $headerList[] = "{$key}: {$value}";
+        }
+        if (!empty($headerList)) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headerList);
+        }
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+
+        curl_close($ch);
+
+        return [
+            'http_code' => $httpCode,
+            'body' => $response,
+            'error' => $error,
+        ];
+    }
 }

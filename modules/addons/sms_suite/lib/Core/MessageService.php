@@ -592,4 +592,95 @@ class MessageService
 
         return null;
     }
+
+    /**
+     * Send a message directly without client context (for admin/system notifications)
+     *
+     * @param string $to Phone number
+     * @param string $message Message content
+     * @param array $options Additional options
+     * @return array
+     */
+    public static function sendDirect(string $to, string $message, array $options = []): array
+    {
+        try {
+            $to = self::normalizePhone($to);
+            if (empty($to)) {
+                return ['success' => false, 'error' => 'Invalid phone number'];
+            }
+
+            if (empty($message)) {
+                return ['success' => false, 'error' => 'Message cannot be empty'];
+            }
+
+            // Get system default gateway
+            $gatewayId = $options['gateway_id'] ?? self::getSystemDefaultGateway();
+            if (!$gatewayId) {
+                return ['success' => false, 'error' => 'No gateway configured'];
+            }
+
+            $channel = $options['channel'] ?? 'sms';
+            $senderId = $options['sender_id'] ?? self::getSystemDefaultSenderId();
+
+            // Calculate segments
+            $segmentResult = SegmentCounter::count($message, $channel);
+
+            // Create message record (client_id = 0 for system messages)
+            $messageId = Capsule::table('mod_sms_messages')->insertGetId([
+                'client_id' => 0,
+                'campaign_id' => null,
+                'automation_id' => null,
+                'gateway_id' => $gatewayId,
+                'channel' => $channel,
+                'direction' => 'outbound',
+                'sender_id' => $senderId,
+                'to_number' => $to,
+                'message' => $message,
+                'encoding' => $segmentResult->encoding,
+                'segments' => $segmentResult->segments,
+                'units' => $segmentResult->units,
+                'cost' => 0,
+                'status' => 'queued',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            // Send immediately
+            return self::processMessage($messageId);
+
+        } catch (Exception $e) {
+            logActivity('SMS Suite: Direct message send error - ' . $e->getMessage());
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get system default gateway (first active gateway)
+     *
+     * @return int|null
+     */
+    private static function getSystemDefaultGateway(): ?int
+    {
+        $gateway = Capsule::table('mod_sms_gateways')
+            ->where('status', 1)
+            ->orderBy('id')
+            ->first();
+
+        return $gateway->id ?? null;
+    }
+
+    /**
+     * Get system default sender ID
+     *
+     * @return string|null
+     */
+    private static function getSystemDefaultSenderId(): ?string
+    {
+        $setting = Capsule::table('tbladdonmodules')
+            ->where('module', 'sms_suite')
+            ->where('setting', 'default_sender_id')
+            ->first();
+
+        return $setting->value ?? null;
+    }
 }

@@ -356,9 +356,31 @@ function sms_suite_create_tables()
             $table->string('default_sender_id', 50)->nullable();
             $table->string('webhook_url', 500)->nullable();
             $table->boolean('api_enabled')->default(true);
+            $table->boolean('accept_sms')->default(true); // Client opted in for SMS notifications
+            $table->boolean('accept_marketing_sms')->default(false); // Marketing SMS opt-in
+            $table->text('enabled_notifications')->nullable(); // JSON array of enabled notification types
             $table->timestamps();
             $table->index('client_id');
         });
+    }
+
+    // Add SMS notification columns if table exists but columns don't
+    if ($schema->hasTable('mod_sms_settings')) {
+        if (!$schema->hasColumn('mod_sms_settings', 'accept_sms')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->boolean('accept_sms')->default(true)->after('api_enabled');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_settings', 'accept_marketing_sms')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->boolean('accept_marketing_sms')->default(false)->after('accept_sms');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_settings', 'enabled_notifications')) {
+            $schema->table('mod_sms_settings', function ($table) {
+                $table->text('enabled_notifications')->nullable()->after('accept_marketing_sms');
+            });
+        }
     }
 
     // Gateways
@@ -1047,6 +1069,108 @@ function sms_suite_create_tables()
         });
     }
 
+    // ============ WHMCS Notification Tables ============
+
+    // SMS Notification Templates (linked to WHMCS email templates)
+    if (!$schema->hasTable('mod_sms_notification_templates')) {
+        $schema->create('mod_sms_notification_templates', function ($table) {
+            $table->increments('id');
+            $table->string('notification_type', 50)->unique(); // invoice_created, order_confirmation, etc
+            $table->string('name', 100);
+            $table->text('message');
+            $table->string('category', 50)->default('other'); // client, order, invoice, domain, service, ticket
+            $table->string('status', 20)->default('inactive'); // active, inactive
+            $table->timestamps();
+            $table->index('notification_type');
+            $table->index('status');
+        });
+    }
+
+    // Admin SMS Notifications
+    if (!$schema->hasTable('mod_sms_admin_notifications')) {
+        $schema->create('mod_sms_admin_notifications', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('admin_id');
+            $table->string('event', 50); // new_order, new_ticket, client_login, etc
+            $table->string('phone', 30);
+            $table->boolean('enabled')->default(true);
+            $table->timestamps();
+            $table->index(['admin_id', 'event']);
+            $table->unique(['admin_id', 'event']);
+        });
+    }
+
+    // ============ Verification Tables ============
+
+    // Verification Tokens
+    if (!$schema->hasTable('mod_sms_verification_tokens')) {
+        $schema->create('mod_sms_verification_tokens', function ($table) {
+            $table->increments('id');
+            $table->string('phone', 30);
+            $table->string('token', 255); // Hashed token
+            $table->string('type', 50); // client_verification, order_verification, two_factor, phone_verification
+            $table->unsignedInteger('related_id')->nullable(); // client_id, order_id, etc
+            $table->dateTime('expires_at');
+            $table->unsignedTinyInteger('attempts')->default(0);
+            $table->boolean('verified')->default(false);
+            $table->dateTime('verified_at')->nullable();
+            $table->timestamp('created_at')->useCurrent();
+            $table->index(['phone', 'type']);
+            $table->index('expires_at');
+        });
+    }
+
+    // Client Verification Status
+    if (!$schema->hasTable('mod_sms_client_verification')) {
+        $schema->create('mod_sms_client_verification', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id')->unique();
+            $table->boolean('phone_verified')->default(false);
+            $table->dateTime('verified_at')->nullable();
+            $table->string('verified_phone', 30)->nullable();
+            $table->timestamps();
+            $table->index('client_id');
+        });
+    }
+
+    // Order Verification Status
+    if (!$schema->hasTable('mod_sms_order_verification')) {
+        $schema->create('mod_sms_order_verification', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('order_id')->unique();
+            $table->boolean('verified')->default(false);
+            $table->dateTime('verified_at')->nullable();
+            $table->string('verification_type', 20)->default('sms'); // sms, admin_override
+            $table->timestamps();
+            $table->index('order_id');
+        });
+    }
+
+    // Custom Verification Message Templates
+    if (!$schema->hasTable('mod_sms_verification_templates')) {
+        $schema->create('mod_sms_verification_templates', function ($table) {
+            $table->increments('id');
+            $table->string('type', 50)->unique(); // client_verification, order_verification, two_factor
+            $table->text('message');
+            $table->string('status', 20)->default('active');
+            $table->timestamps();
+        });
+    }
+
+    // Verification Logs
+    if (!$schema->hasTable('mod_sms_verification_logs')) {
+        $schema->create('mod_sms_verification_logs', function ($table) {
+            $table->increments('id');
+            $table->string('phone', 30); // Masked phone
+            $table->string('type', 50);
+            $table->unsignedInteger('related_id')->nullable();
+            $table->string('ip_address', 45)->nullable();
+            $table->string('user_agent', 255)->nullable();
+            $table->timestamp('created_at')->useCurrent();
+            $table->index(['type', 'created_at']);
+        });
+    }
+
     // Add message_type and from_number columns to messages if not exists
     if ($schema->hasTable('mod_sms_messages')) {
         if (!$schema->hasColumn('mod_sms_messages', 'message_type')) {
@@ -1166,7 +1290,15 @@ function sms_suite_create_tables()
 function sms_suite_drop_tables()
 {
     $tables = [
-        // New advanced tables
+        // Verification and Notification tables
+        'mod_sms_verification_logs',
+        'mod_sms_verification_templates',
+        'mod_sms_order_verification',
+        'mod_sms_client_verification',
+        'mod_sms_verification_tokens',
+        'mod_sms_admin_notifications',
+        'mod_sms_notification_templates',
+        // Advanced campaign tables
         'mod_sms_scheduled',
         'mod_sms_recurring_log',
         'mod_sms_segment_conditions',

@@ -315,3 +315,414 @@ add_hook('TicketStatusChange', 10, function($vars) {
 add_hook('DomainExpiryNotice', 10, function($vars) {
     sms_suite_execute_automation('DomainExpiryNotice', $vars);
 });
+
+// ============ WHMCS Internal Notification Hooks ============
+// These hooks send SMS notifications alongside WHMCS email templates
+
+/**
+ * EmailPreSend Hook - Send SMS notification for WHMCS email templates
+ * This is the main hook for internal WHMCS notifications
+ */
+add_hook('EmailPreSend', 1, function ($vars) {
+    try {
+        $templateName = $vars['messagename'] ?? '';
+        $clientId = $vars['relid'] ?? 0;
+
+        // Skip if no template name or client ID
+        if (empty($templateName) || empty($clientId)) {
+            return;
+        }
+
+        // Check if we have an SMS template for this email template
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        $smsTemplate = \SMSSuite\Core\NotificationService::getSmsTemplateForEmail($templateName, $clientId);
+
+        if (!$smsTemplate) {
+            return; // No SMS template or client opted out
+        }
+
+        // Build merge data from email merge fields
+        $mergeData = $vars['mergefields'] ?? [];
+
+        // Add common fields
+        if (isset($vars['relid'])) {
+            $client = Capsule::table('tblclients')->where('id', $vars['relid'])->first();
+            if ($client) {
+                $mergeData['first_name'] = $client->firstname;
+                $mergeData['last_name'] = $client->lastname;
+                $mergeData['company'] = $client->companyname;
+                $mergeData['email'] = $client->email;
+            }
+        }
+
+        // Send SMS notification
+        require_once __DIR__ . '/lib/Core/TemplateService.php';
+        require_once __DIR__ . '/lib/Core/MessageService.php';
+
+        $phone = \SMSSuite\Core\NotificationService::getClientPhone($client);
+        if (empty($phone)) {
+            return;
+        }
+
+        $message = \SMSSuite\Core\TemplateService::processTemplate($smsTemplate['message'], $mergeData);
+        \SMSSuite\Core\MessageService::send($clientId, $phone, $message, 'notification');
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (EmailPreSend): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Invoice specific notification hooks
+ */
+add_hook('InvoiceCreated', 5, function($vars) {
+    try {
+        $invoiceId = $vars['invoiceid'];
+        $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+        if (!$invoice) return;
+
+        $client = Capsule::table('tblclients')->where('id', $invoice->userid)->first();
+        if (!$client) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($invoice->userid, 'invoice_created', [
+            'invoice_number' => $invoiceId,
+            'invoice_id' => $invoiceId,
+            'total' => $invoice->total,
+            'due_date' => date('M d, Y', strtotime($invoice->duedate)),
+            'currency' => $client->currency == 1 ? '$' : '',
+            'invoice_url' => rtrim(\App::getSystemURL(), '/') . '/viewinvoice.php?id=' . $invoiceId,
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (InvoiceCreated notification): ' . $e->getMessage());
+    }
+});
+
+add_hook('InvoicePaidPreEmail', 5, function($vars) {
+    try {
+        $invoiceId = $vars['invoiceid'];
+        $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+        if (!$invoice) return;
+
+        $client = Capsule::table('tblclients')->where('id', $invoice->userid)->first();
+        if (!$client) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($invoice->userid, 'invoice_paid', [
+            'invoice_number' => $invoiceId,
+            'total' => $invoice->total,
+            'currency' => $client->currency == 1 ? '$' : '',
+        ]);
+
+        // Also notify admins
+        \SMSSuite\Core\NotificationService::sendAdminNotification('order_paid', [
+            'order_id' => $invoiceId,
+            'client_name' => $client->firstname . ' ' . $client->lastname,
+            'total' => $invoice->total,
+            'currency' => '$',
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (InvoicePaidPreEmail): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Order notification hooks
+ */
+add_hook('AfterShoppingCartCheckout', 5, function($vars) {
+    try {
+        $orderId = $vars['OrderID'] ?? $vars['orderid'] ?? null;
+        if (!$orderId) return;
+
+        $order = Capsule::table('tblorders')->where('id', $orderId)->first();
+        if (!$order) return;
+
+        $client = Capsule::table('tblclients')->where('id', $order->userid)->first();
+        if (!$client) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        // Send client notification
+        \SMSSuite\Core\NotificationService::sendClientNotification($order->userid, 'order_confirmation', [
+            'order_number' => $order->ordernum,
+            'order_id' => $orderId,
+            'total' => $order->amount,
+            'currency' => '$',
+        ]);
+
+        // Notify admins of new order
+        \SMSSuite\Core\NotificationService::sendAdminNotification('new_order', [
+            'order_id' => $order->ordernum,
+            'client_name' => $client->firstname . ' ' . $client->lastname,
+            'total' => $order->amount,
+            'currency' => '$',
+        ]);
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (AfterShoppingCartCheckout): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Ticket notification hooks
+ */
+add_hook('TicketOpen', 5, function($vars) {
+    try {
+        $ticketId = $vars['ticketid'];
+
+        $ticket = Capsule::table('tbltickets')->where('id', $ticketId)->first();
+        if (!$ticket || empty($ticket->userid)) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        // Notify client
+        \SMSSuite\Core\NotificationService::sendClientNotification($ticket->userid, 'ticket_opened', [
+            'ticket_id' => $ticket->tid,
+            'ticket_subject' => $ticket->title,
+            'ticket_url' => rtrim(\App::getSystemURL(), '/') . '/viewticket.php?tid=' . $ticket->tid,
+        ]);
+
+        // Notify admins
+        $dept = Capsule::table('tblticketdepartments')->where('id', $ticket->did)->first();
+        \SMSSuite\Core\NotificationService::sendAdminNotification('new_ticket', [
+            'ticket_id' => $ticket->tid,
+            'subject' => $ticket->title,
+            'priority' => $ticket->priority,
+            'department' => $dept->name ?? 'General',
+        ]);
+
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (TicketOpen notification): ' . $e->getMessage());
+    }
+});
+
+add_hook('TicketAdminReply', 5, function($vars) {
+    try {
+        $ticketId = $vars['ticketid'];
+
+        $ticket = Capsule::table('tbltickets')->where('id', $ticketId)->first();
+        if (!$ticket || empty($ticket->userid)) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($ticket->userid, 'ticket_reply', [
+            'ticket_id' => $ticket->tid,
+            'ticket_subject' => $ticket->title,
+            'ticket_url' => rtrim(\App::getSystemURL(), '/') . '/viewticket.php?tid=' . $ticket->tid,
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (TicketAdminReply notification): ' . $e->getMessage());
+    }
+});
+
+add_hook('TicketUserReply', 5, function($vars) {
+    try {
+        $ticketId = $vars['ticketid'];
+
+        $ticket = Capsule::table('tbltickets')->where('id', $ticketId)->first();
+        if (!$ticket) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        // Notify admins of client reply
+        \SMSSuite\Core\NotificationService::sendAdminNotification('ticket_reply', [
+            'ticket_id' => $ticket->tid,
+            'subject' => $ticket->title,
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (TicketUserReply notification): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Domain notification hooks
+ */
+add_hook('DomainRegister', 5, function($vars) {
+    try {
+        $domainId = $vars['domainid'];
+
+        $domain = Capsule::table('tbldomains')->where('id', $domainId)->first();
+        if (!$domain) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($domain->userid, 'domain_registered', [
+            'domain' => $domain->domain,
+            'expiry_date' => date('M d, Y', strtotime($domain->expirydate)),
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (DomainRegister notification): ' . $e->getMessage());
+    }
+});
+
+add_hook('DomainRenewal', 5, function($vars) {
+    try {
+        $domainId = $vars['domainid'];
+
+        $domain = Capsule::table('tbldomains')->where('id', $domainId)->first();
+        if (!$domain) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($domain->userid, 'domain_renewed', [
+            'domain' => $domain->domain,
+            'expiry_date' => date('M d, Y', strtotime($domain->expirydate)),
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (DomainRenewal notification): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Service suspension hooks
+ */
+add_hook('AfterModuleSuspend', 5, function($vars) {
+    try {
+        $serviceId = $vars['serviceid'];
+
+        $service = Capsule::table('tblhosting')->where('id', $serviceId)->first();
+        if (!$service) return;
+
+        $product = Capsule::table('tblproducts')->where('id', $service->packageid)->first();
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        // Notify client
+        \SMSSuite\Core\NotificationService::sendClientNotification($service->userid, 'service_suspended', [
+            'product_name' => $product->name ?? 'Service',
+            'service_id' => $serviceId,
+        ]);
+
+        // Notify admins
+        $client = Capsule::table('tblclients')->where('id', $service->userid)->first();
+        \SMSSuite\Core\NotificationService::sendAdminNotification('service_suspended', [
+            'product_name' => $product->name ?? 'Service',
+            'client_name' => ($client->firstname ?? '') . ' ' . ($client->lastname ?? ''),
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (AfterModuleSuspend notification): ' . $e->getMessage());
+    }
+});
+
+add_hook('AfterModuleUnsuspend', 5, function($vars) {
+    try {
+        $serviceId = $vars['serviceid'];
+
+        $service = Capsule::table('tblhosting')->where('id', $serviceId)->first();
+        if (!$service) return;
+
+        $product = Capsule::table('tblproducts')->where('id', $service->packageid)->first();
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($service->userid, 'service_unsuspended', [
+            'product_name' => $product->name ?? 'Service',
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (AfterModuleUnsuspend notification): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Client login hooks (for admin notification and 2FA)
+ */
+add_hook('ClientLogin', 5, function($vars) {
+    try {
+        $userId = $vars['userid'];
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        $client = Capsule::table('tblclients')->where('id', $userId)->first();
+        if (!$client) return;
+
+        \SMSSuite\Core\NotificationService::sendAdminNotification('client_login', [
+            'email' => $client->email,
+            'ip' => $_SERVER['REMOTE_ADDR'] ?? 'Unknown',
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (ClientLogin notification): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Admin login notification
+ */
+add_hook('AdminLogin', 5, function($vars) {
+    try {
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendAdminNotification('admin_login', [
+            'username' => $vars['username'] ?? 'Unknown',
+            'ip' => $_SERVER['REMOTE_ADDR'] ?? 'Unknown',
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (AdminLogin notification): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Cancellation request notification
+ */
+add_hook('CancellationRequest', 5, function($vars) {
+    try {
+        $serviceId = $vars['relid'];
+
+        $service = Capsule::table('tblhosting')->where('id', $serviceId)->first();
+        if (!$service) return;
+
+        $product = Capsule::table('tblproducts')->where('id', $service->packageid)->first();
+        $client = Capsule::table('tblclients')->where('id', $service->userid)->first();
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendAdminNotification('cancellation_request', [
+            'product_name' => $product->name ?? 'Service',
+            'client_name' => ($client->firstname ?? '') . ' ' . ($client->lastname ?? ''),
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (CancellationRequest notification): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Quote notification hooks
+ */
+add_hook('QuoteCreated', 5, function($vars) {
+    try {
+        $quoteId = $vars['quoteid'];
+
+        $quote = Capsule::table('tblquotes')->where('id', $quoteId)->first();
+        if (!$quote) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($quote->userid, 'quote_created', [
+            'quote_number' => $quoteId,
+            'total' => $quote->total,
+            'currency' => '$',
+            'quote_url' => rtrim(\App::getSystemURL(), '/') . '/viewquote.php?id=' . $quoteId,
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (QuoteCreated notification): ' . $e->getMessage());
+    }
+});
+
+add_hook('QuoteAccepted', 5, function($vars) {
+    try {
+        $quoteId = $vars['quoteid'];
+
+        $quote = Capsule::table('tblquotes')->where('id', $quoteId)->first();
+        if (!$quote) return;
+
+        require_once __DIR__ . '/lib/Core/NotificationService.php';
+
+        \SMSSuite\Core\NotificationService::sendClientNotification($quote->userid, 'quote_accepted', [
+            'quote_number' => $quoteId,
+        ]);
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (QuoteAccepted notification): ' . $e->getMessage());
+    }
+});

@@ -187,6 +187,14 @@ class MessageBirdGateway extends AbstractGateway
     public function getName(): string { return 'MessageBird'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'text', 'label' => 'API Key', 'required' => true],
+            ['name' => 'originator', 'type' => 'text', 'label' => 'Originator/Sender ID', 'required' => true],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $apiKey = $this->config['api_key'];
@@ -219,6 +227,13 @@ class ClickatellGateway extends AbstractGateway
     public function getType(): string { return 'clickatell'; }
     public function getName(): string { return 'Clickatell'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'text', 'label' => 'API Key', 'required' => true],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -255,6 +270,15 @@ class SinchGateway extends AbstractGateway
     public function getName(): string { return 'Sinch'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'service_plan_id', 'type' => 'text', 'label' => 'Service Plan ID', 'required' => true],
+            ['name' => 'api_token', 'type' => 'password', 'label' => 'API Token', 'required' => true],
+            ['name' => 'from_number', 'type' => 'text', 'label' => 'From Number', 'required' => true],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $servicePlanId = $this->config['service_plan_id'];
@@ -289,6 +313,17 @@ class BandwidthGateway extends AbstractGateway
     public function getType(): string { return 'bandwidth'; }
     public function getName(): string { return 'Bandwidth'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'account_id', 'type' => 'text', 'label' => 'Account ID', 'required' => true],
+            ['name' => 'api_token', 'type' => 'text', 'label' => 'API Token', 'required' => true],
+            ['name' => 'api_secret', 'type' => 'password', 'label' => 'API Secret', 'required' => true],
+            ['name' => 'application_id', 'type' => 'text', 'label' => 'Application ID', 'required' => true],
+            ['name' => 'from_number', 'type' => 'text', 'label' => 'From Number', 'required' => true],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -336,6 +371,15 @@ class AfricasTalkingGateway extends AbstractGateway
     public function getName(): string { return 'Africa\'s Talking'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'username', 'type' => 'text', 'label' => 'Username', 'required' => true],
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'from', 'type' => 'text', 'label' => 'Sender ID', 'required' => false],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $username = $this->config['username'];
@@ -379,6 +423,14 @@ class TermiiGateway extends AbstractGateway
     public function getName(): string { return 'Termii'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'sender_id', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $apiKey = $this->config['api_key'];
@@ -415,6 +467,15 @@ class Msg91Gateway extends AbstractGateway
     public function getType(): string { return 'msg91'; }
     public function getName(): string { return 'MSG91'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'auth_key', 'type' => 'password', 'label' => 'Auth Key', 'required' => true],
+            ['name' => 'sender_id', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+            ['name' => 'template_id', 'type' => 'text', 'label' => 'Template ID', 'required' => true],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -453,6 +514,15 @@ class SmsGlobalGateway extends AbstractGateway
     public function getName(): string { return 'SMSGlobal'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'text', 'label' => 'API Key', 'required' => true],
+            ['name' => 'api_secret', 'type' => 'password', 'label' => 'API Secret', 'required' => true],
+            ['name' => 'from', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $apiKey = $this->config['api_key'];
@@ -486,6 +556,15 @@ class TelnyxGateway extends AbstractGateway
     public function getType(): string { return 'telnyx'; }
     public function getName(): string { return 'Telnyx'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'messaging_profile_id', 'type' => 'text', 'label' => 'Messaging Profile ID', 'required' => false],
+            ['name' => 'from', 'type' => 'text', 'label' => 'From Number', 'required' => true],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -527,6 +606,14 @@ class TelesignGateway extends AbstractGateway
     public function getName(): string { return 'Telesign'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'customer_id', 'type' => 'text', 'label' => 'Customer ID', 'required' => true],
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $customerId = $this->config['customer_id'];
@@ -567,6 +654,16 @@ class AwsSnsGateway extends AbstractGateway
     public function getType(): string { return 'aws_sns'; }
     public function getName(): string { return 'Amazon SNS'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'access_key', 'type' => 'text', 'label' => 'AWS Access Key', 'required' => true],
+            ['name' => 'secret_key', 'type' => 'password', 'label' => 'AWS Secret Key', 'required' => true],
+            ['name' => 'region', 'type' => 'text', 'label' => 'AWS Region', 'required' => true, 'default' => 'us-east-1'],
+            ['name' => 'sender_id', 'type' => 'text', 'label' => 'Sender ID', 'required' => false],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -615,6 +712,15 @@ class RouteeGateway extends AbstractGateway
     public function getType(): string { return 'routee'; }
     public function getName(): string { return 'Routee'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'application_id', 'type' => 'text', 'label' => 'Application ID', 'required' => true],
+            ['name' => 'application_secret', 'type' => 'password', 'label' => 'Application Secret', 'required' => true],
+            ['name' => 'from', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -666,6 +772,14 @@ class BulkSmsGateway extends AbstractGateway
     public function getName(): string { return 'BulkSMS'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'username', 'type' => 'text', 'label' => 'Username', 'required' => true],
+            ['name' => 'password', 'type' => 'password', 'label' => 'Password', 'required' => true],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $username = $this->config['username'];
@@ -697,6 +811,14 @@ class SmsToGateway extends AbstractGateway
     public function getType(): string { return 'smsto'; }
     public function getName(): string { return 'SMS.to'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'sender_id', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -732,6 +854,16 @@ class SignalWireGateway extends AbstractGateway
     public function getType(): string { return 'signalwire'; }
     public function getName(): string { return 'SignalWire'; }
     public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'project_id', 'type' => 'text', 'label' => 'Project ID', 'required' => true],
+            ['name' => 'api_token', 'type' => 'password', 'label' => 'API Token', 'required' => true],
+            ['name' => 'space_url', 'type' => 'text', 'label' => 'Space URL', 'required' => true, 'placeholder' => 'example.signalwire.com'],
+            ['name' => 'from', 'type' => 'text', 'label' => 'From Number', 'required' => true],
+        ];
+    }
 
     public function send(MessageDTO $message): SendResult
     {
@@ -777,6 +909,14 @@ class ZenviaGateway extends AbstractGateway
     public function getName(): string { return 'Zenvia'; }
     public function getSupportedChannels(): array { return ['sms']; }
 
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_token', 'type' => 'password', 'label' => 'API Token', 'required' => true],
+            ['name' => 'from', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
+
     public function send(MessageDTO $message): SendResult
     {
         $apiToken = $this->config['api_token'];
@@ -799,5 +939,425 @@ class ZenviaGateway extends AbstractGateway
         }
 
         return new SendResult(false, null, 'Zenvia API error');
+    }
+}
+
+/**
+ * SMPP Gateway
+ * Supports SMPP 3.4 protocol for direct SMSC connections
+ */
+class SmppGateway extends AbstractGateway
+{
+    public function getType(): string { return 'smpp'; }
+    public function getName(): string { return 'SMPP Gateway'; }
+    public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'host', 'type' => 'text', 'label' => 'SMSC Host', 'required' => true, 'placeholder' => 'smsc.provider.com'],
+            ['name' => 'port', 'type' => 'text', 'label' => 'SMSC Port', 'required' => true, 'default' => '2775'],
+            ['name' => 'system_id', 'type' => 'text', 'label' => 'System ID', 'required' => true],
+            ['name' => 'password', 'type' => 'password', 'label' => 'Password', 'required' => true],
+            ['name' => 'system_type', 'type' => 'text', 'label' => 'System Type', 'required' => false, 'default' => ''],
+            ['name' => 'source_addr', 'type' => 'text', 'label' => 'Source Address/Sender ID', 'required' => true],
+            ['name' => 'source_addr_ton', 'type' => 'select', 'label' => 'Source TON', 'required' => false,
+             'options' => ['0' => 'Unknown', '1' => 'International', '2' => 'National', '3' => 'Network Specific', '5' => 'Alphanumeric'],
+             'default' => '5'],
+            ['name' => 'source_addr_npi', 'type' => 'select', 'label' => 'Source NPI', 'required' => false,
+             'options' => ['0' => 'Unknown', '1' => 'ISDN (E163/E164)', '9' => 'Private'],
+             'default' => '0'],
+            ['name' => 'dest_addr_ton', 'type' => 'select', 'label' => 'Destination TON', 'required' => false,
+             'options' => ['0' => 'Unknown', '1' => 'International', '2' => 'National'],
+             'default' => '1'],
+            ['name' => 'dest_addr_npi', 'type' => 'select', 'label' => 'Destination NPI', 'required' => false,
+             'options' => ['0' => 'Unknown', '1' => 'ISDN (E163/E164)'],
+             'default' => '1'],
+            ['name' => 'use_ssl', 'type' => 'checkbox', 'label' => 'Use SSL/TLS', 'required' => false, 'default' => '0'],
+            ['name' => 'enquire_link_interval', 'type' => 'text', 'label' => 'Enquire Link Interval (seconds)', 'required' => false, 'default' => '30'],
+        ];
+    }
+
+    public function send(MessageDTO $message): SendResult
+    {
+        $host = $this->config['host'];
+        $port = (int)($this->config['port'] ?? 2775);
+        $systemId = $this->config['system_id'];
+        $password = $this->config['password'];
+        $systemType = $this->config['system_type'] ?? '';
+        $sourceAddr = $message->from ?: $this->config['source_addr'];
+        $useSsl = !empty($this->config['use_ssl']);
+
+        // TON/NPI settings
+        $sourceTon = (int)($this->config['source_addr_ton'] ?? 5);
+        $sourceNpi = (int)($this->config['source_addr_npi'] ?? 0);
+        $destTon = (int)($this->config['dest_addr_ton'] ?? 1);
+        $destNpi = (int)($this->config['dest_addr_npi'] ?? 1);
+
+        try {
+            // Connect to SMSC
+            $transport = $useSsl
+                ? "ssl://{$host}:{$port}"
+                : "tcp://{$host}:{$port}";
+
+            $socket = @stream_socket_client($transport, $errno, $errstr, 30);
+
+            if (!$socket) {
+                return new SendResult(false, null, "Connection failed: {$errstr}");
+            }
+
+            stream_set_timeout($socket, 30);
+
+            // BIND_TRANSMITTER (command_id = 0x00000002)
+            $bindPdu = $this->buildBindPdu($systemId, $password, $systemType);
+            fwrite($socket, $bindPdu);
+
+            // Read bind response
+            $bindResp = $this->readPdu($socket);
+            if (!$bindResp || $bindResp['command_status'] !== 0) {
+                fclose($socket);
+                $statusMsg = $this->getSmppError($bindResp['command_status'] ?? -1);
+                return new SendResult(false, null, "Bind failed: {$statusMsg}");
+            }
+
+            // SUBMIT_SM (command_id = 0x00000004)
+            $submitPdu = $this->buildSubmitPdu(
+                $sourceAddr, $sourceTon, $sourceNpi,
+                $message->to, $destTon, $destNpi,
+                $message->message, $message->encoding
+            );
+            fwrite($socket, $submitPdu);
+
+            // Read submit response
+            $submitResp = $this->readPdu($socket);
+
+            // UNBIND
+            $unbindPdu = $this->buildUnbindPdu();
+            fwrite($socket, $unbindPdu);
+            fclose($socket);
+
+            if (!$submitResp || $submitResp['command_status'] !== 0) {
+                $statusMsg = $this->getSmppError($submitResp['command_status'] ?? -1);
+                return new SendResult(false, null, "Submit failed: {$statusMsg}");
+            }
+
+            $messageId = $submitResp['message_id'] ?? ('smpp_' . time());
+            return new SendResult(true, $messageId);
+
+        } catch (\Exception $e) {
+            return new SendResult(false, null, 'SMPP error: ' . $e->getMessage());
+        }
+    }
+
+    private function buildBindPdu(string $systemId, string $password, string $systemType): string
+    {
+        $body = $systemId . "\x00" .        // system_id
+                $password . "\x00" .         // password
+                $systemType . "\x00" .       // system_type
+                "\x34" .                     // interface_version (3.4)
+                "\x00" .                     // addr_ton
+                "\x00" .                     // addr_npi
+                "\x00";                      // address_range
+
+        $header = pack('N', strlen($body) + 16) .  // command_length
+                  pack('N', 0x00000002) .           // command_id (bind_transmitter)
+                  pack('N', 0x00000000) .           // command_status
+                  pack('N', 0x00000001);            // sequence_number
+
+        return $header . $body;
+    }
+
+    private function buildSubmitPdu(
+        string $sourceAddr, int $sourceTon, int $sourceNpi,
+        string $destAddr, int $destTon, int $destNpi,
+        string $message, string $encoding
+    ): string {
+        // Determine data coding
+        $dataCoding = 0; // GSM-7
+        if ($encoding === 'ucs2') {
+            $dataCoding = 8; // UCS2
+            $message = mb_convert_encoding($message, 'UCS-2BE', 'UTF-8');
+        }
+
+        $body = "\x00" .                          // service_type
+                chr($sourceTon) .                  // source_addr_ton
+                chr($sourceNpi) .                  // source_addr_npi
+                $sourceAddr . "\x00" .             // source_addr
+                chr($destTon) .                    // dest_addr_ton
+                chr($destNpi) .                    // dest_addr_npi
+                $destAddr . "\x00" .               // destination_addr
+                "\x00" .                          // esm_class
+                "\x00" .                          // protocol_id
+                "\x00" .                          // priority_flag
+                "\x00" .                          // schedule_delivery_time
+                "\x00" .                          // validity_period
+                "\x01" .                          // registered_delivery (request DLR)
+                "\x00" .                          // replace_if_present_flag
+                chr($dataCoding) .                // data_coding
+                "\x00" .                          // sm_default_msg_id
+                chr(strlen($message)) .           // sm_length
+                $message;                         // short_message
+
+        static $seq = 1;
+        $header = pack('N', strlen($body) + 16) .  // command_length
+                  pack('N', 0x00000004) .           // command_id (submit_sm)
+                  pack('N', 0x00000000) .           // command_status
+                  pack('N', ++$seq);                // sequence_number
+
+        return $header . $body;
+    }
+
+    private function buildUnbindPdu(): string
+    {
+        static $seq = 100;
+        return pack('N', 16) .              // command_length
+               pack('N', 0x00000006) .      // command_id (unbind)
+               pack('N', 0x00000000) .      // command_status
+               pack('N', ++$seq);           // sequence_number
+    }
+
+    private function readPdu($socket): ?array
+    {
+        $header = fread($socket, 16);
+        if (!$header || strlen($header) < 16) {
+            return null;
+        }
+
+        $parsed = unpack('Nlength/Ncommand_id/Ncommand_status/Nsequence', $header);
+        $bodyLen = $parsed['length'] - 16;
+
+        $body = '';
+        if ($bodyLen > 0) {
+            $body = fread($socket, $bodyLen);
+        }
+
+        $result = [
+            'command_id' => $parsed['command_id'],
+            'command_status' => $parsed['command_status'],
+            'sequence' => $parsed['sequence'],
+        ];
+
+        // Extract message_id from submit_sm_resp
+        if ($parsed['command_id'] === 0x80000004 && !empty($body)) {
+            $nullPos = strpos($body, "\x00");
+            $result['message_id'] = $nullPos !== false ? substr($body, 0, $nullPos) : $body;
+        }
+
+        return $result;
+    }
+
+    private function getSmppError(int $status): string
+    {
+        $errors = [
+            0x00 => 'OK',
+            0x01 => 'Invalid message length',
+            0x02 => 'Invalid command length',
+            0x03 => 'Invalid command ID',
+            0x04 => 'Incorrect bind status',
+            0x05 => 'Already bound',
+            0x06 => 'Invalid priority flag',
+            0x07 => 'Invalid registered delivery flag',
+            0x08 => 'System error',
+            0x0A => 'Invalid source address',
+            0x0B => 'Invalid destination address',
+            0x0C => 'Message ID invalid',
+            0x0D => 'Bind failed',
+            0x0E => 'Invalid password',
+            0x0F => 'Invalid system ID',
+            0x14 => 'Message queue full',
+            0x45 => 'Invalid number of destinations',
+            0x58 => 'Throttling error',
+        ];
+
+        return $errors[$status] ?? "Unknown error (0x" . dechex($status) . ")";
+    }
+
+    public function parseDeliveryReceipt(array $payload): ?DLRResult
+    {
+        // SMPP DLR comes as text message with specific format
+        $text = $payload['message'] ?? $payload['short_message'] ?? '';
+
+        // Parse: id:MSGID sub:001 dlvrd:001 submit date:... done date:... stat:DELIVRD
+        if (preg_match('/id:(\S+).*stat:(\S+)/', $text, $matches)) {
+            $result = new DLRResult($matches[1], DLRResult::normalizeStatus($matches[2]));
+            $result->rawPayload = $payload;
+            return $result;
+        }
+
+        return null;
+    }
+}
+
+/**
+ * Textlocal India Gateway
+ */
+class TextlocalIndiaGateway extends AbstractGateway
+{
+    public function getType(): string { return 'textlocal_india'; }
+    public function getName(): string { return 'Textlocal India'; }
+    public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'sender', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
+
+    public function send(MessageDTO $message): SendResult
+    {
+        $apiKey = $this->config['api_key'];
+        $sender = $message->from ?: $this->config['sender'];
+
+        $response = $this->httpPost('https://api.textlocal.in/send/', [
+            'apikey' => $apiKey,
+            'numbers' => preg_replace('/[^0-9]/', '', $message->to),
+            'message' => $message->message,
+            'sender' => $sender,
+        ]);
+
+        if ($response['http_code'] >= 200 && $response['http_code'] < 300) {
+            $data = json_decode($response['body'], true);
+            if (($data['status'] ?? '') === 'success') {
+                return new SendResult(true, $data['messages'][0]['id'] ?? null);
+            }
+            return new SendResult(false, null, $data['errors'][0]['message'] ?? 'Textlocal error');
+        }
+
+        return new SendResult(false, null, 'Textlocal API error');
+    }
+}
+
+/**
+ * Textlocal UK Gateway
+ */
+class TextlocalUkGateway extends AbstractGateway
+{
+    public function getType(): string { return 'textlocal_uk'; }
+    public function getName(): string { return 'Textlocal UK'; }
+    public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'sender', 'type' => 'text', 'label' => 'Sender Name', 'required' => true],
+        ];
+    }
+
+    public function send(MessageDTO $message): SendResult
+    {
+        $apiKey = $this->config['api_key'];
+        $sender = $message->from ?: $this->config['sender'];
+
+        $response = $this->httpPost('https://api.txtlocal.com/send/', [
+            'apikey' => $apiKey,
+            'numbers' => preg_replace('/[^0-9]/', '', $message->to),
+            'message' => $message->message,
+            'sender' => $sender,
+        ]);
+
+        if ($response['http_code'] >= 200 && $response['http_code'] < 300) {
+            $data = json_decode($response['body'], true);
+            if (($data['status'] ?? '') === 'success') {
+                return new SendResult(true, $data['messages'][0]['id'] ?? null);
+            }
+            return new SendResult(false, null, $data['errors'][0]['message'] ?? 'Textlocal error');
+        }
+
+        return new SendResult(false, null, 'Textlocal API error');
+    }
+}
+
+/**
+ * Kaleyra Gateway (India)
+ */
+class KaleyraGateway extends AbstractGateway
+{
+    public function getType(): string { return 'kaleyra'; }
+    public function getName(): string { return 'Kaleyra'; }
+    public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'sid', 'type' => 'text', 'label' => 'SID', 'required' => true],
+            ['name' => 'from', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
+
+    public function send(MessageDTO $message): SendResult
+    {
+        $apiKey = $this->config['api_key'];
+        $sid = $this->config['sid'];
+        $from = $message->from ?: $this->config['from'];
+
+        $url = "https://api.kaleyra.io/v1/{$sid}/messages";
+
+        $response = $this->httpPost($url, [
+            'to' => $message->to,
+            'type' => 'OTP',
+            'sender' => $from,
+            'body' => $message->message,
+        ], [
+            'api-key' => $apiKey,
+            'Content-Type' => 'application/x-www-form-urlencoded',
+        ]);
+
+        if ($response['http_code'] >= 200 && $response['http_code'] < 300) {
+            $data = json_decode($response['body'], true);
+            if (!empty($data['id'])) {
+                return new SendResult(true, $data['id']);
+            }
+            return new SendResult(false, null, $data['error']['message'] ?? 'Kaleyra error');
+        }
+
+        return new SendResult(false, null, 'Kaleyra API error');
+    }
+}
+
+/**
+ * Fast2SMS Gateway (India)
+ */
+class Fast2SmsGateway extends AbstractGateway
+{
+    public function getType(): string { return 'fast2sms'; }
+    public function getName(): string { return 'Fast2SMS'; }
+    public function getSupportedChannels(): array { return ['sms']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'api_key', 'type' => 'password', 'label' => 'API Key', 'required' => true],
+            ['name' => 'sender_id', 'type' => 'text', 'label' => 'Sender ID', 'required' => true],
+        ];
+    }
+
+    public function send(MessageDTO $message): SendResult
+    {
+        $apiKey = $this->config['api_key'];
+        $senderId = $message->from ?: $this->config['sender_id'];
+
+        $response = $this->httpPost('https://www.fast2sms.com/dev/bulkV2', [
+            'route' => 'dlt',
+            'sender_id' => $senderId,
+            'message' => $message->message,
+            'numbers' => preg_replace('/[^0-9]/', '', $message->to),
+        ], [
+            'authorization' => $apiKey,
+            'Content-Type' => 'application/json',
+        ], true);
+
+        if ($response['http_code'] >= 200 && $response['http_code'] < 300) {
+            $data = json_decode($response['body'], true);
+            if (($data['return'] ?? false)) {
+                return new SendResult(true, $data['request_id'] ?? null);
+            }
+            return new SendResult(false, null, $data['message'][0] ?? 'Fast2SMS error');
+        }
+
+        return new SendResult(false, null, 'Fast2SMS API error');
     }
 }
