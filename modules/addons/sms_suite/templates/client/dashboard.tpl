@@ -14,7 +14,7 @@
                 <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
                 <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
                 <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
-                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups}</a></li>
+                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
                 <li><a href="{$modulelink}&action=sender_ids">{$lang.menu_sender_ids}</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
                 <li><a href="{$modulelink}&action=api_keys">{$lang.menu_api_keys}</a></li>

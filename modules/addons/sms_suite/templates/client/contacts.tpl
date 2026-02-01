@@ -22,7 +22,7 @@
                 <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
                 <li><a href="{$modulelink}&action=campaigns">{$lang.campaigns}</a></li>
                 <li class="active"><a href="{$modulelink}&action=contacts">{$lang.contacts}</a></li>
-                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups}</a></li>
+                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
             </ul>
         </div>
@@ -51,7 +51,7 @@
 
                 <div class="form-group">
                     <select name="group_id" class="form-control">
-                        <option value="">{$lang.all} {$lang.contact_groups}</option>
+                        <option value="">{$lang.all} {$lang.contact_groups|default:'Groups'}</option>
                         {foreach $groups as $group}
                         <option value="{$group->id}" {if $filters.group_id eq $group->id}selected{/if}>
                             {$group->name|escape:'html'} ({$group->contact_count})

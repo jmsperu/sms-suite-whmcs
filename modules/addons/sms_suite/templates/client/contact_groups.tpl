@@ -1,7 +1,7 @@
 <div class="sms-suite-contact-groups">
     <div class="row">
         <div class="col-sm-8">
-            <h2>{$lang.contact_groups}</h2>
+            <h2>{$lang.contact_groups|default:'Groups'}</h2>
         </div>
         <div class="col-sm-4 text-right">
             <button class="btn btn-success" data-toggle="modal" data-target="#createGroupModal">
@@ -19,7 +19,7 @@
                 <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
                 <li><a href="{$modulelink}&action=campaigns">{$lang.campaigns}</a></li>
                 <li><a href="{$modulelink}&action=contacts">{$lang.contacts}</a></li>
-                <li class="active"><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups}</a></li>
+                <li class="active"><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
                 <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
             </ul>
         </div>
