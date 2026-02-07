@@ -13,6 +13,8 @@ use SMSSuite\Gateways\MessageDTO;
 use SMSSuite\Billing\BillingService;
 use Exception;
 
+require_once __DIR__ . '/SegmentCounter.php';
+
 class MessageService
 {
     /**
@@ -82,9 +84,10 @@ class MessageService
             if ($clientId > 0) {
                 require_once dirname(__DIR__) . '/Billing/BillingService.php';
 
-                // Extract country code from phone for rate lookup
+                // Extract country code and detect network for rate lookup
                 $countryCode = self::extractCountryCode($to);
-                $cost = BillingService::calculateCost($clientId, $segmentResult->segments, $channel, $gatewayId, $countryCode);
+                $network = self::detectNetworkFromPhone($to);
+                $cost = BillingService::calculateCost($clientId, $segmentResult->segments, $channel, $gatewayId, $countryCode, $network);
 
                 // Check balance
                 if (!BillingService::hasBalance($clientId, $cost)) {
@@ -202,19 +205,19 @@ class MessageService
                 if ($message->client_id > 0) {
                     require_once dirname(__DIR__) . '/Billing/BillingService.php';
                     $countryCode = self::extractCountryCode($message->to_number);
+                    $network = self::detectNetworkFromPhone($message->to_number);
+
                     $cost = BillingService::calculateCost(
                         $message->client_id,
                         $message->segments,
                         $message->channel,
                         $message->gateway_id,
-                        $countryCode
+                        $countryCode,
+                        $network
                     );
 
                     // Get sender ID reference for tracking
                     $senderIdRef = self::getSenderIdReference($message->client_id, $message->sender_id);
-
-                    // Detect network from phone number (Kenya networks)
-                    $network = self::detectKenyaNetwork($message->to_number);
 
                     BillingService::deduct($message->client_id, $messageId, $cost, $message->segments);
 
@@ -224,9 +227,10 @@ class MessageService
                         ->first();
 
                     if ($settings && $settings->billing_mode === 'plan') {
+                        $creditCost = BillingService::getCreditCost($countryCode, $network);
                         BillingService::deductSmsCredits(
                             $message->client_id,
-                            $message->segments,
+                            $message->segments * $creditCost,
                             "Message to {$message->to_number}",
                             $messageId,
                             $senderIdRef,

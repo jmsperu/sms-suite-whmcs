@@ -94,6 +94,52 @@
         </div>
     </div>
 
+    <!-- Credit Balance Graphic -->
+    {if $total_purchased > 0}
+    <div class="row">
+        <div class="col-md-6 col-md-offset-3">
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <h3 class="panel-title text-center"><i class="fa fa-pie-chart"></i> {$lang.credit_overview|default:'Credit Balance Overview'}</h3>
+                </div>
+                <div class="panel-body text-center">
+                    {assign var="pct" value=0}
+                    {if $total_purchased > 0}
+                        {assign var="pct" value=($credit_balance / $total_purchased) * 100}
+                    {/if}
+                    {if $pct > 100}{assign var="pct" value=100}{/if}
+
+                    <div class="credit-ring-container">
+                        <div class="credit-ring {if $pct > 50}credit-ring-green{elseif $pct > 20}credit-ring-yellow{else}credit-ring-red{/if}" style="--pct: {$pct|number_format:1};">
+                            <div class="credit-ring-inner">
+                                <span class="credit-ring-number">{$credit_balance|number_format:0}</span>
+                                <span class="credit-ring-label">{$lang.credits_remaining|default:'credits remaining'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="text-muted" style="margin-top: 10px;">
+                        of <strong>{$total_purchased|number_format:0}</strong> total purchased
+                    </p>
+                    <div class="row" style="margin-top: 15px;">
+                        <div class="col-xs-4">
+                            <div class="text-success"><strong>{$total_purchased|number_format:0}</strong></div>
+                            <small class="text-muted">{$lang.purchased|default:'Purchased'}</small>
+                        </div>
+                        <div class="col-xs-4">
+                            <div class="text-warning"><strong>{$total_used|number_format:0}</strong></div>
+                            <small class="text-muted">{$lang.used|default:'Used'}</small>
+                        </div>
+                        <div class="col-xs-4">
+                            <div class="text-danger"><strong>{$total_expired|number_format:0}</strong></div>
+                            <small class="text-muted">{$lang.expired|default:'Expired'}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {/if}
+
     <!-- SMS Packages -->
     {if $sms_packages && count($sms_packages) > 0}
     <div class="row">
@@ -457,5 +503,51 @@
 }
 .sms-suite-billing .panel-warning .ribbon {
     background: #f39c12;
+}
+
+/* Credit Balance Ring Chart */
+.sms-suite-billing .credit-ring-container {
+    display: flex;
+    justify-content: center;
+    padding: 10px 0;
+}
+.sms-suite-billing .credit-ring {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.sms-suite-billing .credit-ring-green {
+    background: conic-gradient(#27ae60 0% calc(var(--pct) * 1%), #ecf0f1 calc(var(--pct) * 1%) 100%);
+}
+.sms-suite-billing .credit-ring-yellow {
+    background: conic-gradient(#f39c12 0% calc(var(--pct) * 1%), #ecf0f1 calc(var(--pct) * 1%) 100%);
+}
+.sms-suite-billing .credit-ring-red {
+    background: conic-gradient(#e74c3c 0% calc(var(--pct) * 1%), #ecf0f1 calc(var(--pct) * 1%) 100%);
+}
+.sms-suite-billing .credit-ring-inner {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+.sms-suite-billing .credit-ring-number {
+    font-size: 2.2em;
+    font-weight: bold;
+    color: #2c3e50;
+    line-height: 1;
+}
+.sms-suite-billing .credit-ring-label {
+    font-size: 0.75em;
+    color: #7f8c8d;
+    margin-top: 4px;
 }
 </style>

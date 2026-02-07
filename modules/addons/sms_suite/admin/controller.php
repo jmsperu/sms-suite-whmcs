@@ -5650,6 +5650,32 @@ function sms_suite_admin_billing_rates($vars, $lang)
                 ->delete();
 
             echo '<div class="alert alert-success">Country rate deleted.</div>';
+        } elseif ($action === 'save_destination_rate') {
+            $countryCode = strtoupper(trim($_POST['dest_country_code'] ?? ''));
+            $network = trim($_POST['dest_network'] ?? '') ?: null;
+
+            if (!empty($countryCode)) {
+                Capsule::table('mod_sms_destination_rates')
+                    ->updateOrInsert(
+                        ['country_code' => $countryCode, 'network' => $network],
+                        [
+                            'sms_rate' => (float)($_POST['dest_sms_rate'] ?? 0),
+                            'whatsapp_rate' => (float)($_POST['dest_whatsapp_rate'] ?? 0),
+                            'credit_cost' => max(1, (int)($_POST['dest_credit_cost'] ?? 1)),
+                            'status' => isset($_POST['dest_status']) ? 1 : 0,
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]
+                    );
+                echo '<div class="alert alert-success">Destination rate saved.</div>';
+            } else {
+                echo '<div class="alert alert-danger">Country code is required.</div>';
+            }
+        } elseif ($action === 'delete_destination_rate') {
+            Capsule::table('mod_sms_destination_rates')
+                ->where('id', (int)$_POST['dest_rate_id'])
+                ->delete();
+
+            echo '<div class="alert alert-success">Destination rate deleted.</div>';
         }
     }
 
@@ -5674,6 +5700,21 @@ function sms_suite_admin_billing_rates($vars, $lang)
         ->select(['gc.*', 'g.name as gateway_name'])
         ->orderBy('g.name')
         ->orderBy('gc.country_name')
+        ->get();
+
+    // Get destination rates
+    $destinationRates = Capsule::table('mod_sms_destination_rates')
+        ->orderBy('country_code')
+        ->orderBy('network')
+        ->get();
+
+    // Get networks for dropdown
+    $networks = Capsule::table('mod_sms_network_prefixes')
+        ->select('operator_code', 'operator', 'country_code')
+        ->where('status', 1)
+        ->groupBy('operator_code', 'operator', 'country_code')
+        ->orderBy('country_code')
+        ->orderBy('operator')
         ->get();
 
     echo '<div class="row">';
@@ -5843,6 +5884,122 @@ function sms_suite_admin_billing_rates($vars, $lang)
     }
 
     echo '</tbody></table></div></div>';
+
+    // ==========================================
+    // Destination Rates Section
+    // ==========================================
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                <i class="fa fa-map-marker"></i> Destination Rates
+                <button class="btn btn-success btn-sm pull-right" data-toggle="modal" data-target="#addDestinationRateModal">
+                    <i class="fa fa-plus"></i> Add Destination Rate
+                </button>
+            </h3>
+        </div>
+        <div class="panel-body">
+            <p class="text-muted">Set different rates per destination country and network. These are used when no client-specific rate exists. The <code>credit_cost</code> column controls how many credits are deducted per segment in Plan mode.</p>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Country</th>
+                        <th>Network</th>
+                        <th>SMS Rate</th>
+                        <th>WhatsApp Rate</th>
+                        <th>Credit Cost</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>';
+
+    if ($destinationRates->isEmpty()) {
+        echo '<tr><td colspan="7" class="text-center text-muted">No destination rates configured. Default rates will be used for all destinations.</td></tr>';
+    } else {
+        foreach ($destinationRates as $dr) {
+            $drStatus = $dr->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>';
+            $networkDisplay = $dr->network ? htmlspecialchars(ucfirst($dr->network)) : '<em class="text-muted">All networks</em>';
+            echo '<tr>
+                <td><code>' . htmlspecialchars($dr->country_code) . '</code></td>
+                <td>' . $networkDisplay . '</td>
+                <td>$' . number_format($dr->sms_rate, 6) . '</td>
+                <td>$' . number_format($dr->whatsapp_rate, 6) . '</td>
+                <td><span class="badge">' . (int)$dr->credit_cost . '</span> credit' . ($dr->credit_cost != 1 ? 's' : '') . '/segment</td>
+                <td>' . $drStatus . '</td>
+                <td>
+                    <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this destination rate?\');">
+                        <input type="hidden" name="form_action" value="delete_destination_rate">
+                        <input type="hidden" name="dest_rate_id" value="' . $dr->id . '">
+                        <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>';
+        }
+    }
+
+    echo '</tbody></table></div></div>';
+
+    // Build network options for destination rate modal
+    $networkOptions = '<option value="">All networks (country-wide default)</option>';
+    foreach ($networks as $nw) {
+        $networkOptions .= '<option value="' . htmlspecialchars(strtolower($nw->operator_code ?: $nw->operator)) . '">'
+            . htmlspecialchars($nw->operator) . ' (' . htmlspecialchars($nw->country_code) . ')</option>';
+    }
+
+    // Add Destination Rate Modal
+    echo '<div class="modal fade" id="addDestinationRateModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <form method="post">
+                    <input type="hidden" name="form_action" value="save_destination_rate">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-plus"></i> Add Destination Rate</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Country Code <span class="text-danger">*</span></label>
+                            <input type="text" name="dest_country_code" class="form-control" required maxlength="5" placeholder="e.g. KE, US, GB">
+                            <p class="help-block">ISO country dial code (254, 1, 44) or ISO alpha-2 (KE, US, GB)</p>
+                        </div>
+                        <div class="form-group">
+                            <label>Network</label>
+                            <select name="dest_network" class="form-control">
+                                ' . $networkOptions . '
+                            </select>
+                            <p class="help-block">Leave blank for country-wide default rate</p>
+                        </div>
+                        <div class="form-group">
+                            <label>SMS Rate</label>
+                            <div class="input-group">
+                                <span class="input-group-addon">$</span>
+                                <input type="number" name="dest_sms_rate" class="form-control" step="0.000001" value="0.05">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>WhatsApp Rate</label>
+                            <div class="input-group">
+                                <span class="input-group-addon">$</span>
+                                <input type="number" name="dest_whatsapp_rate" class="form-control" step="0.000001" value="0.08">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Credit Cost (Plan mode)</label>
+                            <input type="number" name="dest_credit_cost" class="form-control" min="1" value="1">
+                            <p class="help-block">Credits deducted per segment. e.g. 1 for local, 3 for international.</p>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="dest_status" value="1" checked> Active</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">Save Destination Rate</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>';
 
     // Gateway options for modal
     $gatewayOptions = '';

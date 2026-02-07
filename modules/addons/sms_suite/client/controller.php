@@ -1207,6 +1207,16 @@ function sms_suite_client_billing($vars, $clientId, $lang)
         ->whereIn('status', ['pending', 'approved'])
         ->count();
 
+    // Get credit balance details for graphic
+    $creditBalance = Capsule::table('mod_sms_credit_balance')
+        ->where('client_id', $clientId)
+        ->first();
+
+    $creditBalanceAmount = $creditBalance ? (int)$creditBalance->balance : 0;
+    $totalPurchased = $creditBalance ? (int)$creditBalance->total_purchased : 0;
+    $totalUsed = $creditBalance ? (int)$creditBalance->total_used : 0;
+    $totalExpired = $creditBalance ? (int)$creditBalance->total_expired : 0;
+
     // Get credit usage by sender ID (last 30 days)
     $thirtyDaysAgo = date('Y-m-d H:i:s', strtotime('-30 days'));
     $senderIdUsage = \SMSSuite\Billing\BillingService::getCreditUsageBySenderId($clientId, $thirtyDaysAgo);
@@ -1235,6 +1245,10 @@ function sms_suite_client_billing($vars, $clientId, $lang)
             'pending_requests' => $pendingRequests,
             'sender_id_usage' => $senderIdUsage,
             'network_usage' => $networkUsage,
+            'credit_balance' => $creditBalanceAmount,
+            'total_purchased' => $totalPurchased,
+            'total_used' => $totalUsed,
+            'total_expired' => $totalExpired,
             'currency_symbol' => $currencySymbol,
             'currency_code' => $currencyCode,
             'success' => $success,

@@ -44,7 +44,7 @@ class BillingService
                 ->where('expires_at', '>', date('Y-m-d H:i:s'))
                 ->sum('remaining');
 
-            return $planCredits >= 1; // At least 1 credit needed
+            return $planCredits >= $cost; // cost = segments * credit_cost in plan mode
         }
 
         // For all other modes, check wallet balance
@@ -62,13 +62,13 @@ class BillingService
      * @param string|null $countryCode
      * @return float
      */
-    public static function calculateCost(int $clientId, int $segments, string $channel = 'sms', ?int $gatewayId = null, ?string $countryCode = null): float
+    public static function calculateCost(int $clientId, int $segments, string $channel = 'sms', ?int $gatewayId = null, ?string $countryCode = null, ?string $network = null): float
     {
         $settings = self::getClientSettings($clientId);
         $billingMode = $settings->billing_mode ?? self::MODE_PER_SEGMENT;
 
         // Get base rate
-        $baseRate = self::getRate($clientId, $channel, $gatewayId, $countryCode);
+        $baseRate = self::getRate($clientId, $channel, $gatewayId, $countryCode, $network);
 
         // Calculate based on billing mode
         switch ($billingMode) {
@@ -80,8 +80,8 @@ class BillingService
                 return $baseRate * $segments;
 
             case self::MODE_PLAN:
-                // Plan mode uses credits, not currency
-                return $segments; // 1 credit per segment
+                // Plan mode uses credits per segment based on destination
+                return $segments * self::getCreditCost($countryCode, $network);
 
             default:
                 return $baseRate * $segments;
@@ -97,19 +97,88 @@ class BillingService
      * @param string|null $countryCode
      * @return float
      */
-    public static function getRate(int $clientId, string $channel = 'sms', ?int $gatewayId = null, ?string $countryCode = null): float
+    public static function getRate(int $clientId, string $channel = 'sms', ?int $gatewayId = null, ?string $countryCode = null, ?string $network = null): float
     {
-        // Check for client-specific rate override
-        $clientRate = Capsule::table('mod_sms_client_rates')
-            ->where('client_id', $clientId)
-            ->where('channel', $channel)
-            ->first();
+        $rateColumn = $channel === 'whatsapp' ? 'whatsapp_rate' : 'sms_rate';
 
-        if ($clientRate) {
-            return (float)$clientRate->rate;
+        // 1. Client rate: client + country + network (most specific)
+        if ($countryCode && $network) {
+            $clientRate = Capsule::table('mod_sms_client_rates')
+                ->where('client_id', $clientId)
+                ->where('country_code', $countryCode)
+                ->where('network_prefix', $network)
+                ->where('status', 1)
+                ->orderBy('priority', 'desc')
+                ->first();
+
+            if ($clientRate) {
+                return (float)$clientRate->$rateColumn;
+            }
         }
 
-        // Check gateway country pricing
+        // 2. Client rate: client + country only
+        if ($countryCode) {
+            $clientRate = Capsule::table('mod_sms_client_rates')
+                ->where('client_id', $clientId)
+                ->where('country_code', $countryCode)
+                ->where(function ($q) {
+                    $q->whereNull('network_prefix')
+                      ->orWhere('network_prefix', '');
+                })
+                ->where('status', 1)
+                ->orderBy('priority', 'desc')
+                ->first();
+
+            if ($clientRate) {
+                return (float)$clientRate->$rateColumn;
+            }
+        }
+
+        // 3. Client rate: client flat override (no country/network)
+        $clientFlat = Capsule::table('mod_sms_client_rates')
+            ->where('client_id', $clientId)
+            ->where(function ($q) {
+                $q->whereNull('country_code')
+                  ->orWhere('country_code', '');
+            })
+            ->where('status', 1)
+            ->orderBy('priority', 'desc')
+            ->first();
+
+        if ($clientFlat) {
+            return (float)$clientFlat->$rateColumn;
+        }
+
+        // 4. Destination rate: country + network
+        if ($countryCode && $network) {
+            $destRate = Capsule::table('mod_sms_destination_rates')
+                ->where('country_code', $countryCode)
+                ->where('network', $network)
+                ->where('status', 1)
+                ->first();
+
+            if ($destRate) {
+                return (float)$destRate->$rateColumn;
+            }
+        }
+
+        // 5. Destination rate: country only
+        if ($countryCode) {
+            $destRate = Capsule::table('mod_sms_destination_rates')
+                ->where('country_code', $countryCode)
+                ->where(function ($q) {
+                    $q->whereNull('network')
+                      ->orWhere('network', '');
+                })
+                ->where('status', 1)
+                ->first();
+
+            if ($destRate) {
+                return (float)$destRate->$rateColumn;
+            }
+        }
+
+        // 6. Gateway-country rate
         if ($gatewayId && $countryCode) {
             $countryRate = Capsule::table('mod_sms_gateway_countries')
                 ->where('gateway_id', $gatewayId)
@@ -117,13 +186,11 @@ class BillingService
                 ->first();
 
             if ($countryRate) {
-                return $channel === 'whatsapp'
-                    ? (float)$countryRate->whatsapp_rate
-                    : (float)$countryRate->sms_rate;
+                return (float)$countryRate->$rateColumn;
             }
         }
 
-        // Get default rate from module settings
+        // 7. Default module setting
         $settings = Capsule::table('tbladdonmodules')
             ->where('module', 'sms_suite')
             ->pluck('value', 'setting');
@@ -131,6 +198,60 @@ class BillingService
         $rateKey = $channel === 'whatsapp' ? 'default_whatsapp_rate' : 'default_sms_rate';
 
         return (float)($settings[$rateKey] ?? 0.05);
+    }
+
+    /**
+     * Get credit cost per segment for a destination (used in plan/credit mode)
+     *
+     * Lookup order: destination_rates (country+network) -> destination_rates (country) -> module setting -> default 1
+     *
+     * @param string|null $countryCode
+     * @param string|null $network
+     * @return int Credits per segment
+     */
+    public static function getCreditCost(?string $countryCode, ?string $network = null): int
+    {
+        // 1. Destination rate: country + network
+        if ($countryCode && $network) {
+            $destRate = Capsule::table('mod_sms_destination_rates')
+                ->where('country_code', $countryCode)
+                ->where('network', $network)
+                ->where('status', 1)
+                ->first();
+
+            if ($destRate) {
+                return max(1, (int)$destRate->credit_cost);
+            }
+        }
+
+        // 2. Destination rate: country only
+        if ($countryCode) {
+            $destRate = Capsule::table('mod_sms_destination_rates')
+                ->where('country_code', $countryCode)
+                ->where(function ($q) {
+                    $q->whereNull('network')
+                      ->orWhere('network', '');
+                })
+                ->where('status', 1)
+                ->first();
+
+            if ($destRate) {
+                return max(1, (int)$destRate->credit_cost);
+            }
+        }
+
+        // 3. Module setting
+        $setting = Capsule::table('tbladdonmodules')
+            ->where('module', 'sms_suite')
+            ->where('setting', 'credit_per_segment')
+            ->first();
+
+        if ($setting && (int)$setting->value > 0) {
+            return (int)$setting->value;
+        }
+
+        // 4. Default
+        return 1;
     }
 
     /**

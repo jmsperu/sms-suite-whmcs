@@ -1720,6 +1720,25 @@ function sms_suite_create_tables_sql()
         ", "Create mod_sms_network_prefixes");
     }
 
+    // 47a. Destination Rates (global rate card by country + network)
+    if (!$tableExists('mod_sms_destination_rates')) {
+        $execSql("
+            CREATE TABLE `mod_sms_destination_rates` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `country_code` VARCHAR(5) NOT NULL,
+                `network` VARCHAR(50) DEFAULT NULL,
+                `sms_rate` DECIMAL(10,6) DEFAULT 0,
+                `whatsapp_rate` DECIMAL(10,6) DEFAULT 0,
+                `credit_cost` INT UNSIGNED DEFAULT 1,
+                `status` TINYINT(1) DEFAULT 1,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_destination` (`country_code`, `network`),
+                INDEX `idx_status` (`status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_destination_rates");
+    }
+
     // 47. Sender ID billing records
     if (!$tableExists('mod_sms_sender_id_billing')) {
         $execSql("
@@ -3165,6 +3184,22 @@ function sms_suite_create_tables()
             });
         }
     }
+
+    // Destination Rates (global rate card by country + network)
+    if (!$schema->hasTable('mod_sms_destination_rates')) {
+        $schema->create('mod_sms_destination_rates', function ($table) {
+            $table->increments('id');
+            $table->string('country_code', 5);
+            $table->string('network', 50)->nullable();
+            $table->decimal('sms_rate', 10, 6)->default(0);
+            $table->decimal('whatsapp_rate', 10, 6)->default(0);
+            $table->unsignedInteger('credit_cost')->default(1);
+            $table->boolean('status')->default(true);
+            $table->timestamps();
+            $table->unique(['country_code', 'network'], 'unique_destination');
+            $table->index('status', 'idx_status');
+        });
+    }
 }
 
 /**
@@ -3278,6 +3313,7 @@ function sms_suite_diagnose_tables()
         'mod_sms_credit_purchases',
         'mod_sms_plan_credits',
         'mod_sms_client_rates',
+        'mod_sms_destination_rates',
         'mod_sms_credit_allocations',
         'mod_sms_credit_usage',
         // Network Prefixes
@@ -3350,6 +3386,8 @@ function sms_suite_diagnose_columns()
         'mod_sms_campaigns' => ['client_id', 'name', 'message', 'status', 'created_at'],
         'mod_sms_credit_balance' => ['client_id', 'balance', 'total_purchased', 'total_used', 'total_expired'],
         'mod_sms_credit_transactions' => ['client_id', 'type', 'credits', 'balance_before', 'balance_after', 'description'],
+        'mod_sms_destination_rates' => ['country_code', 'network', 'sms_rate', 'whatsapp_rate', 'credit_cost', 'status'],
+        'mod_sms_client_rates' => ['client_id', 'gateway_id', 'country_code', 'network_prefix', 'sms_rate', 'whatsapp_rate', 'status', 'priority'],
     ];
 
     foreach ($requiredColumns as $table => $columns) {
