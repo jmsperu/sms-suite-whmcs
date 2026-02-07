@@ -99,7 +99,7 @@ function processCampaignQueue()
         require_once __DIR__ . '/lib/Campaigns/CampaignService.php';
 
         $result = \SMSSuite\Campaigns\CampaignService::processPending();
-        echo "  Processed {$result['processed']} campaigns.\n";
+        echo "  Processed " . ($result['processed'] ?? 0) . " campaigns.\n";
 
     } catch (Exception $e) {
         echo "  Campaign processing error: " . $e->getMessage() . "\n";
@@ -150,7 +150,7 @@ function processMessageQueue()
         foreach ($messages as $message) {
             $result = \SMSSuite\Core\MessageService::processMessage($message->id);
 
-            if ($result['success']) {
+            if (!empty($result['success'])) {
                 $processed++;
             } else {
                 $failed++;
@@ -240,7 +240,7 @@ function processScheduledMessages()
         require_once __DIR__ . '/lib/Campaigns/AdvancedCampaignService.php';
 
         $result = \SMSSuite\Campaigns\AdvancedCampaignService::processScheduledMessages();
-        echo "  Processed {$result['processed']} scheduled messages.\n";
+        echo "  Processed " . ($result['processed'] ?? 0) . " scheduled messages.\n";
 
     } catch (Exception $e) {
         echo "  Scheduled message processing error: " . $e->getMessage() . "\n";
@@ -258,7 +258,7 @@ function processDripCampaigns()
         require_once __DIR__ . '/lib/Campaigns/AdvancedCampaignService.php';
 
         $result = \SMSSuite\Campaigns\AdvancedCampaignService::processDripCampaigns();
-        echo "  Processed {$result['processed']} drip campaign messages.\n";
+        echo "  Processed " . ($result['processed'] ?? 0) . " drip campaign messages.\n";
 
     } catch (Exception $e) {
         echo "  Drip campaign processing error: " . $e->getMessage() . "\n";
@@ -276,7 +276,7 @@ function processRecurringCampaigns()
         require_once __DIR__ . '/lib/Campaigns/AdvancedCampaignService.php';
 
         $result = \SMSSuite\Campaigns\AdvancedCampaignService::processRecurringCampaigns();
-        echo "  Processed {$result['processed']} recurring campaigns.\n";
+        echo "  Processed " . ($result['processed'] ?? 0) . " recurring campaigns.\n";
 
     } catch (Exception $e) {
         echo "  Recurring campaign processing error: " . $e->getMessage() . "\n";

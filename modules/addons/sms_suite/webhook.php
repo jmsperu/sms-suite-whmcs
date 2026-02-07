@@ -202,7 +202,7 @@ function handleDLR(\SMSSuite\Gateways\DLRResult $dlr, int $inboxId): array
         }
 
         // If failed, consider refund
-        if ($dlr->status === 'failed' || $dlr->status === 'undelivered') {
+        if ($message && ($dlr->status === 'failed' || $dlr->status === 'undelivered')) {
             require_once __DIR__ . '/lib/Billing/BillingService.php';
             \SMSSuite\Billing\BillingService::refund($message->id);
         }
