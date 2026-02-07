@@ -29,6 +29,9 @@ class ApiController
     public function handle(string $method, string $endpoint, array $params = []): array
     {
         try {
+            // Load security helper for audit logging
+            require_once dirname(__DIR__) . '/Core/SecurityHelper.php';
+
             // Authenticate
             if (!$this->authenticate()) {
                 return $this->error('Invalid API credentials', 401);
@@ -155,6 +158,12 @@ class ApiController
             return $this->error('Missing required parameter: message', 400);
         }
 
+        // Enforce message size limits
+        $maxLen = ($channel === 'whatsapp') ? 4096 : 1600;
+        if (mb_strlen($message) > $maxLen) {
+            return $this->error("Message too long: max {$maxLen} characters for {$channel}", 400);
+        }
+
         // Load message service
         require_once dirname(__DIR__) . '/Core/SegmentCounter.php';
         require_once dirname(__DIR__) . '/Core/MessageService.php';
@@ -168,6 +177,12 @@ class ApiController
         ]);
 
         if ($result['success']) {
+            \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_send_message', [
+                'client_id' => $this->apiKey['client_id'],
+                'key_id' => $this->apiKey['key_id'],
+                'to' => $to,
+                'channel' => $channel,
+            ]);
             return $this->success([
                 'message_id' => $result['message_id'],
                 'segments' => $result['segments'] ?? 1,
@@ -206,6 +221,12 @@ class ApiController
             return $this->error('Maximum 1000 recipients per request', 400);
         }
 
+        // Enforce message size limits
+        $maxLen = ($channel === 'whatsapp') ? 4096 : 1600;
+        if (mb_strlen($message) > $maxLen) {
+            return $this->error("Message too long: max {$maxLen} characters for {$channel}", 400);
+        }
+
         require_once dirname(__DIR__) . '/Core/SegmentCounter.php';
         require_once dirname(__DIR__) . '/Core/MessageService.php';
 
@@ -235,6 +256,14 @@ class ApiController
                 $failed++;
             }
         }
+
+        \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_send_bulk', [
+            'client_id' => $this->apiKey['client_id'],
+            'key_id' => $this->apiKey['key_id'],
+            'total' => count($recipients),
+            'sent' => $sent,
+            'failed' => $failed,
+        ]);
 
         return $this->success([
             'total' => count($recipients),
@@ -361,6 +390,10 @@ class ApiController
      */
     private function countSegments(array $params): array
     {
+        if (!ApiKeyService::hasScope($this->apiKey, 'send_sms')) {
+            return $this->error('Insufficient permissions', 403);
+        }
+
         $message = $params['message'] ?? '';
         $channel = $params['channel'] ?? 'sms';
 
@@ -437,6 +470,12 @@ class ApiController
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
+        \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_create_contact', [
+            'client_id' => $this->apiKey['client_id'],
+            'key_id' => $this->apiKey['key_id'],
+            'contact_id' => $id,
+        ]);
+
         return $this->success(['id' => $id], 201);
     }
 
@@ -475,6 +514,13 @@ class ApiController
             return $this->error('Missing required parameters: to, message, scheduled_at', 400);
         }
 
+        // Enforce message size limits
+        $channel = $params['channel'] ?? 'sms';
+        $maxLen = ($channel === 'whatsapp') ? 4096 : 1600;
+        if (mb_strlen($message) > $maxLen) {
+            return $this->error("Message too long: max {$maxLen} characters for {$channel}", 400);
+        }
+
         require_once dirname(__DIR__) . '/Campaigns/AdvancedCampaignService.php';
 
         $result = \SMSSuite\Campaigns\AdvancedCampaignService::scheduleMessage(
@@ -511,6 +557,11 @@ class ApiController
 
         if (empty($to) || empty($message)) {
             return $this->error('Missing required parameters: to, message', 400);
+        }
+
+        // Enforce WhatsApp message size limit
+        if (mb_strlen($message) > 4096) {
+            return $this->error('Message too long: max 4096 characters for whatsapp', 400);
         }
 
         require_once dirname(__DIR__) . '/Core/SegmentCounter.php';
@@ -660,6 +711,13 @@ class ApiController
             }
         }
 
+        \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_import_contacts', [
+            'client_id' => $this->apiKey['client_id'],
+            'key_id' => $this->apiKey['key_id'],
+            'imported' => $imported,
+            'skipped' => $skipped,
+        ]);
+
         return $this->success([
             'imported' => $imported,
             'skipped' => $skipped,
@@ -751,6 +809,11 @@ class ApiController
                 );
             }
 
+            \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_create_campaign', [
+                'client_id' => $this->apiKey['client_id'],
+                'key_id' => $this->apiKey['key_id'],
+                'campaign_id' => $result['id'],
+            ]);
             return $this->success(['campaign_id' => $result['id']], 201);
         }
 

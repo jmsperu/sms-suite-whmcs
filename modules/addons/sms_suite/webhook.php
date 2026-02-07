@@ -28,6 +28,82 @@ if (strpos($contentType, 'application/json') !== false) {
     $payload = array_merge($payload, $_POST, $_GET);
 }
 
+// Verify webhook signature/token if configured
+$gatewayRecord = Capsule::table('mod_sms_gateways')
+    ->where('type', $gatewayType)
+    ->where('status', 1)
+    ->first();
+
+if ($gatewayRecord && !empty($gatewayRecord->webhook_token)) {
+    // Build headers array from $_SERVER
+    $headers = [];
+    foreach ($_SERVER as $key => $value) {
+        if (strpos($key, 'HTTP_') === 0) {
+            $headerName = str_replace('_', '-', substr($key, 5));
+            $headers[$headerName] = $value;
+        }
+    }
+
+    // Load gateway class for verification
+    $baseDir = __DIR__ . '/lib/Gateways/';
+    require_once $baseDir . 'GatewayInterface.php';
+    require_once $baseDir . 'AbstractGateway.php';
+
+    $verifyClass = null;
+    switch ($gatewayType) {
+        case 'twilio':
+            require_once $baseDir . 'TwilioGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\TwilioGateway(0, []);
+            break;
+        case 'plivo':
+            require_once $baseDir . 'PlivoGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\PlivoGateway(0, []);
+            break;
+        case 'vonage':
+        case 'nexmo':
+            require_once $baseDir . 'VonageGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\VonageGateway(0, []);
+            break;
+        case 'infobip':
+            require_once $baseDir . 'InfobipGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\InfobipGateway(0, []);
+            break;
+        case 'airtouch':
+        case 'airtouch_kenya':
+            require_once $baseDir . 'AirtouchGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\AirtouchGateway(0, []);
+            break;
+        case 'generic':
+            require_once $baseDir . 'GenericHttpGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\GenericHttpGateway(0, []);
+            break;
+        default:
+            // Use base class for token check
+            $verifyClass = new class(0, []) extends \SMSSuite\Gateways\AbstractGateway {
+                public function send(string $to, string $message, array $options = []): array { return []; }
+                public function getBalance(): ?float { return null; }
+            };
+            break;
+    }
+
+    if (!$verifyClass->verifyWebhook($headers, $rawPayload, $gatewayRecord->webhook_token)) {
+        // Log the failed attempt
+        Capsule::table('mod_sms_webhooks_inbox')->insertGetId([
+            'gateway_type' => $gatewayType,
+            'payload' => json_encode($payload),
+            'raw_payload' => $rawPayload,
+            'ip_address' => $_SERVER['REMOTE_ADDR'] ?? null,
+            'processed' => false,
+            'error' => 'Webhook signature verification failed',
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        http_response_code(403);
+        echo json_encode(['error' => 'Webhook verification failed']);
+        exit;
+    }
+}
+
 // Store in inbox for processing
 $inboxId = Capsule::table('mod_sms_webhooks_inbox')->insertGetId([
     'gateway_type' => $gatewayType,

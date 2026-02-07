@@ -104,6 +104,33 @@ class ApiKeyService
             return null;
         }
 
+        // Check IP whitelist if configured
+        if (!empty($key->allowed_ips)) {
+            $clientIp = $_SERVER['REMOTE_ADDR'] ?? '';
+            $allowedIps = array_map('trim', explode(',', $key->allowed_ips));
+            $ipAllowed = false;
+
+            foreach ($allowedIps as $allowed) {
+                if (empty($allowed)) {
+                    continue;
+                }
+                // Support CIDR notation
+                if (strpos($allowed, '/') !== false) {
+                    if (self::ipInCidr($clientIp, $allowed)) {
+                        $ipAllowed = true;
+                        break;
+                    }
+                } elseif ($clientIp === $allowed) {
+                    $ipAllowed = true;
+                    break;
+                }
+            }
+
+            if (!$ipAllowed) {
+                return null;
+            }
+        }
+
         // Update last used
         Capsule::table('mod_sms_api_keys')
             ->where('id', $key->id)
@@ -142,33 +169,21 @@ class ApiKeyService
     {
         $windowStart = date('Y-m-d H:i:00'); // Current minute
 
-        // Get current count
+        // Atomic upsert: insert new row or increment existing (prevents race condition)
+        Capsule::statement(
+            "INSERT INTO `mod_sms_rate_limits` (`key_id`, `window`, `requests`)
+             VALUES (?, ?, 1)
+             ON DUPLICATE KEY UPDATE `requests` = `requests` + 1",
+            [$keyId, $windowStart]
+        );
+
+        // Read back the count to check against limit
         $count = Capsule::table('mod_sms_rate_limits')
             ->where('key_id', $keyId)
             ->where('window', $windowStart)
             ->value('requests');
 
-        if ($count === null) {
-            // First request in this window
-            Capsule::table('mod_sms_rate_limits')->insert([
-                'key_id' => $keyId,
-                'window' => $windowStart,
-                'requests' => 1,
-            ]);
-            return true;
-        }
-
-        if ($count >= $limit) {
-            return false;
-        }
-
-        // Increment counter
-        Capsule::table('mod_sms_rate_limits')
-            ->where('key_id', $keyId)
-            ->where('window', $windowStart)
-            ->increment('requests');
-
-        return true;
+        return $count <= $limit;
     }
 
     /**
@@ -222,5 +237,27 @@ class ApiKeyService
                 ];
             })
             ->toArray();
+    }
+
+    /**
+     * Check if an IP address is within a CIDR range
+     *
+     * @param string $ip
+     * @param string $cidr e.g. "192.168.1.0/24"
+     * @return bool
+     */
+    private static function ipInCidr(string $ip, string $cidr): bool
+    {
+        list($subnet, $bits) = explode('/', $cidr, 2);
+        $bits = (int)$bits;
+
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $ipLong = ip2long($ip);
+            $subnetLong = ip2long($subnet);
+            $mask = -1 << (32 - $bits);
+            return ($ipLong & $mask) === ($subnetLong & $mask);
+        }
+
+        return false;
     }
 }

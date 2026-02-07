@@ -57,28 +57,42 @@ $whmcsPath = dirname(dirname(dirname(dirname(__DIR__))));
 require_once $whmcsPath . '/init.php';
 require_once $whmcsPath . '/includes/api.php';
 
+use WHMCS\Database\Capsule;
+
 // Set JSON content type and security headers
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 
-// Handle CORS for API clients
+// Handle CORS for API clients — restrict to configured origins
+$corsAllowed = false;
 if (isset($_SERVER['HTTP_ORIGIN'])) {
-    header('Access-Control-Allow-Origin: ' . $_SERVER['HTTP_ORIGIN']);
-    header('Access-Control-Allow-Credentials: true');
+    $allowedOrigins = Capsule::table('mod_sms_settings')
+        ->where('setting', 'api_cors_origins')
+        ->value('value');
+
+    if (!empty($allowedOrigins)) {
+        $originList = array_map('trim', explode(',', $allowedOrigins));
+        if (in_array($_SERVER['HTTP_ORIGIN'], $originList, true)) {
+            header('Access-Control-Allow-Origin: ' . $_SERVER['HTTP_ORIGIN']);
+            header('Access-Control-Allow-Credentials: true');
+            $corsAllowed = true;
+        }
+    }
+    // If no origins configured or origin not in list, no CORS headers are sent
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: X-API-Key, X-API-Secret, Authorization, Content-Type');
-    header('Access-Control-Max-Age: 86400');
+    if ($corsAllowed) {
+        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+        header('Access-Control-Allow-Headers: X-API-Key, X-API-Secret, Authorization, Content-Type');
+        header('Access-Control-Max-Age: 86400');
+    }
     exit(0);
 }
 
 // Check if module is active
-use WHMCS\Database\Capsule;
-
 $moduleActive = Capsule::table('tbladdonmodules')
     ->where('module', 'sms_suite')
     ->where('setting', 'status')
@@ -108,10 +122,20 @@ $endpoint = isset($_GET['endpoint']) ? preg_replace('/[^a-zA-Z0-9\/_-]/', '', $_
 // Parse JSON body for POST/PUT requests
 $params = [];
 if (in_array($method, ['POST', 'PUT'])) {
+    // Enforce request body size limit (1MB)
+    $body = file_get_contents('php://input');
+    if (strlen($body) > 1048576) {
+        http_response_code(413);
+        echo json_encode([
+            'success' => false,
+            'error' => ['code' => 413, 'message' => 'Request body too large (max 1MB)'],
+        ]);
+        exit;
+    }
+
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
 
     if (strpos($contentType, 'application/json') !== false) {
-        $body = file_get_contents('php://input');
         $json = json_decode($body, true);
         if (json_last_error() === JSON_ERROR_NONE && is_array($json)) {
             $params = $json;
