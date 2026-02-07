@@ -3675,7 +3675,7 @@ function sms_suite_admin_client_settings($vars, $lang)
 
     // Get wallet balance
     $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
-    $balance = $wallet->balance ?? 0;
+    $balance = $wallet ? $wallet->balance : 0;
 
     // Get credit balance
     require_once __DIR__ . '/../lib/Billing/BillingService.php';
@@ -4111,7 +4111,7 @@ function sms_suite_admin_notifications($vars, $lang)
                 echo '<td style="width: 180px;"><strong>' . htmlspecialchars($t->name) . '</strong><br><small class="text-muted">' . $t->notification_type . '</small></td>';
                 echo '<td>' . htmlspecialchars(substr($t->message, 0, 100)) . (strlen($t->message) > 100 ? '...' : '') . '</td>';
                 echo '<td><span class="label label-' . $statusClass . '">' . ucfirst($t->status) . '</span></td>';
-                echo '<td><button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', \'' . addslashes($t->name) . '\', \'' . addslashes($t->message) . '\', \'' . $t->status . '\')">Edit</button></td>';
+                echo '<td><button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->message), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->status), ENT_QUOTES, 'UTF-8') . ')">Edit</button></td>';
                 echo '</tr>';
             }
             echo '</tbody>';
