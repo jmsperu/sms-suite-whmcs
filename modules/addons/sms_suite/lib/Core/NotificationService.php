@@ -550,8 +550,18 @@ class NotificationService
         if (!empty($phone)) {
             // Try to get country code
             $countryCode = self::getCountryPhoneCode($client->country ?? '');
-            if ($countryCode && strpos($phone, '+') !== 0 && strpos($phone, $countryCode) !== 0) {
-                $phone = $countryCode . ltrim($phone, '0');
+            if ($countryCode) {
+                $codeDigits = ltrim($countryCode, '+');
+                // Only prepend if the phone doesn't already start with the country code (with or without +)
+                if (strpos($phone, '+' . $codeDigits) === 0) {
+                    // Already has +254... format, leave as-is
+                } elseif (strpos($phone, $codeDigits) === 0) {
+                    // Has 254... format (no +), just add +
+                    $phone = '+' . $phone;
+                } else {
+                    // Local number like 0702..., prepend country code
+                    $phone = $countryCode . ltrim($phone, '0');
+                }
             }
         }
 

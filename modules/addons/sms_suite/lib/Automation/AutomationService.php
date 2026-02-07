@@ -57,24 +57,18 @@ class AutomationService
             return ['success' => false, 'error' => 'Name is required'];
         }
 
-        if (empty($data['hook'])) {
-            return ['success' => false, 'error' => 'Hook is required'];
-        }
-
-        if (!isset(self::AVAILABLE_HOOKS[$data['hook']])) {
-            return ['success' => false, 'error' => 'Invalid hook'];
+        if (empty($data['trigger_type'])) {
+            return ['success' => false, 'error' => 'Trigger type is required'];
         }
 
         try {
             $id = Capsule::table('mod_sms_automations')->insertGetId([
                 'name' => $data['name'],
-                'hook' => $data['hook'],
-                'channel' => $data['channel'] ?? 'sms',
-                'template_id' => $data['template_id'] ?? null,
-                'message' => $data['message'] ?? '',
+                'trigger_type' => $data['trigger_type'],
+                'trigger_config' => is_string($data['trigger_config'] ?? '') ? ($data['trigger_config'] ?? '{}') : json_encode($data['trigger_config'] ?? []),
+                'message_template' => $data['message_template'] ?? '',
                 'sender_id' => $data['sender_id'] ?? null,
                 'gateway_id' => $data['gateway_id'] ?? null,
-                'conditions' => json_encode($data['conditions'] ?? []),
                 'status' => $data['status'] ?? 'active',
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
@@ -98,7 +92,7 @@ class AutomationService
     {
         $updateData = ['updated_at' => date('Y-m-d H:i:s')];
 
-        $allowedFields = ['name', 'hook', 'channel', 'template_id', 'message',
+        $allowedFields = ['name', 'trigger_type', 'message_template',
                           'sender_id', 'gateway_id', 'status'];
 
         foreach ($allowedFields as $field) {
@@ -107,8 +101,10 @@ class AutomationService
             }
         }
 
-        if (isset($data['conditions'])) {
-            $updateData['conditions'] = json_encode($data['conditions']);
+        if (isset($data['trigger_config'])) {
+            $updateData['trigger_config'] = is_string($data['trigger_config'])
+                ? $data['trigger_config']
+                : json_encode($data['trigger_config']);
         }
 
         Capsule::table('mod_sms_automations')
@@ -157,14 +153,15 @@ class AutomationService
 
         // Find active automations for this hook
         $automations = Capsule::table('mod_sms_automations')
-            ->where('hook', $hook)
+            ->where('trigger_type', 'whmcs_hook')
             ->where('status', 'active')
             ->get();
 
         foreach ($automations as $automation) {
             try {
-                // Check conditions
-                if (!self::checkConditions($automation, $vars)) {
+                // Check if this automation matches the specific hook
+                $config = json_decode($automation->trigger_config, true) ?: [];
+                if (($config['hook'] ?? '') !== $hook) {
                     continue;
                 }
 
@@ -183,25 +180,14 @@ class AutomationService
                 $clientId = self::getClientId($hook, $vars);
 
                 // Parse message template
-                $message = self::parseTemplate($automation->message, $vars);
-
-                // If template_id is set, use template content
-                if ($automation->template_id) {
-                    $template = Capsule::table('mod_sms_templates')
-                        ->where('id', $automation->template_id)
-                        ->first();
-
-                    if ($template) {
-                        $message = self::parseTemplate($template->content, $vars);
-                    }
-                }
+                $message = self::parseTemplate($automation->message_template, $vars);
 
                 // Send message
                 require_once dirname(__DIR__) . '/Core/SegmentCounter.php';
                 require_once dirname(__DIR__) . '/Core/MessageService.php';
 
                 $result = MessageService::send($clientId, $phone, $message, [
-                    'channel' => $automation->channel,
+                    'channel' => 'sms',
                     'sender_id' => $automation->sender_id,
                     'gateway_id' => $automation->gateway_id,
                     'automation_id' => $automation->id,
@@ -218,10 +204,9 @@ class AutomationService
                 // Log execution
                 Capsule::table('mod_sms_automation_logs')->insert([
                     'automation_id' => $automation->id,
-                    'hook' => $hook,
-                    'recipient' => $phone,
-                    'success' => $result['success'] ? 1 : 0,
+                    'trigger_data' => json_encode(['hook' => $hook, 'recipient' => $phone]),
                     'message_id' => $result['message_id'] ?? null,
+                    'status' => $result['success'] ? 'sent' : 'failed',
                     'error' => $result['error'] ?? null,
                     'created_at' => date('Y-m-d H:i:s'),
                 ]);
@@ -245,7 +230,8 @@ class AutomationService
      */
     private static function checkConditions(object $automation, array $vars): bool
     {
-        $conditions = json_decode($automation->conditions, true) ?: [];
+        $config = json_decode($automation->trigger_config, true) ?: [];
+        $conditions = $config['conditions'] ?? [];
 
         if (empty($conditions)) {
             return true;
