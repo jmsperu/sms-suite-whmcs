@@ -2745,29 +2745,37 @@ function sms_suite_admin_clients($vars, $lang)
             $description = $_POST['description'] ?? 'Admin credit adjustment';
 
             // Update or create credit balance
-            $balance = Capsule::table('mod_sms_credit_balance')->where('client_id', $clientId)->first();
-            if ($balance) {
-                Capsule::table('mod_sms_credit_balance')->where('client_id', $clientId)->update([
-                    'total_credits' => $balance->total_credits + $credits,
+            $balanceRow = Capsule::table('mod_sms_credit_balance')->where('client_id', $clientId)->first();
+            if ($balanceRow) {
+                $newBalance = $balanceRow->balance + $credits;
+                $updateData = [
+                    'balance' => max(0, $newBalance),
                     'updated_at' => date('Y-m-d H:i:s'),
-                ]);
-                $newBalance = $balance->total_credits + $credits - $balance->used_credits;
+                ];
+                if ($credits > 0) {
+                    $updateData['total_purchased'] = $balanceRow->total_purchased + $credits;
+                }
+                Capsule::table('mod_sms_credit_balance')->where('client_id', $clientId)->update($updateData);
             } else {
+                $newBalance = max(0, $credits);
                 Capsule::table('mod_sms_credit_balance')->insert([
                     'client_id' => $clientId,
-                    'total_credits' => max(0, $credits),
-                    'used_credits' => 0,
+                    'balance' => $newBalance,
+                    'total_purchased' => max(0, $credits),
+                    'total_used' => 0,
+                    'total_expired' => 0,
                     'created_at' => date('Y-m-d H:i:s'),
                 ]);
-                $newBalance = max(0, $credits);
             }
 
             // Log transaction
+            $balanceBefore = $balanceRow ? $balanceRow->balance : 0;
             Capsule::table('mod_sms_credit_transactions')->insert([
                 'client_id' => $clientId,
                 'type' => $credits > 0 ? 'admin_add' : 'admin_deduct',
                 'credits' => $credits,
-                'balance_after' => $newBalance,
+                'balance_before' => $balanceBefore,
+                'balance_after' => max(0, $newBalance),
                 'description' => $description,
                 'created_at' => date('Y-m-d H:i:s'),
             ]);
@@ -2798,7 +2806,7 @@ function sms_suite_admin_clients($vars, $lang)
             'mod_sms_settings.accept_sms',
             'mod_sms_settings.monthly_limit',
             'mod_sms_settings.monthly_used',
-            Capsule::raw('COALESCE(mod_sms_credit_balance.total_credits, 0) - COALESCE(mod_sms_credit_balance.used_credits, 0) as credit_balance'),
+            Capsule::raw('COALESCE(mod_sms_credit_balance.balance, 0) as credit_balance'),
         ]);
 
     if (!empty($search)) {
@@ -3014,35 +3022,50 @@ function sms_suite_admin_diagnostics($vars, $lang)
     $repairType = '';
     $autoRepaired = false;
 
-    // Auto-repair: Check for missing tables and create them automatically
+    // Auto-repair: Check for missing tables/columns and repair automatically
     $diagnosis = sms_suite_diagnose_tables();
-    if (count($diagnosis['missing']) > 0) {
+    $colDiagnosis = sms_suite_diagnose_columns();
+    if (count($diagnosis['missing']) > 0 || count($colDiagnosis['missing']) > 0) {
         // Automatically attempt repair
         $result = sms_suite_repair_tables();
         $autoRepaired = true;
+        $parts = [];
+        if ($result['repaired'] > 0) $parts[] = $result['repaired'] . ' tables created';
+        if (($result['columns_repaired'] ?? 0) > 0) $parts[] = ($result['columns_repaired'] ?? 0) . ' columns added';
         if ($result['success']) {
-            $repairMessage = 'Auto-repair completed: ' . $result['repaired'] . ' missing tables were created automatically.';
+            $repairMessage = 'Auto-repair completed: ' . (implode(', ', $parts) ?: 'schema verified') . '.';
             $repairType = 'success';
         } else {
-            $repairMessage = 'Auto-repair attempted but some tables could not be created: ' . implode(', ', $result['still_missing']);
+            $issues = [];
+            if (!empty($result['still_missing'])) $issues[] = 'Tables: ' . implode(', ', $result['still_missing']);
+            if (!empty($result['columns_still_missing'])) $issues[] = 'Columns: ' . implode(', ', $result['columns_still_missing']);
+            $repairMessage = 'Auto-repair attempted but some issues remain. ' . implode('. ', $issues);
             $repairType = 'warning';
         }
         // Re-diagnose after repair
         $diagnosis = sms_suite_diagnose_tables();
+        $colDiagnosis = sms_suite_diagnose_columns();
     }
 
     // Handle manual repair action
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['repair_database'])) {
         $result = sms_suite_repair_tables();
+        $parts = [];
+        if ($result['repaired'] > 0) $parts[] = $result['repaired'] . ' tables created';
+        if (($result['columns_repaired'] ?? 0) > 0) $parts[] = ($result['columns_repaired'] ?? 0) . ' columns added';
         if ($result['success']) {
-            $repairMessage = 'Database repair completed successfully. All tables are now available.';
+            $repairMessage = 'Database repair completed successfully. ' . (implode(', ', $parts) ?: 'All tables and columns verified.') ;
             $repairType = 'success';
         } else {
-            $repairMessage = 'Database repair completed with issues. Still missing: ' . implode(', ', $result['still_missing']);
+            $issues = [];
+            if (!empty($result['still_missing'])) $issues[] = 'Tables: ' . implode(', ', $result['still_missing']);
+            if (!empty($result['columns_still_missing'])) $issues[] = 'Columns: ' . implode(', ', $result['columns_still_missing']);
+            $repairMessage = 'Database repair completed with issues. ' . implode('. ', $issues);
             $repairType = 'warning';
         }
         // Re-diagnose after repair
         $diagnosis = sms_suite_diagnose_tables();
+        $colDiagnosis = sms_suite_diagnose_columns();
     }
 
     echo '<div class="panel panel-default">';
@@ -3084,7 +3107,32 @@ function sms_suite_admin_diagnostics($vars, $lang)
     if (count($diagnosis['missing']) > 0) {
         echo '<div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> Some tables are missing. Click repair to create them.</div>';
     } else {
-        echo '<div class="alert alert-success"><i class="fa fa-check-circle"></i> All required database tables are present and operational.</div>';
+        echo '<div class="alert alert-success"><i class="fa fa-check-circle"></i> All required database tables are present.</div>';
+    }
+
+    // Column-level diagnostics
+    echo '<h4><i class="fa fa-columns"></i> Column Schema Check</h4>';
+    echo '<table class="table table-bordered">';
+    echo '<tr><td width="30%">Columns Checked</td><td>' . $colDiagnosis['total_checked'] . '</td></tr>';
+    echo '<tr><td>Columns OK</td><td><span class="text-success"><i class="fa fa-check"></i> ' . count($colDiagnosis['ok']) . '</span></td></tr>';
+    echo '<tr><td>Columns Missing</td><td>';
+    if (count($colDiagnosis['missing']) > 0) {
+        echo '<span class="text-danger"><i class="fa fa-warning"></i> ' . count($colDiagnosis['missing']) . '</span>';
+        echo '<ul style="margin-top:5px; margin-bottom:0;">';
+        foreach ($colDiagnosis['missing'] as $col) {
+            echo '<li><code>' . htmlspecialchars($col) . '</code></li>';
+        }
+        echo '</ul>';
+    } else {
+        echo '<span class="text-success"><i class="fa fa-check"></i> 0</span>';
+    }
+    echo '</td></tr>';
+    echo '</table>';
+
+    if (count($colDiagnosis['missing']) > 0) {
+        echo '<div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> Some columns are missing. Click repair to add them.</div>';
+    } elseif (count($diagnosis['missing']) == 0) {
+        echo '<div class="alert alert-success"><i class="fa fa-check-circle"></i> All database tables and columns are correct.</div>';
     }
 
     // Always show repair button - it also updates column schemas

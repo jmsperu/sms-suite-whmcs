@@ -949,6 +949,35 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_status` (`status`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_automations");
+    } else {
+        // Fix schema if table was created by old Schema Builder with wrong columns
+        if (!$columnExists('mod_sms_automations', 'trigger_type')) {
+            if ($columnExists('mod_sms_automations', 'hook')) {
+                $execSql("ALTER TABLE `mod_sms_automations` CHANGE `hook` `trigger_type` VARCHAR(50) NOT NULL", "Rename hook to trigger_type in mod_sms_automations");
+            } else {
+                $execSql("ALTER TABLE `mod_sms_automations` ADD COLUMN `trigger_type` VARCHAR(50) NOT NULL DEFAULT 'whmcs_hook' AFTER `name`", "Add trigger_type to mod_sms_automations");
+            }
+        }
+        if (!$columnExists('mod_sms_automations', 'trigger_config')) {
+            if ($columnExists('mod_sms_automations', 'conditions')) {
+                $execSql("ALTER TABLE `mod_sms_automations` CHANGE `conditions` `trigger_config` TEXT", "Rename conditions to trigger_config in mod_sms_automations");
+            } else {
+                $execSql("ALTER TABLE `mod_sms_automations` ADD COLUMN `trigger_config` TEXT AFTER `trigger_type`", "Add trigger_config to mod_sms_automations");
+            }
+        }
+        if (!$columnExists('mod_sms_automations', 'message_template')) {
+            if ($columnExists('mod_sms_automations', 'message')) {
+                $execSql("ALTER TABLE `mod_sms_automations` CHANGE `message` `message_template` TEXT", "Rename message to message_template in mod_sms_automations");
+            } else {
+                $execSql("ALTER TABLE `mod_sms_automations` ADD COLUMN `message_template` TEXT AFTER `trigger_config`", "Add message_template to mod_sms_automations");
+            }
+        }
+        if (!$columnExists('mod_sms_automations', 'run_count')) {
+            $execSql("ALTER TABLE `mod_sms_automations` ADD COLUMN `run_count` INT UNSIGNED DEFAULT 0 AFTER `status`", "Add run_count to mod_sms_automations");
+        }
+        if (!$columnExists('mod_sms_automations', 'last_run')) {
+            $execSql("ALTER TABLE `mod_sms_automations` ADD COLUMN `last_run` TIMESTAMP NULL AFTER `run_count`", "Add last_run to mod_sms_automations");
+        }
     }
 
     // 19. Verification tokens (for 2FA)
@@ -1227,6 +1256,31 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_created_at` (`created_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_automation_logs");
+    } else {
+        // Fix schema if table was created by old Schema Builder with wrong columns
+        if (!$columnExists('mod_sms_automation_logs', 'trigger_data')) {
+            if ($columnExists('mod_sms_automation_logs', 'hook')) {
+                // Old schema had hook + recipient columns; migrate to trigger_data JSON
+                $execSql("ALTER TABLE `mod_sms_automation_logs` ADD COLUMN `trigger_data` TEXT AFTER `automation_id`", "Add trigger_data to mod_sms_automation_logs");
+                // Migrate existing data: combine hook and recipient into trigger_data JSON
+                try {
+                    $pdo->exec("UPDATE `mod_sms_automation_logs` SET `trigger_data` = CONCAT('{\"hook\":\"', IFNULL(`hook`,''), '\",\"recipient\":\"', IFNULL(`recipient`,''), '\"}') WHERE `trigger_data` IS NULL");
+                } catch (Exception $e) {}
+            } else {
+                $execSql("ALTER TABLE `mod_sms_automation_logs` ADD COLUMN `trigger_data` TEXT AFTER `automation_id`", "Add trigger_data to mod_sms_automation_logs");
+            }
+        }
+        if (!$columnExists('mod_sms_automation_logs', 'status')) {
+            if ($columnExists('mod_sms_automation_logs', 'success')) {
+                // Old schema had boolean success; add status column and migrate
+                $execSql("ALTER TABLE `mod_sms_automation_logs` ADD COLUMN `status` VARCHAR(20) DEFAULT 'sent' AFTER `message_id`", "Add status to mod_sms_automation_logs");
+                try {
+                    $pdo->exec("UPDATE `mod_sms_automation_logs` SET `status` = CASE WHEN `success` = 1 THEN 'sent' ELSE 'failed' END WHERE `status` = 'sent'");
+                } catch (Exception $e) {}
+            } else {
+                $execSql("ALTER TABLE `mod_sms_automation_logs` ADD COLUMN `status` VARCHAR(20) DEFAULT 'sent' AFTER `message_id`", "Add status to mod_sms_automation_logs");
+            }
+        }
     }
 
     // 32. Pending wallet topups
@@ -1511,14 +1565,29 @@ function sms_suite_create_tables_sql()
             CREATE TABLE `mod_sms_credit_balance` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `client_id` INT UNSIGNED NOT NULL,
-                `total_credits` INT UNSIGNED DEFAULT 0,
-                `used_credits` INT UNSIGNED DEFAULT 0,
-                `reserved_credits` INT UNSIGNED DEFAULT 0,
+                `balance` INT UNSIGNED DEFAULT 0,
+                `total_purchased` INT UNSIGNED DEFAULT 0,
+                `total_used` INT UNSIGNED DEFAULT 0,
+                `total_expired` INT UNSIGNED DEFAULT 0,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 UNIQUE KEY `unique_client` (`client_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_credit_balance");
+    } else {
+        // Migrate old column names to BillingService convention
+        if ($columnExists('mod_sms_credit_balance', 'total_credits') && !$columnExists('mod_sms_credit_balance', 'balance')) {
+            $execSql("ALTER TABLE `mod_sms_credit_balance` CHANGE `total_credits` `balance` INT UNSIGNED DEFAULT 0", "Rename total_credits to balance");
+        }
+        if ($columnExists('mod_sms_credit_balance', 'used_credits') && !$columnExists('mod_sms_credit_balance', 'total_used')) {
+            $execSql("ALTER TABLE `mod_sms_credit_balance` CHANGE `used_credits` `total_used` INT UNSIGNED DEFAULT 0", "Rename used_credits to total_used");
+        }
+        if ($columnExists('mod_sms_credit_balance', 'reserved_credits') && !$columnExists('mod_sms_credit_balance', 'total_expired')) {
+            $execSql("ALTER TABLE `mod_sms_credit_balance` CHANGE `reserved_credits` `total_expired` INT UNSIGNED DEFAULT 0", "Rename reserved_credits to total_expired");
+        }
+        if (!$columnExists('mod_sms_credit_balance', 'total_purchased')) {
+            $execSql("ALTER TABLE `mod_sms_credit_balance` ADD COLUMN `total_purchased` INT UNSIGNED DEFAULT 0 AFTER `balance`", "Add total_purchased to mod_sms_credit_balance");
+        }
     }
 
     // 45. Credit transactions
@@ -1529,6 +1598,7 @@ function sms_suite_create_tables_sql()
                 `client_id` INT UNSIGNED NOT NULL,
                 `type` VARCHAR(30) NOT NULL,
                 `credits` INT NOT NULL,
+                `balance_before` INT UNSIGNED,
                 `balance_after` INT UNSIGNED,
                 `description` VARCHAR(255),
                 `reference_type` VARCHAR(50),
@@ -1539,6 +1609,13 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_created_at` (`created_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_credit_transactions");
+    } else {
+        if (!$columnExists('mod_sms_credit_transactions', 'balance_before')) {
+            $execSql("ALTER TABLE `mod_sms_credit_transactions` ADD COLUMN `balance_before` INT UNSIGNED AFTER `credits`", "Add balance_before to mod_sms_credit_transactions");
+        }
+        if ($columnExists('mod_sms_credit_transactions', 'amount') && !$columnExists('mod_sms_credit_transactions', 'credits')) {
+            $execSql("ALTER TABLE `mod_sms_credit_transactions` CHANGE `amount` `credits` INT NOT NULL", "Rename amount to credits");
+        }
     }
 
     // 46. Client sender IDs (assigned to clients)
@@ -1554,6 +1631,7 @@ function sms_suite_create_tables_sql()
                 `type` VARCHAR(20) DEFAULT 'alphanumeric',
                 `network` VARCHAR(20) DEFAULT 'all',
                 `status` VARCHAR(20) DEFAULT 'active',
+                `is_default` TINYINT(1) DEFAULT 0,
                 `service_id` INT UNSIGNED,
                 `monthly_fee` DECIMAL(10,2) DEFAULT 0,
                 `next_billing` DATE,
@@ -1566,6 +1644,13 @@ function sms_suite_create_tables_sql()
                 UNIQUE KEY `unique_client_sender_network` (`client_id`, `sender_id`, `network`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_client_sender_ids");
+    } else {
+        if (!$columnExists('mod_sms_client_sender_ids', 'is_default')) {
+            $execSql("ALTER TABLE `mod_sms_client_sender_ids` ADD COLUMN `is_default` TINYINT(1) DEFAULT 0 AFTER `status`", "Add is_default to mod_sms_client_sender_ids");
+        }
+        if (!$columnExists('mod_sms_client_sender_ids', 'network')) {
+            $execSql("ALTER TABLE `mod_sms_client_sender_ids` ADD COLUMN `network` VARCHAR(20) DEFAULT 'all' AFTER `type`", "Add network to mod_sms_client_sender_ids");
+        }
     }
 
     // 47b. Credit Allocations (track credits per package/service)
@@ -2322,16 +2407,16 @@ function sms_suite_create_tables()
         $schema->create('mod_sms_automations', function ($table) {
             $table->increments('id');
             $table->string('name', 100);
-            $table->string('hook', 100);
-            $table->string('channel', 20)->default('sms');
-            $table->unsignedInteger('template_id')->nullable();
-            $table->text('message')->nullable();
+            $table->string('trigger_type', 50);
+            $table->text('trigger_config')->nullable();
+            $table->text('message_template')->nullable();
             $table->string('sender_id', 50)->nullable();
             $table->unsignedInteger('gateway_id')->nullable();
-            $table->text('conditions')->nullable();
             $table->string('status', 20)->default('active');
+            $table->unsignedInteger('run_count')->default(0);
+            $table->timestamp('last_run')->nullable();
             $table->timestamps();
-            $table->index('hook');
+            $table->index('trigger_type');
             $table->index('status');
         });
     }
@@ -2341,13 +2426,13 @@ function sms_suite_create_tables()
         $schema->create('mod_sms_automation_logs', function ($table) {
             $table->increments('id');
             $table->unsignedInteger('automation_id');
-            $table->string('hook', 100);
-            $table->string('recipient', 50);
-            $table->boolean('success')->default(false);
+            $table->text('trigger_data')->nullable();
             $table->unsignedInteger('message_id')->nullable();
+            $table->string('status', 20)->default('sent');
             $table->text('error')->nullable();
             $table->timestamp('created_at')->useCurrent();
-            $table->index(['automation_id', 'created_at']);
+            $table->index('automation_id');
+            $table->index('created_at');
         });
     }
 
@@ -3240,11 +3325,69 @@ function sms_suite_diagnose_tables()
 }
 
 /**
- * Repair database tables - creates missing tables
+ * Diagnose database columns - checks critical columns exist in tables
+ * Returns array of missing columns per table
+ */
+function sms_suite_diagnose_columns()
+{
+    $pdo = Capsule::connection()->getPdo();
+    $results = [
+        'missing' => [],
+        'ok' => [],
+        'total_checked' => 0,
+    ];
+
+    // Define critical columns that must exist in each table
+    $requiredColumns = [
+        'mod_sms_automations' => ['trigger_type', 'trigger_config', 'message_template', 'run_count', 'last_run', 'sender_id', 'gateway_id', 'status'],
+        'mod_sms_automation_logs' => ['automation_id', 'trigger_data', 'message_id', 'status', 'error', 'created_at'],
+        'mod_sms_client_sender_ids' => ['client_id', 'sender_id', 'pool_id', 'gateway_id', 'type', 'network', 'status', 'is_default', 'created_at', 'updated_at'],
+        'mod_sms_messages' => ['client_id', 'gateway_id', 'channel', 'direction', 'sender_id', 'to_number', 'message', 'encoding', 'segments', 'units', 'cost', 'status', 'gateway_response', 'sent_at', 'created_at'],
+        'mod_sms_settings' => ['client_id', 'billing_mode', 'default_gateway_id', 'default_sender_id', 'api_enabled', 'accept_sms', 'accept_marketing_sms'],
+        'mod_sms_webhooks_inbox' => ['gateway_id', 'gateway_type', 'payload', 'raw_payload', 'ip_address', 'processed', 'processed_at'],
+        'mod_sms_sender_ids' => ['sender_id', 'type', 'network', 'status', 'documents', 'gateway_bindings', 'approved_at', 'approved_by', 'rejection_reason'],
+        'mod_sms_gateways' => ['name', 'type', 'status', 'created_at'],
+        'mod_sms_campaigns' => ['client_id', 'name', 'message', 'status', 'created_at'],
+        'mod_sms_credit_balance' => ['client_id', 'balance', 'total_purchased', 'total_used', 'total_expired'],
+        'mod_sms_credit_transactions' => ['client_id', 'type', 'credits', 'balance_before', 'balance_after', 'description'],
+    ];
+
+    foreach ($requiredColumns as $table => $columns) {
+        try {
+            $tableCheck = $pdo->query("SHOW TABLES LIKE '{$table}'")->fetch();
+            if (empty($tableCheck)) {
+                continue; // Skip - table itself is missing (handled by table diagnosis)
+            }
+
+            $existingColumns = [];
+            $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}`");
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                $existingColumns[] = $row['Field'];
+            }
+
+            foreach ($columns as $col) {
+                $results['total_checked']++;
+                if (in_array($col, $existingColumns)) {
+                    $results['ok'][] = "{$table}.{$col}";
+                } else {
+                    $results['missing'][] = "{$table}.{$col}";
+                }
+            }
+        } catch (Exception $e) {
+            // Table might not exist, skip
+        }
+    }
+
+    return $results;
+}
+
+/**
+ * Repair database tables - creates missing tables and adds missing columns
  */
 function sms_suite_repair_tables()
 {
     $diagnosis = sms_suite_diagnose_tables();
+    $colDiagBefore = sms_suite_diagnose_columns();
 
     // Always run table creation/migration - it handles both creating missing tables
     // AND adding missing columns to existing tables
@@ -3253,17 +3396,19 @@ function sms_suite_repair_tables()
     $errors = sms_suite_create_tables_sql();
 
     $newDiagnosis = sms_suite_diagnose_tables();
+    $colDiagAfter = sms_suite_diagnose_columns();
 
     $tablesRepaired = count($diagnosis['missing']) - count($newDiagnosis['missing']);
+    $columnsRepaired = count($colDiagBefore['missing']) - count($colDiagAfter['missing']);
 
     return [
-        'success' => empty($newDiagnosis['missing']),
+        'success' => empty($newDiagnosis['missing']) && empty($colDiagAfter['missing']),
         'repaired' => $tablesRepaired,
+        'columns_repaired' => $columnsRepaired,
         'still_missing' => $newDiagnosis['missing'],
+        'columns_still_missing' => $colDiagAfter['missing'],
         'errors' => $errors,
-        'message' => $tablesRepaired > 0
-            ? "Repaired {$tablesRepaired} tables and updated column schemas."
-            : "All tables exist. Column schemas updated.",
+        'message' => "Repaired {$tablesRepaired} tables, {$columnsRepaired} columns.",
     ];
 }
 
