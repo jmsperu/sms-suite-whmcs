@@ -979,8 +979,8 @@ function sms_suite_client_inbox($vars, $clientId, $lang)
             ->orderBy('created_at', 'desc')
             ->first();
         $conv->last_message = $lastMsg ? substr($lastMsg->message, 0, 50) . (strlen($lastMsg->message) > 50 ? '...' : '') : '';
-        $conv->last_direction = $lastMsg->direction ?? 'outbound';
-        $conv->last_status = $lastMsg->status ?? '';
+        $conv->last_direction = $lastMsg ? ($lastMsg->direction ?? 'outbound') : 'outbound';
+        $conv->last_status = $lastMsg ? ($lastMsg->status ?? '') : '';
 
         // Try to get contact name
         $contact = Capsule::table('mod_sms_contacts')
@@ -1121,9 +1121,9 @@ function sms_suite_client_billing($vars, $clientId, $lang)
 
     // Get client's currency
     $client = Capsule::table('tblclients')->where('id', $clientId)->first();
-    $clientCurrency = Capsule::table('tblcurrencies')->where('id', $client->currency)->first();
-    $currencyCode = $clientCurrency->code ?? 'USD';
-    $currencySymbol = $clientCurrency->prefix ?? '$';
+    $clientCurrency = $client ? Capsule::table('tblcurrencies')->where('id', $client->currency)->first() : null;
+    $currencyCode = $clientCurrency ? ($clientCurrency->code ?? 'USD') : 'USD';
+    $currencySymbol = $clientCurrency ? ($clientCurrency->prefix ?? '$') : '$';
 
     // Handle wallet top-up request
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['topup_amount'])) {
