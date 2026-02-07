@@ -281,6 +281,10 @@ class VerificationService
             ->where('id', $order->userid)
             ->first();
 
+        if (!$client) {
+            return ['success' => false, 'error' => 'Client not found'];
+        }
+
         $phone = NotificationService::getClientPhone($client);
 
         $result = self::verifyToken($phone, $token, self::TYPE_ORDER_VERIFICATION);

@@ -437,7 +437,7 @@ class NotificationService
         $message = TemplateService::processTemplate($template->message, $mergeData);
 
         // Send via MessageService
-        return MessageService::send($clientId, $phone, $message, 'notification');
+        return MessageService::send($clientId, $phone, $message, ['context' => 'notification']);
     }
 
     /**

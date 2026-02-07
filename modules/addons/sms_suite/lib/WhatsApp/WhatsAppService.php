@@ -1128,7 +1128,7 @@ class WhatsAppService
             ->where('id', $chatboxId)
             ->update([
                 'client_id' => $clientId ?: null,
-                'last_message' => substr($message->message ?? '', 0, 255),
+                'last_message' => $message ? substr($message->message ?? '', 0, 255) : '',
                 'last_message_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);

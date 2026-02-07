@@ -37,8 +37,7 @@ class SenderIdService
             ->where('sender_id', $senderId)
             ->where(function ($q) use ($network) {
                 $q->where('network', $network)
-                  ->orWhere('network', 'all')
-                  ->orWhere($network, 'all');
+                  ->orWhere('network', 'all');
             })
             ->whereIn('status', ['pending', 'active'])
             ->exists();

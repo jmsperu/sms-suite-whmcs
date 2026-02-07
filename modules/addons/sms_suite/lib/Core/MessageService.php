@@ -702,7 +702,7 @@ class MessageService
             ->orderBy('id')
             ->first();
 
-        return $gateway->id ?? null;
+        return $gateway ? $gateway->id : null;
     }
 
     /**
@@ -717,7 +717,7 @@ class MessageService
             ->where('setting', 'default_sender_id')
             ->first();
 
-        return $setting->value ?? null;
+        return $setting ? $setting->value : null;
     }
 
     /**
@@ -739,7 +739,7 @@ class MessageService
             ->where('status', 'active')
             ->first();
 
-        return $record->id ?? null;
+        return $record ? $record->id : null;
     }
 
     /**

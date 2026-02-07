@@ -946,7 +946,7 @@ class GenericHttpGateway extends AbstractGateway
         $verifySSL = $this->getConfig('ignore_ssl', 'no') !== 'yes';
 
         // Add auth params to URL if needed
-        $urlParams = $this->buildUrlParams(new MessageDTO('', '', ''), '', false);
+        $urlParams = $this->buildUrlParams(new MessageDTO([]), '', false);
         if (!empty($urlParams)) {
             $separator = (strpos($endpoint, '?') === false) ? '?' : '&';
             $endpoint .= $separator . http_build_query($urlParams);

@@ -263,8 +263,8 @@ class ApiController
 
         return $this->success([
             'balance' => $wallet ? (float)$wallet->balance : 0,
-            'currency' => $settings->currency ?? 'USD',
-            'billing_mode' => $settings->billing_mode ?? 'per_segment',
+            'currency' => $settings ? ($settings->currency ?? 'USD') : 'USD',
+            'billing_mode' => $settings ? ($settings->billing_mode ?? 'per_segment') : 'per_segment',
         ]);
     }
 
