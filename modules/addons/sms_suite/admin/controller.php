@@ -136,6 +136,10 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_network_prefixes($vars, $lang);
             break;
 
+        case 'client_rates':
+            sms_suite_admin_client_rates($vars, $lang);
+            break;
+
         case 'download_doc':
             sms_suite_admin_download_document();
             break;
@@ -170,6 +174,7 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'credit_packages' => ['icon' => 'fa-credit-card', 'label' => 'SMS Packages'],
         'billing_rates' => ['icon' => 'fa-dollar', 'label' => 'Billing Rates'],
         'network_prefixes' => ['icon' => 'fa-globe', 'label' => 'Network Prefixes'],
+        'client_rates' => ['icon' => 'fa-user-circle', 'label' => 'Client Rates'],
         'contacts' => ['icon' => 'fa-address-book', 'label' => 'Contacts'],
         'contact_groups' => ['icon' => 'fa-users', 'label' => 'Contact Groups'],
         'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
@@ -7553,4 +7558,233 @@ function sms_suite_admin_contacts($vars, $lang)
             </div>
         </div>
     </div>';
+}
+
+/**
+ * Client Rates admin page
+ * Manages per-client rate overrides (mod_sms_client_rates)
+ */
+function sms_suite_admin_client_rates($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $message = '';
+    $messageType = '';
+
+    // Handle form submissions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (isset($_POST['add_rate'])) {
+            $clientId = (int)($_POST['client_id'] ?? 0);
+            $countryCode = trim($_POST['country_code'] ?? '');
+            $networkPrefix = trim($_POST['network_prefix'] ?? '');
+            $smsRate = (float)($_POST['sms_rate'] ?? 0);
+            $whatsappRate = (float)($_POST['whatsapp_rate'] ?? 0);
+            $priority = (int)($_POST['priority'] ?? 0);
+            $status = isset($_POST['status']) ? 1 : 0;
+
+            if ($clientId > 0 && $smsRate >= 0) {
+                try {
+                    Capsule::table('mod_sms_client_rates')->insert([
+                        'client_id' => $clientId,
+                        'country_code' => $countryCode ?: null,
+                        'network_prefix' => $networkPrefix ?: null,
+                        'sms_rate' => $smsRate,
+                        'whatsapp_rate' => $whatsappRate,
+                        'priority' => $priority,
+                        'status' => $status,
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $message = 'Client rate added successfully.';
+                    $messageType = 'success';
+                } catch (\Exception $e) {
+                    $message = 'Error adding rate: ' . $e->getMessage();
+                    $messageType = 'danger';
+                }
+            } else {
+                $message = 'Client and SMS Rate are required.';
+                $messageType = 'danger';
+            }
+        } elseif (isset($_POST['update_rates'])) {
+            $updated = 0;
+            if (!empty($_POST['rates']) && is_array($_POST['rates'])) {
+                foreach ($_POST['rates'] as $rateId => $rateData) {
+                    Capsule::table('mod_sms_client_rates')
+                        ->where('id', (int)$rateId)
+                        ->update([
+                            'sms_rate' => (float)($rateData['sms'] ?? 0),
+                            'whatsapp_rate' => (float)($rateData['whatsapp'] ?? 0),
+                            'priority' => (int)($rateData['priority'] ?? 0),
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    $updated++;
+                }
+            }
+            $message = $updated . ' rate(s) updated successfully.';
+            $messageType = 'success';
+        } elseif (isset($_POST['delete_rate'])) {
+            $rateId = (int)($_POST['rate_id'] ?? 0);
+            if ($rateId > 0) {
+                Capsule::table('mod_sms_client_rates')->where('id', $rateId)->delete();
+                $message = 'Rate deleted.';
+                $messageType = 'success';
+            }
+        }
+    }
+
+    // Filter by client
+    $filterClientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+
+    // Build query
+    $query = Capsule::table('mod_sms_client_rates as cr')
+        ->leftJoin('tblclients as c', 'cr.client_id', '=', 'c.id')
+        ->select(['cr.*', Capsule::raw("CONCAT(c.firstname, ' ', c.lastname) as client_name"), 'c.companyname']);
+
+    if ($filterClientId > 0) {
+        $query->where('cr.client_id', $filterClientId);
+    }
+
+    $rates = $query->orderBy('cr.client_id')
+        ->orderBy('cr.priority', 'desc')
+        ->orderBy('cr.country_code')
+        ->get();
+
+    // Get clients for dropdowns
+    $clients = Capsule::table('tblclients')
+        ->select(['id', 'firstname', 'lastname', 'companyname'])
+        ->where('status', 'Active')
+        ->orderBy('firstname')
+        ->orderBy('lastname')
+        ->get();
+
+    // Page header
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading">';
+    echo '<h3 class="panel-title"><i class="fa fa-user-circle"></i> Client Rates</h3>';
+    echo '</div>';
+    echo '<div class="panel-body">';
+
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . '">' . htmlspecialchars($message) . '</div>';
+    }
+
+    // Help text
+    echo '<div class="alert alert-info">
+        <strong>Client Rate Hierarchy (highest to lowest priority):</strong><br>
+        1. <strong>Client + Country + Network</strong> &mdash; Most specific: rate for a specific client, country, and network prefix<br>
+        2. <strong>Client + Country</strong> &mdash; Country-level override for a specific client<br>
+        3. <strong>Client Flat Rate</strong> &mdash; Blanket rate for all messages from this client (no country/network set)<br>
+        <small class="text-muted">If no client rate matches, the system falls back to gateway country rates, destination rates, then default rates.</small>
+    </div>';
+
+    // Filter bar
+    echo '<form method="get" class="form-inline" style="margin-bottom: 15px;">';
+    // Preserve modulelink params
+    echo '<input type="hidden" name="module" value="sms_suite">';
+    echo '<input type="hidden" name="action" value="client_rates">';
+    echo '<label>Filter by Client: </label> ';
+    echo '<select name="client_id" class="form-control" style="width: 250px;" onchange="this.form.submit()">';
+    echo '<option value="0">-- Show All Clients --</option>';
+    foreach ($clients as $client) {
+        $clientLabel = htmlspecialchars($client->firstname . ' ' . $client->lastname);
+        if ($client->companyname) {
+            $clientLabel .= ' (' . htmlspecialchars($client->companyname) . ')';
+        }
+        $selected = ($filterClientId == $client->id) ? ' selected' : '';
+        echo '<option value="' . $client->id . '"' . $selected . '>' . $clientLabel . '</option>';
+    }
+    echo '</select>';
+    echo '</form>';
+
+    // Add rate form
+    echo '<div class="panel panel-success" style="margin-top: 10px;">';
+    echo '<div class="panel-heading"><strong>Add New Client Rate</strong></div>';
+    echo '<div class="panel-body">';
+    echo '<form method="post" class="form-inline">';
+    echo '<input type="hidden" name="add_rate" value="1">';
+
+    echo '<select name="client_id" class="form-control" required style="width: 200px;">';
+    echo '<option value="">Select Client...</option>';
+    foreach ($clients as $client) {
+        $clientLabel = htmlspecialchars($client->firstname . ' ' . $client->lastname);
+        if ($client->companyname) {
+            $clientLabel .= ' (' . htmlspecialchars($client->companyname) . ')';
+        }
+        echo '<option value="' . $client->id . '">' . $clientLabel . '</option>';
+    }
+    echo '</select> ';
+
+    echo '<input type="text" name="country_code" class="form-control" placeholder="Country Code" style="width: 120px;" title="e.g. 1, 44, 234 (leave blank for flat rate)"> ';
+    echo '<input type="text" name="network_prefix" class="form-control" placeholder="Network Prefix" style="width: 120px;" title="e.g. 2348, 4479 (leave blank for country-level)"> ';
+    echo '<input type="number" name="sms_rate" class="form-control" placeholder="SMS Rate" step="0.000001" min="0" style="width: 110px;" required> ';
+    echo '<input type="number" name="whatsapp_rate" class="form-control" placeholder="WA Rate" step="0.000001" min="0" style="width: 110px;"> ';
+    echo '<input type="number" name="priority" class="form-control" placeholder="Priority" value="0" min="0" style="width: 90px;" title="Higher priority = checked first"> ';
+    echo '<label style="margin-left: 5px;"><input type="checkbox" name="status" value="1" checked> Active</label> ';
+    echo '<button type="submit" class="btn btn-success"><i class="fa fa-plus"></i> Add Rate</button>';
+    echo '</form>';
+    echo '</div>';
+    echo '</div>';
+
+    // Rates table
+    if (count($rates) > 0) {
+        echo '<form method="post">';
+        echo '<input type="hidden" name="update_rates" value="1">';
+        echo '<table class="table table-striped table-bordered">';
+        echo '<thead><tr>';
+        echo '<th>Client</th>';
+        echo '<th>Country Code</th>';
+        echo '<th>Network Prefix</th>';
+        echo '<th>SMS Rate</th>';
+        echo '<th>WhatsApp Rate</th>';
+        echo '<th>Priority</th>';
+        echo '<th>Status</th>';
+        echo '<th>Actions</th>';
+        echo '</tr></thead>';
+        echo '<tbody>';
+
+        foreach ($rates as $rate) {
+            $clientDisplay = htmlspecialchars($rate->client_name ?: 'Unknown');
+            if ($rate->companyname) {
+                $clientDisplay .= ' <small class="text-muted">(' . htmlspecialchars($rate->companyname) . ')</small>';
+            }
+
+            echo '<tr>';
+            echo '<td>' . $clientDisplay . ' <small class="text-muted">#' . $rate->client_id . '</small></td>';
+            echo '<td>' . ($rate->country_code ? htmlspecialchars($rate->country_code) : '<span class="text-muted">Any</span>') . '</td>';
+            echo '<td>' . ($rate->network_prefix ? htmlspecialchars($rate->network_prefix) : '<span class="text-muted">Any</span>') . '</td>';
+            echo '<td><input type="number" name="rates[' . $rate->id . '][sms]" class="form-control input-sm" value="' . $rate->sms_rate . '" step="0.000001" min="0" style="width: 110px;"></td>';
+            echo '<td><input type="number" name="rates[' . $rate->id . '][whatsapp]" class="form-control input-sm" value="' . $rate->whatsapp_rate . '" step="0.000001" min="0" style="width: 110px;"></td>';
+            echo '<td><input type="number" name="rates[' . $rate->id . '][priority]" class="form-control input-sm" value="' . $rate->priority . '" min="0" style="width: 70px;"></td>';
+            echo '<td>' . ($rate->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>') . '</td>';
+            echo '<td><button type="button" class="btn btn-xs btn-danger" onclick="deleteClientRate(' . $rate->id . ')"><i class="fa fa-trash"></i></button></td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody>';
+        echo '</table>';
+        echo '<button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Save Rates</button>';
+        echo '</form>';
+    } else {
+        if ($filterClientId > 0) {
+            echo '<p class="text-muted">No rates configured for this client.</p>';
+        } else {
+            echo '<p class="text-muted">No client-specific rates configured. Add a rate above to set per-client pricing.</p>';
+        }
+    }
+
+    echo '</div>'; // panel-body
+    echo '</div>'; // panel
+    echo '</div>'; // tab-content wrapper
+
+    // JavaScript for delete
+    echo '<script>
+    function deleteClientRate(id) {
+        if (confirm("Delete this client rate?")) {
+            var form = document.createElement("form");
+            form.method = "POST";
+            form.innerHTML = \'<input type="hidden" name="delete_rate" value="1"><input type="hidden" name="rate_id" value="\' + id + \'">\';
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+    </script>';
 }
