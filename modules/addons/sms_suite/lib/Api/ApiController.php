@@ -431,8 +431,8 @@ class ApiController
             'first_name' => $params['first_name'] ?? null,
             'last_name' => $params['last_name'] ?? null,
             'email' => $params['email'] ?? null,
-            'custom_fields' => json_encode($params['custom_fields'] ?? []),
-            'status' => 'active',
+            'custom_data' => json_encode($params['custom_fields'] ?? []),
+            'status' => 'subscribed',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);

@@ -173,6 +173,18 @@ add_hook('ClientDelete', 1, function ($vars) {
         Capsule::table('mod_sms_api_keys')->where('client_id', $clientId)->delete();
         Capsule::table('mod_sms_campaigns')->where('client_id', $clientId)->delete();
         Capsule::table('mod_sms_blacklist')->where('client_id', $clientId)->delete();
+        // Credit & billing cleanup
+        Capsule::table('mod_sms_credit_balance')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_credit_transactions')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_credit_purchases')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_credit_allocations')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_credit_usage')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_pending_topups')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_client_rates')->where('client_id', $clientId)->delete();
+        // Sender ID cleanup
+        Capsule::table('mod_sms_client_sender_ids')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_sender_id_requests')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_sender_id_billing')->where('client_id', $clientId)->delete();
         // Keep messages for audit trail, but could optionally delete
     } catch (Exception $e) {
         logActivity('SMS Suite Hook Error (ClientDelete): ' . $e->getMessage());
@@ -316,7 +328,7 @@ HTML;
  */
 add_hook('DailyCronJob', 1, function ($vars) {
     try {
-        // Check and expire sender IDs
+        // Check and expire legacy sender IDs
         $today = date('Y-m-d');
         Capsule::table('mod_sms_sender_ids')
             ->where('validity_date', '<', $today)
@@ -325,6 +337,11 @@ add_hook('DailyCronJob', 1, function ($vars) {
                 'status' => 'expired',
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
+
+        // Expire overdue client sender IDs and generate renewals
+        require_once __DIR__ . '/lib/Billing/BillingService.php';
+        \SMSSuite\Billing\BillingService::expireOverdueSenderIds();
+        \SMSSuite\Billing\BillingService::generateSenderIdRenewals();
 
         // Log cleanup (if retention is set)
         $retentionDays = 90; // Default, could be from config

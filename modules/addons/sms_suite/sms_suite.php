@@ -175,6 +175,8 @@ function sms_suite_drop_tables_sql()
         'mod_sms_credit_purchases',
         'mod_sms_credit_packages',
         'mod_sms_sender_id_pool',
+        'mod_sms_client_rates',
+        'mod_sms_destination_rates',
         // Verification and Notification tables
         'mod_sms_verification_logs',
         'mod_sms_verification_templates',
@@ -861,42 +863,75 @@ function sms_suite_create_tables_sql()
         ", "Create mod_sms_templates");
     }
 
-    // 15. API keys
+    // 15. API keys (must match ApiKeyService column names)
     if (!$tableExists('mod_sms_api_keys')) {
         $execSql("
             CREATE TABLE `mod_sms_api_keys` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `client_id` INT UNSIGNED NOT NULL,
                 `name` VARCHAR(100) NOT NULL,
-                `api_key` VARCHAR(64) NOT NULL,
-                `api_secret` VARCHAR(64) NOT NULL,
+                `key_id` VARCHAR(64) NOT NULL,
+                `secret_hash` VARCHAR(255) NOT NULL,
+                `scopes` TEXT,
                 `status` VARCHAR(20) DEFAULT 'active',
-                `rate_limit` INT UNSIGNED DEFAULT 100,
+                `rate_limit` INT UNSIGNED DEFAULT 60,
                 `allowed_ips` TEXT,
-                `permissions` TEXT,
                 `last_used_at` TIMESTAMP NULL,
                 `expires_at` TIMESTAMP NULL,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`),
-                UNIQUE KEY `unique_api_key` (`api_key`)
+                UNIQUE KEY `unique_key_id` (`key_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_api_keys");
+    } else {
+        // Migrate from old schema (api_key/api_secret/permissions) to new (key_id/secret_hash/scopes)
+        if ($columnExists('mod_sms_api_keys', 'api_key') && !$columnExists('mod_sms_api_keys', 'key_id')) {
+            $execSql("ALTER TABLE `mod_sms_api_keys` CHANGE `api_key` `key_id` VARCHAR(64) NOT NULL", "Rename api_key to key_id in mod_sms_api_keys");
+        }
+        if ($columnExists('mod_sms_api_keys', 'api_secret') && !$columnExists('mod_sms_api_keys', 'secret_hash')) {
+            $execSql("ALTER TABLE `mod_sms_api_keys` CHANGE `api_secret` `secret_hash` VARCHAR(255) NOT NULL", "Rename api_secret to secret_hash in mod_sms_api_keys");
+        }
+        if ($columnExists('mod_sms_api_keys', 'permissions') && !$columnExists('mod_sms_api_keys', 'scopes')) {
+            $execSql("ALTER TABLE `mod_sms_api_keys` CHANGE `permissions` `scopes` TEXT", "Rename permissions to scopes in mod_sms_api_keys");
+        }
+        if (!$columnExists('mod_sms_api_keys', 'key_id')) {
+            $execSql("ALTER TABLE `mod_sms_api_keys` ADD COLUMN `key_id` VARCHAR(64) NOT NULL AFTER `name`", "Add key_id to mod_sms_api_keys");
+        }
+        if (!$columnExists('mod_sms_api_keys', 'secret_hash')) {
+            $execSql("ALTER TABLE `mod_sms_api_keys` ADD COLUMN `secret_hash` VARCHAR(255) NOT NULL AFTER `key_id`", "Add secret_hash to mod_sms_api_keys");
+        }
+        if (!$columnExists('mod_sms_api_keys', 'scopes')) {
+            $execSql("ALTER TABLE `mod_sms_api_keys` ADD COLUMN `scopes` TEXT AFTER `secret_hash`", "Add scopes to mod_sms_api_keys");
+        }
     }
 
-    // 16. Rate limits tracking
+    // 16. Rate limits tracking (used by ApiKeyService::checkRateLimit)
     if (!$tableExists('mod_sms_rate_limits')) {
         $execSql("
             CREATE TABLE `mod_sms_rate_limits` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                `key` VARCHAR(100) NOT NULL,
-                `count` INT UNSIGNED DEFAULT 1,
-                `window` INT UNSIGNED NOT NULL,
+                `key_id` INT UNSIGNED NOT NULL,
+                `window` VARCHAR(20) NOT NULL,
+                `requests` INT UNSIGNED DEFAULT 1,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX `idx_key` (`key`),
-                INDEX `idx_window` (`window`)
+                INDEX `idx_key_id` (`key_id`),
+                INDEX `idx_window` (`window`),
+                UNIQUE KEY `unique_key_window` (`key_id`, `window`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_rate_limits");
+    } else {
+        // Migrate from old schema ('key'+'count') to new schema ('key_id'+'requests')
+        if ($columnExists('mod_sms_rate_limits', 'key') && !$columnExists('mod_sms_rate_limits', 'key_id')) {
+            $execSql("ALTER TABLE `mod_sms_rate_limits` ADD COLUMN `key_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `id`", "Add key_id to mod_sms_rate_limits");
+            $execSql("ALTER TABLE `mod_sms_rate_limits` ADD COLUMN `requests` INT UNSIGNED DEFAULT 1 AFTER `window`", "Add requests to mod_sms_rate_limits");
+        }
+        if (!$columnExists('mod_sms_rate_limits', 'key_id')) {
+            $execSql("ALTER TABLE `mod_sms_rate_limits` ADD COLUMN `key_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `id`", "Add key_id to mod_sms_rate_limits");
+        }
+        if (!$columnExists('mod_sms_rate_limits', 'requests')) {
+            $execSql("ALTER TABLE `mod_sms_rate_limits` ADD COLUMN `requests` INT UNSIGNED DEFAULT 1 AFTER `window`", "Add requests to mod_sms_rate_limits");
+        }
     }
 
     // 17. Webhooks inbox
@@ -1041,9 +1076,11 @@ function sms_suite_create_tables_sql()
             CREATE TABLE `mod_sms_credit_packages` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `name` VARCHAR(100) NOT NULL,
+                `description` TEXT,
                 `credits` INT UNSIGNED NOT NULL,
                 `bonus_credits` INT UNSIGNED DEFAULT 0,
                 `price` DECIMAL(10,2) NOT NULL,
+                `currency` VARCHAR(10) DEFAULT 'USD',
                 `currency_id` INT UNSIGNED,
                 `validity_days` INT DEFAULT 0,
                 `popular` TINYINT(1) DEFAULT 0,
@@ -1054,6 +1091,13 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_status` (`status`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_credit_packages");
+    } else {
+        if (!$columnExists('mod_sms_credit_packages', 'currency')) {
+            $execSql("ALTER TABLE `mod_sms_credit_packages` ADD COLUMN `currency` VARCHAR(10) DEFAULT 'USD' AFTER `price`", "Add currency to mod_sms_credit_packages");
+        }
+        if (!$columnExists('mod_sms_credit_packages', 'description')) {
+            $execSql("ALTER TABLE `mod_sms_credit_packages` ADD COLUMN `description` TEXT AFTER `name`", "Add description to mod_sms_credit_packages");
+        }
     }
 
     // 23. Optouts
@@ -1426,25 +1470,55 @@ function sms_suite_create_tables_sql()
                 `client_id` INT UNSIGNED NOT NULL,
                 `sender_id` VARCHAR(50) NOT NULL,
                 `type` VARCHAR(20) DEFAULT 'alphanumeric',
+                `pool_id` INT UNSIGNED,
                 `gateway_id` INT UNSIGNED,
+                `business_name` VARCHAR(255),
                 `use_case` TEXT,
                 `company_name` VARCHAR(255),
                 `registration_number` VARCHAR(100),
+                `documents` TEXT,
                 `doc_certificate` VARCHAR(500),
                 `doc_vat_cert` VARCHAR(500),
                 `doc_authorization` VARCHAR(500),
                 `doc_other` VARCHAR(500),
+                `billing_cycle` VARCHAR(20) DEFAULT 'monthly',
+                `setup_fee` DECIMAL(10,2) DEFAULT 0,
+                `recurring_fee` DECIMAL(10,2) DEFAULT 0,
+                `invoice_id` INT UNSIGNED,
                 `status` VARCHAR(20) DEFAULT 'pending',
                 `admin_notes` TEXT,
+                `approved_by` INT UNSIGNED,
+                `approved_at` TIMESTAMP NULL,
+                `expires_at` TIMESTAMP NULL,
                 `reviewed_by` INT UNSIGNED,
                 `reviewed_at` TIMESTAMP NULL,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`),
                 INDEX `idx_status` (`status`),
-                INDEX `idx_sender_id` (`sender_id`)
+                INDEX `idx_sender_id` (`sender_id`),
+                INDEX `idx_invoice_id` (`invoice_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_sender_id_requests");
+    } else {
+        // Add missing columns for billing integration
+        $senderReqCols = [
+            'pool_id' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `pool_id` INT UNSIGNED AFTER `type`",
+            'business_name' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `business_name` VARCHAR(255) AFTER `gateway_id`",
+            'documents' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `documents` TEXT AFTER `registration_number`",
+            'billing_cycle' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `billing_cycle` VARCHAR(20) DEFAULT 'monthly' AFTER `doc_other`",
+            'setup_fee' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `setup_fee` DECIMAL(10,2) DEFAULT 0 AFTER `billing_cycle`",
+            'recurring_fee' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `recurring_fee` DECIMAL(10,2) DEFAULT 0 AFTER `setup_fee`",
+            'invoice_id' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `invoice_id` INT UNSIGNED AFTER `recurring_fee`",
+            'approved_by' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `approved_by` INT UNSIGNED AFTER `admin_notes`",
+            'approved_at' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `approved_at` TIMESTAMP NULL AFTER `approved_by`",
+            'expires_at' => "ALTER TABLE `mod_sms_sender_id_requests` ADD COLUMN `expires_at` TIMESTAMP NULL AFTER `approved_at`",
+        ];
+        foreach ($senderReqCols as $col => $sql) {
+            if (!$columnExists('mod_sms_sender_id_requests', $col)) {
+                $execSql($sql, "Add {$col} to mod_sms_sender_id_requests");
+            }
+        }
     }
 
     // 40. Sender ID pool (admin-managed pool of sender IDs)
@@ -1518,25 +1592,7 @@ function sms_suite_create_tables_sql()
         ", "Create mod_sms_client_rates");
     }
 
-    // 42. Credit packages for purchase
-    if (!$tableExists('mod_sms_credit_packages')) {
-        $execSql("
-            CREATE TABLE `mod_sms_credit_packages` (
-                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                `name` VARCHAR(100) NOT NULL,
-                `credits` INT UNSIGNED NOT NULL,
-                `bonus_credits` INT UNSIGNED DEFAULT 0,
-                `price` DECIMAL(10,2) NOT NULL,
-                `currency_id` INT UNSIGNED,
-                `validity_days` INT DEFAULT 0,
-                `popular` TINYINT(1) DEFAULT 0,
-                `status` TINYINT(1) DEFAULT 1,
-                `sort_order` INT DEFAULT 0,
-                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ", "Create mod_sms_credit_packages");
-    }
+    // 42. Credit packages - already created in block #22 above
 
     // 43. Credit purchases history
     if (!$tableExists('mod_sms_credit_purchases')) {
@@ -1545,18 +1601,31 @@ function sms_suite_create_tables_sql()
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `client_id` INT UNSIGNED NOT NULL,
                 `package_id` INT UNSIGNED,
-                `credits` INT UNSIGNED NOT NULL,
+                `credits_purchased` INT UNSIGNED NOT NULL,
                 `bonus_credits` INT UNSIGNED DEFAULT 0,
                 `amount` DECIMAL(10,2) NOT NULL,
                 `invoice_id` INT UNSIGNED,
                 `status` VARCHAR(20) DEFAULT 'pending',
+                `credited_at` TIMESTAMP NULL,
                 `expires_at` DATE,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`),
                 INDEX `idx_invoice_id` (`invoice_id`),
                 INDEX `idx_status` (`status`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_credit_purchases");
+    } else {
+        // Fix column name if old schema used 'credits' instead of 'credits_purchased'
+        if ($columnExists('mod_sms_credit_purchases', 'credits') && !$columnExists('mod_sms_credit_purchases', 'credits_purchased')) {
+            $execSql("ALTER TABLE `mod_sms_credit_purchases` CHANGE `credits` `credits_purchased` INT UNSIGNED NOT NULL", "Rename credits to credits_purchased in mod_sms_credit_purchases");
+        }
+        if (!$columnExists('mod_sms_credit_purchases', 'credited_at')) {
+            $execSql("ALTER TABLE `mod_sms_credit_purchases` ADD COLUMN `credited_at` TIMESTAMP NULL AFTER `status`", "Add credited_at to mod_sms_credit_purchases");
+        }
+        if (!$columnExists('mod_sms_credit_purchases', 'updated_at')) {
+            $execSql("ALTER TABLE `mod_sms_credit_purchases` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`", "Add updated_at to mod_sms_credit_purchases");
+        }
     }
 
     // 44. Credit balance tracking
@@ -1603,6 +1672,7 @@ function sms_suite_create_tables_sql()
                 `description` VARCHAR(255),
                 `reference_type` VARCHAR(50),
                 `reference_id` INT UNSIGNED,
+                `admin_id` INT UNSIGNED,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`),
                 INDEX `idx_type` (`type`),
@@ -1612,6 +1682,9 @@ function sms_suite_create_tables_sql()
     } else {
         if (!$columnExists('mod_sms_credit_transactions', 'balance_before')) {
             $execSql("ALTER TABLE `mod_sms_credit_transactions` ADD COLUMN `balance_before` INT UNSIGNED AFTER `credits`", "Add balance_before to mod_sms_credit_transactions");
+        }
+        if (!$columnExists('mod_sms_credit_transactions', 'admin_id')) {
+            $execSql("ALTER TABLE `mod_sms_credit_transactions` ADD COLUMN `admin_id` INT UNSIGNED AFTER `reference_id`", "Add admin_id to mod_sms_credit_transactions");
         }
         if ($columnExists('mod_sms_credit_transactions', 'amount') && !$columnExists('mod_sms_credit_transactions', 'credits')) {
             $execSql("ALTER TABLE `mod_sms_credit_transactions` CHANGE `amount` `credits` INT NOT NULL", "Rename amount to credits");
@@ -1636,6 +1709,7 @@ function sms_suite_create_tables_sql()
                 `monthly_fee` DECIMAL(10,2) DEFAULT 0,
                 `next_billing` DATE,
                 `expires_at` DATE,
+                `last_invoice_id` INT UNSIGNED,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`),
@@ -1650,6 +1724,9 @@ function sms_suite_create_tables_sql()
         }
         if (!$columnExists('mod_sms_client_sender_ids', 'network')) {
             $execSql("ALTER TABLE `mod_sms_client_sender_ids` ADD COLUMN `network` VARCHAR(20) DEFAULT 'all' AFTER `type`", "Add network to mod_sms_client_sender_ids");
+        }
+        if (!$columnExists('mod_sms_client_sender_ids', 'last_invoice_id')) {
+            $execSql("ALTER TABLE `mod_sms_client_sender_ids` ADD COLUMN `last_invoice_id` INT UNSIGNED AFTER `expires_at`", "Add last_invoice_id to mod_sms_client_sender_ids");
         }
     }
 
@@ -1746,16 +1823,26 @@ function sms_suite_create_tables_sql()
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `client_sender_id` INT UNSIGNED NOT NULL,
                 `client_id` INT UNSIGNED NOT NULL,
+                `billing_type` VARCHAR(20) DEFAULT 'setup',
                 `amount` DECIMAL(10,2) NOT NULL,
                 `invoice_id` INT UNSIGNED,
                 `period_start` DATE,
                 `period_end` DATE,
                 `status` VARCHAR(20) DEFAULT 'pending',
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`),
-                INDEX `idx_invoice_id` (`invoice_id`)
+                INDEX `idx_invoice_id` (`invoice_id`),
+                INDEX `idx_billing_type` (`billing_type`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_sender_id_billing");
+    } else {
+        if (!$columnExists('mod_sms_sender_id_billing', 'billing_type')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_billing` ADD COLUMN `billing_type` VARCHAR(20) DEFAULT 'setup' AFTER `client_id`", "Add billing_type to mod_sms_sender_id_billing");
+        }
+        if (!$columnExists('mod_sms_sender_id_billing', 'updated_at')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_billing` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`", "Add updated_at to mod_sms_sender_id_billing");
+        }
     }
 
     // 48. Verification logs
@@ -3299,10 +3386,13 @@ function sms_suite_diagnose_tables()
         'mod_sms_messages',
         // Contacts & Campaigns
         'mod_sms_contact_groups',
+        'mod_sms_contact_group_fields',
         'mod_sms_contacts',
         'mod_sms_campaigns',
         'mod_sms_campaign_lists',
         'mod_sms_campaign_recipients',
+        'mod_sms_campaign_ab_tests',
+        'mod_sms_recurring_log',
         'mod_sms_templates',
         // Billing & Credits
         'mod_sms_wallet',
@@ -3316,17 +3406,23 @@ function sms_suite_diagnose_tables()
         'mod_sms_destination_rates',
         'mod_sms_credit_allocations',
         'mod_sms_credit_usage',
+        'mod_sms_pending_topups',
         // Network Prefixes
         'mod_sms_network_prefixes',
         // Sender IDs
         'mod_sms_sender_ids',
         'mod_sms_sender_id_pool',
         'mod_sms_sender_id_requests',
+        'mod_sms_sender_id_plans',
         'mod_sms_client_sender_ids',
         'mod_sms_sender_id_billing',
         // API & Security
         'mod_sms_api_keys',
+        'mod_sms_api_audit',
+        'mod_sms_api_rate_limits',
+        'mod_sms_rate_limits',
         'mod_sms_verification_tokens',
+        'mod_sms_verification_logs',
         'mod_sms_blacklist',
         'mod_sms_optouts',
         // Notifications & Automation
@@ -3337,6 +3433,21 @@ function sms_suite_diagnose_tables()
         'mod_sms_automations',
         'mod_sms_automation_triggers',
         'mod_sms_automation_logs',
+        // WhatsApp & Chat
+        'mod_sms_whatsapp_templates',
+        'mod_sms_chatbox',
+        'mod_sms_chatbox_messages',
+        'mod_sms_auto_replies',
+        // Scheduling & Drip
+        'mod_sms_scheduled',
+        'mod_sms_drip_campaigns',
+        'mod_sms_drip_steps',
+        'mod_sms_drip_subscribers',
+        // Segments & Tracking
+        'mod_sms_segments',
+        'mod_sms_segment_conditions',
+        'mod_sms_tracking_links',
+        'mod_sms_link_clicks',
         // System
         'mod_sms_cron_status',
         'mod_sms_countries',
@@ -3377,7 +3488,7 @@ function sms_suite_diagnose_columns()
     $requiredColumns = [
         'mod_sms_automations' => ['trigger_type', 'trigger_config', 'message_template', 'run_count', 'last_run', 'sender_id', 'gateway_id', 'status'],
         'mod_sms_automation_logs' => ['automation_id', 'trigger_data', 'message_id', 'status', 'error', 'created_at'],
-        'mod_sms_client_sender_ids' => ['client_id', 'sender_id', 'pool_id', 'gateway_id', 'type', 'network', 'status', 'is_default', 'created_at', 'updated_at'],
+        'mod_sms_client_sender_ids' => ['client_id', 'sender_id', 'pool_id', 'request_id', 'gateway_id', 'type', 'network', 'status', 'is_default', 'service_id', 'monthly_fee', 'next_billing', 'expires_at', 'last_invoice_id', 'created_at', 'updated_at'],
         'mod_sms_messages' => ['client_id', 'gateway_id', 'channel', 'direction', 'sender_id', 'to_number', 'message', 'encoding', 'segments', 'units', 'cost', 'status', 'gateway_response', 'sent_at', 'created_at'],
         'mod_sms_settings' => ['client_id', 'billing_mode', 'default_gateway_id', 'default_sender_id', 'api_enabled', 'accept_sms', 'accept_marketing_sms'],
         'mod_sms_webhooks_inbox' => ['gateway_id', 'gateway_type', 'payload', 'raw_payload', 'ip_address', 'processed', 'processed_at'],
@@ -3385,9 +3496,19 @@ function sms_suite_diagnose_columns()
         'mod_sms_gateways' => ['name', 'type', 'status', 'created_at'],
         'mod_sms_campaigns' => ['client_id', 'name', 'message', 'status', 'created_at'],
         'mod_sms_credit_balance' => ['client_id', 'balance', 'total_purchased', 'total_used', 'total_expired'],
-        'mod_sms_credit_transactions' => ['client_id', 'type', 'credits', 'balance_before', 'balance_after', 'description'],
+        'mod_sms_credit_transactions' => ['client_id', 'type', 'credits', 'balance_before', 'balance_after', 'description', 'admin_id'],
+        'mod_sms_credit_purchases' => ['client_id', 'package_id', 'credits_purchased', 'bonus_credits', 'amount', 'invoice_id', 'status', 'credited_at'],
+        'mod_sms_credit_packages' => ['name', 'credits', 'bonus_credits', 'price', 'currency', 'validity_days', 'status'],
+        'mod_sms_credit_allocations' => ['client_id', 'service_id', 'sender_id_ref', 'total_credits', 'remaining_credits', 'used_credits', 'status'],
+        'mod_sms_wallet' => ['client_id', 'balance'],
+        'mod_sms_wallet_transactions' => ['client_id', 'type', 'amount', 'balance_after', 'description'],
+        'mod_sms_sender_id_requests' => ['client_id', 'sender_id', 'pool_id', 'business_name', 'billing_cycle', 'setup_fee', 'recurring_fee', 'invoice_id', 'status', 'approved_by', 'approved_at', 'expires_at'],
+        'mod_sms_sender_id_billing' => ['client_sender_id', 'client_id', 'billing_type', 'amount', 'invoice_id', 'period_start', 'period_end', 'status'],
+        'mod_sms_sender_id_pool' => ['sender_id', 'type', 'network', 'gateway_id', 'price_setup', 'price_monthly', 'price_yearly', 'telco_status', 'status'],
         'mod_sms_destination_rates' => ['country_code', 'network', 'sms_rate', 'whatsapp_rate', 'credit_cost', 'status'],
         'mod_sms_client_rates' => ['client_id', 'gateway_id', 'country_code', 'network_prefix', 'sms_rate', 'whatsapp_rate', 'status', 'priority'],
+        'mod_sms_api_keys' => ['client_id', 'name', 'key_id', 'secret_hash', 'scopes', 'rate_limit', 'status', 'last_used_at', 'expires_at'],
+        'mod_sms_rate_limits' => ['key_id', 'window', 'requests'],
     ];
 
     foreach ($requiredColumns as $table => $columns) {

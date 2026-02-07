@@ -191,11 +191,8 @@ modules/addons/sms_suite/
 
 ## Known Issues / Pending Items
 
-1. **WHMCS Product Redirect Bug**
-   - Product ID 328 redirects to "linux-unlimited" instead of showing order form
-   - Appears to be WHMCS configuration issue, not module-related
-   - Investigated: product group, module assignment checked
-   - Status: Unresolved, needs further WHMCS debugging
+1. ~~**WHMCS Product Redirect Bug**~~ **RESOLVED**
+   - Product ID 328 redirect issue has been resolved
 
 2. **Server Module** (Not Started)
    - `modules/servers/sms_suite/` exists but not implemented
