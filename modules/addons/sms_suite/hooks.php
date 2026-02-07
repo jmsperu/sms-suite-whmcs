@@ -237,15 +237,15 @@ add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
 
         // Get wallet balance
         $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
-        $balance = $wallet->balance ?? 0;
+        $balance = $wallet ? $wallet->balance : 0;
 
         // Get assigned sender ID and gateway
-        $assignedSenderId = $settings->assigned_sender_id ?? 'Not assigned';
-        $assignedGatewayId = $settings->assigned_gateway_id ?? null;
+        $assignedSenderId = $settings ? ($settings->assigned_sender_id ?? 'Not assigned') : 'Not assigned';
+        $assignedGatewayId = $settings ? ($settings->assigned_gateway_id ?? null) : null;
         $gatewayName = 'Default';
         if ($assignedGatewayId) {
             $gateway = Capsule::table('mod_sms_gateways')->where('id', $assignedGatewayId)->first();
-            $gatewayName = $gateway->name ?? 'Unknown';
+            $gatewayName = $gateway ? $gateway->name : 'Unknown';
         }
 
         // Verification status
@@ -497,14 +497,14 @@ add_hook('EmailPreSend', 1, function ($vars) {
         $mergeData = $vars['mergefields'] ?? [];
 
         // Add common fields
-        if (isset($vars['relid'])) {
-            $client = Capsule::table('tblclients')->where('id', $vars['relid'])->first();
-            if ($client) {
-                $mergeData['first_name'] = $client->firstname;
-                $mergeData['last_name'] = $client->lastname;
-                $mergeData['company'] = $client->companyname;
-                $mergeData['email'] = $client->email;
-            }
+        $client = Capsule::table('tblclients')->where('id', $clientId)->first();
+        if ($client) {
+            $mergeData['first_name'] = $client->firstname;
+            $mergeData['last_name'] = $client->lastname;
+            $mergeData['company'] = $client->companyname;
+            $mergeData['email'] = $client->email;
+        } else {
+            return; // No client found, skip notification
         }
 
         // Send SMS notification
@@ -517,7 +517,7 @@ add_hook('EmailPreSend', 1, function ($vars) {
         }
 
         $message = \SMSSuite\Core\TemplateService::processTemplate($smsTemplate['message'], $mergeData);
-        \SMSSuite\Core\MessageService::send($clientId, $phone, $message, 'notification');
+        \SMSSuite\Core\MessageService::send($clientId, $phone, $message, ['context' => 'notification']);
 
     } catch (Exception $e) {
         logActivity('SMS Suite Hook Error (EmailPreSend): ' . $e->getMessage());
@@ -1069,7 +1069,7 @@ add_hook('ClientAreaPageHome', 1, function($vars) {
 
         // Get client's masked phone number
         $client = Capsule::table('tblclients')->where('id', $userId)->first();
-        $maskedPhone = '****' . substr($client->phonenumber, -4);
+        $maskedPhone = ($client && $client->phonenumber) ? '****' . substr($client->phonenumber, -4) : '****';
 
         // Return custom page vars
         $vars['pagetitle'] = 'Two-Factor Authentication';
