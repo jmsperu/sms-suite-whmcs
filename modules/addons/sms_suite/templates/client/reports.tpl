@@ -1,44 +1,38 @@
 {$sms_css nofilter}
 <div class="sms-suite-reports">
-    <div class="row">
-        <div class="col-sm-12">
-            <h2>{$lang.reports}</h2>
-        </div>
+    <div class="sms-page-header">
+        <h2><i class="fas fa-chart-bar"></i> {$lang.reports}</h2>
     </div>
 
     <!-- Navigation -->
-    <div class="row" style="margin: 20px 0;">
-        <div class="col-sm-12">
-            <ul class="nav nav-pills">
-                <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
-                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
-                <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
-                <li><a href="{$modulelink}&action=campaigns">{$lang.campaigns}</a></li>
-                <li class="active"><a href="{$modulelink}&action=reports">{$lang.reports}</a></li>
-            </ul>
-        </div>
-    </div>
+    <ul class="sms-nav">
+        <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
+        <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
+        <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
+        <li><a href="{$modulelink}&action=campaigns">{$lang.campaigns}</a></li>
+        <li class="active"><a href="{$modulelink}&action=reports">{$lang.reports}</a></li>
+    </ul>
 
     <!-- Date Range Filter -->
-    <div class="panel panel-default">
-        <div class="panel-body">
-            <form method="get" class="form-inline">
+    <div class="panel panel-default" style="margin-bottom: 16px;">
+        <div class="panel-body" style="padding: 14px 20px;">
+            <form method="get" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
                 <input type="hidden" name="m" value="sms_suite">
                 <input type="hidden" name="action" value="reports">
 
-                <div class="form-group">
-                    <label>{$lang.report_from}:</label>
-                    <input type="date" name="start_date" class="form-control" value="{$start_date}">
+                <div class="form-group" style="margin: 0;">
+                    <label style="margin-right: 6px; font-size: .85rem;">{$lang.report_from}:</label>
+                    <input type="date" name="start_date" class="form-control" value="{$start_date}" style="width: auto;">
                 </div>
 
-                <div class="form-group">
-                    <label>{$lang.report_to}:</label>
-                    <input type="date" name="end_date" class="form-control" value="{$end_date}">
+                <div class="form-group" style="margin: 0;">
+                    <label style="margin-right: 6px; font-size: .85rem;">{$lang.report_to}:</label>
+                    <input type="date" name="end_date" class="form-control" value="{$end_date}" style="width: auto;">
                 </div>
 
-                <button type="submit" class="btn btn-primary">{$lang.report_generate}</button>
+                <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-chart-bar"></i> {$lang.report_generate}</button>
 
-                <a href="{$modulelink}&action=reports&start_date={$start_date}&end_date={$end_date}&export=csv" class="btn btn-default">
+                <a href="{$modulelink}&action=reports&start_date={$start_date}&end_date={$end_date}&export=csv" class="btn btn-default btn-sm">
                     <i class="fas fa-download"></i> {$lang.export} CSV
                 </a>
             </form>
@@ -46,47 +40,43 @@
     </div>
 
     <!-- Summary Stats -->
-    <div class="row">
-        <div class="col-md-3">
-            <div class="panel panel-primary">
-                <div class="panel-body text-center">
-                    <h3 style="margin: 0;">{$summary.total_messages|number_format:0}</h3>
-                    <p class="text-muted">{$lang.total_messages}</p>
-                </div>
+    <div class="row" style="margin-bottom: 24px;">
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-purple"><i class="fas fa-envelope"></i></div>
+                <h3 class="stat-value">{$summary.total_messages|number_format:0}</h3>
+                <p class="stat-label">{$lang.total_messages}</p>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="panel panel-info">
-                <div class="panel-body text-center">
-                    <h3 style="margin: 0;">{$summary.total_segments|number_format:0}</h3>
-                    <p class="text-muted">{$lang.segments}</p>
-                </div>
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-blue"><i class="fas fa-layer-group"></i></div>
+                <h3 class="stat-value">{$summary.total_segments|number_format:0}</h3>
+                <p class="stat-label">{$lang.segments}</p>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="panel panel-success">
-                <div class="panel-body text-center">
-                    <h3 style="margin: 0;">{$summary.by_status.delivered|default:0|number_format:0}</h3>
-                    <p class="text-muted">{$lang.delivered}</p>
-                </div>
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-green"><i class="fas fa-check-double"></i></div>
+                <h3 class="stat-value">{$summary.by_status.delivered|default:0|number_format:0}</h3>
+                <p class="stat-label">{$lang.delivered}</p>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="panel panel-warning">
-                <div class="panel-body text-center">
-                    <h3 style="margin: 0;">${$summary.total_cost|number_format:2}</h3>
-                    <p class="text-muted">Total Cost</p>
-                </div>
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-orange"><i class="fas fa-dollar-sign"></i></div>
+                <h3 class="stat-value">${$summary.total_cost|number_format:2}</h3>
+                <p class="stat-label">Total Cost</p>
             </div>
         </div>
     </div>
 
     <div class="row">
         <!-- Status Breakdown -->
-        <div class="col-md-6">
+        <div class="col-md-6" style="margin-bottom: 24px;">
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    <h3 class="panel-title">Status Breakdown</h3>
+                    <h3 class="panel-title"><i class="fas fa-tasks"></i> Status Breakdown</h3>
                 </div>
                 <div class="panel-body">
                     {if $summary.by_status}
@@ -116,9 +106,7 @@
                                 <td class="text-right">
                                     {if $summary.total_messages > 0}
                                     {($count / $summary.total_messages * 100)|number_format:1}%
-                                    {else}
-                                    0%
-                                    {/if}
+                                    {else}0%{/if}
                                 </td>
                             </tr>
                             {/foreach}
@@ -132,10 +120,10 @@
         </div>
 
         <!-- Channel Breakdown -->
-        <div class="col-md-6">
+        <div class="col-md-6" style="margin-bottom: 24px;">
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    <h3 class="panel-title">By Channel</h3>
+                    <h3 class="panel-title"><i class="fas fa-broadcast-tower"></i> By Channel</h3>
                 </div>
                 <div class="panel-body">
                     {if $summary.by_channel}
@@ -161,9 +149,7 @@
                                 <td class="text-right">
                                     {if $summary.total_messages > 0}
                                     {($count / $summary.total_messages * 100)|number_format:1}%
-                                    {else}
-                                    0%
-                                    {/if}
+                                    {else}0%{/if}
                                 </td>
                             </tr>
                             {/foreach}
@@ -180,36 +166,38 @@
     <!-- Daily Stats -->
     <div class="panel panel-default">
         <div class="panel-heading">
-            <h3 class="panel-title">Daily Activity</h3>
+            <h3 class="panel-title"><i class="fas fa-calendar-alt"></i> Daily Activity</h3>
         </div>
         <div class="panel-body">
             {if $daily_stats && count($daily_stats) > 0}
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>{$lang.date}</th>
-                        <th class="text-right">Total</th>
-                        <th class="text-right">{$lang.delivered}</th>
-                        <th class="text-right">{$lang.failed}</th>
-                        <th class="text-right">{$lang.segments}</th>
-                        <th class="text-right">Cost</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {foreach $daily_stats as $day}
-                    <tr>
-                        <td>{$day->date}</td>
-                        <td class="text-right">{$day->total|number_format:0}</td>
-                        <td class="text-right text-success">{$day->delivered|number_format:0}</td>
-                        <td class="text-right text-danger">{$day->failed|number_format:0}</td>
-                        <td class="text-right">{$day->segments|number_format:0}</td>
-                        <td class="text-right">${$day->cost|number_format:2}</td>
-                    </tr>
-                    {/foreach}
-                </tbody>
-            </table>
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>{$lang.date}</th>
+                            <th class="text-right">Total</th>
+                            <th class="text-right">{$lang.delivered}</th>
+                            <th class="text-right">{$lang.failed}</th>
+                            <th class="text-right">{$lang.segments}</th>
+                            <th class="text-right">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {foreach $daily_stats as $day}
+                        <tr>
+                            <td>{$day->date}</td>
+                            <td class="text-right">{$day->total|number_format:0}</td>
+                            <td class="text-right" style="color: #00c853;">{$day->delivered|number_format:0}</td>
+                            <td class="text-right" style="color: #ef4444;">{$day->failed|number_format:0}</td>
+                            <td class="text-right">{$day->segments|number_format:0}</td>
+                            <td class="text-right">${$day->cost|number_format:2}</td>
+                        </tr>
+                        {/foreach}
+                    </tbody>
+                </table>
+            </div>
             {else}
-            <p class="text-muted text-center">No data for selected period.</p>
+            <p class="text-muted text-center" style="padding: 20px;">No data for selected period.</p>
             {/if}
         </div>
     </div>

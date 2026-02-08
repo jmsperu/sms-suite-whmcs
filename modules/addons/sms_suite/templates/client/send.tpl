@@ -1,29 +1,23 @@
 {$sms_css nofilter}
 <div class="sms-suite-send">
-    <div class="row">
-        <div class="col-sm-12">
-            <h2>{$lang.menu_send_sms}</h2>
-        </div>
+    <div class="sms-page-header">
+        <h2><i class="fas fa-paper-plane"></i> {$lang.menu_send_sms}</h2>
     </div>
 
     <!-- Navigation -->
-    <div class="row" style="margin-bottom: 20px;">
-        <div class="col-sm-12">
-            <ul class="nav nav-pills">
-                <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
-                <li class="active"><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
-                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
-                <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
-                <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
-                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
-                <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
-            </ul>
-        </div>
-    </div>
+    <ul class="sms-nav">
+        <li><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
+        <li class="active"><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
+        <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
+        <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
+        <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
+        <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
+        <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
+    </ul>
 
     {if $success}
     <div class="alert alert-success">
-        <strong>{$lang.success}!</strong> {$success}
+        <i class="fas fa-check-circle"></i> <strong>{$lang.success}!</strong> {$success}
         {if $segment_info}
         <br><small>{$lang.segments}: {$segment_info.segments} | {$lang.encoding}: {$segment_info.encoding|upper}</small>
         {/if}
@@ -32,15 +26,15 @@
 
     {if $error}
     <div class="alert alert-danger">
-        <strong>{$lang.error}!</strong> {$error}
+        <i class="fas fa-exclamation-circle"></i> <strong>{$lang.error}!</strong> {$error}
     </div>
     {/if}
 
     <div class="row">
-        <div class="col-md-8">
+        <div class="col-md-8" style="margin-bottom: 24px;">
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    <h3 class="panel-title">{$lang.compose_message}</h3>
+                    <h3 class="panel-title"><i class="fas fa-edit"></i> {$lang.compose_message}</h3>
                 </div>
                 <div class="panel-body">
                     <form method="post" action="{$modulelink}&action=send" id="smsForm">
@@ -62,7 +56,7 @@
                             <input type="text" name="to" id="to" class="form-control"
                                    placeholder="+1234567890"
                                    value="{$posted.to|escape:'html'}" required>
-                            <small class="help-block">{$lang.recipient_help}</small>
+                            <span class="help-block">{$lang.recipient_help}</span>
                         </div>
 
                         <!-- Sender ID -->
@@ -106,25 +100,23 @@
                         </div>
 
                         <!-- Segment Counter -->
-                        <div class="form-group">
-                            <div class="well well-sm" id="segmentInfo">
-                                <div class="row">
-                                    <div class="col-xs-3 text-center">
-                                        <strong id="charCount">0</strong><br>
-                                        <small>{$lang.characters}</small>
-                                    </div>
-                                    <div class="col-xs-3 text-center">
-                                        <strong id="segmentCount">0</strong><br>
-                                        <small>{$lang.segments}</small>
-                                    </div>
-                                    <div class="col-xs-3 text-center">
-                                        <strong id="encoding">GSM-7</strong><br>
-                                        <small>{$lang.encoding}</small>
-                                    </div>
-                                    <div class="col-xs-3 text-center">
-                                        <strong id="remaining">160</strong><br>
-                                        <small>{$lang.remaining}</small>
-                                    </div>
+                        <div id="segmentInfo" style="background: var(--sms-light, #f8fafc); border: 1px solid var(--sms-border, #e2e8f0); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                            <div class="row">
+                                <div class="col-xs-3 text-center">
+                                    <strong id="charCount" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">0</strong><br>
+                                    <small style="color: var(--sms-muted, #64748b);">{$lang.characters}</small>
+                                </div>
+                                <div class="col-xs-3 text-center">
+                                    <strong id="segmentCount" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">0</strong><br>
+                                    <small style="color: var(--sms-muted, #64748b);">{$lang.segments}</small>
+                                </div>
+                                <div class="col-xs-3 text-center">
+                                    <strong id="encoding" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">GSM-7</strong><br>
+                                    <small style="color: var(--sms-muted, #64748b);">{$lang.encoding}</small>
+                                </div>
+                                <div class="col-xs-3 text-center">
+                                    <strong id="remaining" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">160</strong><br>
+                                    <small style="color: var(--sms-muted, #64748b);">{$lang.remaining}</small>
                                 </div>
                             </div>
                         </div>
@@ -143,10 +135,9 @@
 
         <!-- Sidebar -->
         <div class="col-md-4">
-            <!-- Quick Stats -->
             <div class="panel panel-info">
                 <div class="panel-heading">
-                    <h3 class="panel-title">{$lang.quick_info}</h3>
+                    <h3 class="panel-title"><i class="fas fa-info-circle"></i> {$lang.quick_info}</h3>
                 </div>
                 <div class="panel-body">
                     <p><strong>{$lang.wallet_balance}:</strong>
@@ -156,24 +147,23 @@
                            $
                        {/if}{$balance|default:0|number_format:2}
                     </p>
-                    <p><strong>{$lang.active_sender_ids}:</strong> {$sender_ids|@count|default:0}</p>
+                    <p style="margin-bottom: 0;"><strong>{$lang.active_sender_ids}:</strong> {$sender_ids|@count|default:0}</p>
                 </div>
             </div>
 
-            <!-- Encoding Guide -->
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    <h3 class="panel-title">{$lang.encoding_guide}</h3>
+                    <h3 class="panel-title"><i class="fas fa-book"></i> {$lang.encoding_guide}</h3>
                 </div>
                 <div class="panel-body">
-                    <p><strong>GSM-7:</strong></p>
-                    <ul class="small">
+                    <p style="margin-bottom: 4px;"><strong>GSM-7:</strong></p>
+                    <ul class="small" style="padding-left: 18px; margin-bottom: 12px;">
                         <li>160 {$lang.chars_single}</li>
                         <li>153 {$lang.chars_per_segment}</li>
                         <li>{$lang.gsm7_description}</li>
                     </ul>
-                    <p><strong>UCS-2 (Unicode):</strong></p>
-                    <ul class="small">
+                    <p style="margin-bottom: 4px;"><strong>UCS-2 (Unicode):</strong></p>
+                    <ul class="small" style="padding-left: 18px; margin-bottom: 0;">
                         <li>70 {$lang.chars_single}</li>
                         <li>67 {$lang.chars_per_segment}</li>
                         <li>{$lang.ucs2_description}</li>
@@ -186,7 +176,6 @@
 
 <script>
 (function() {
-    // GSM-7 Basic Character Set (code points)
     var gsm7Chars = [
         10, 12, 13, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
         45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
@@ -199,10 +188,7 @@
         232, 233, 236, 241, 242, 246, 248, 249, 252, 915, 916, 920, 923,
         926, 928, 931, 934, 936, 937, 8364
     ];
-
-    // Extended chars (count as 2)
     var gsm7ExtChars = [12, 91, 92, 93, 94, 123, 124, 125, 126, 8364];
-
     var allGsmChars = gsm7Chars.concat(gsm7ExtChars);
 
     function getCodePoints(str) {
@@ -210,7 +196,7 @@
         for (var i = 0; i < str.length; i++) {
             var code = str.codePointAt(i);
             points.push(code);
-            if (code > 0xFFFF) i++; // Skip surrogate pair
+            if (code > 0xFFFF) i++;
         }
         return points;
     }
@@ -218,12 +204,8 @@
     function detectEncoding(codePoints) {
         var hasExtended = false;
         for (var i = 0; i < codePoints.length; i++) {
-            if (allGsmChars.indexOf(codePoints[i]) === -1) {
-                return 'ucs2';
-            }
-            if (gsm7ExtChars.indexOf(codePoints[i]) !== -1) {
-                hasExtended = true;
-            }
+            if (allGsmChars.indexOf(codePoints[i]) === -1) return 'ucs2';
+            if (gsm7ExtChars.indexOf(codePoints[i]) !== -1) hasExtended = true;
         }
         return hasExtended ? 'gsm7ex' : 'gsm7';
     }
@@ -232,42 +214,30 @@
         if (!message || message.length === 0) {
             return { encoding: 'gsm7', length: 0, segments: 0, remaining: 160, perMessage: 160 };
         }
-
-        // WhatsApp uses different limits
         if (channel === 'whatsapp') {
             var len = message.length;
             var segments = Math.ceil(len / 1000);
             return { encoding: 'whatsapp', length: len, segments: segments, remaining: (1000 * segments) - len, perMessage: 1000 };
         }
-
         var codePoints = getCodePoints(message);
         var encoding = detectEncoding(codePoints);
-
         var length = codePoints.length;
 
-        // Count extended chars (they use 2 positions)
         if (encoding === 'gsm7ex') {
             for (var i = 0; i < codePoints.length; i++) {
-                if (gsm7ExtChars.indexOf(codePoints[i]) !== -1) {
-                    length++;
-                }
+                if (gsm7ExtChars.indexOf(codePoints[i]) !== -1) length++;
             }
         } else if (encoding === 'ucs2') {
-            // Surrogate pairs count as 2
             for (var i = 0; i < codePoints.length; i++) {
-                if (codePoints[i] >= 65536) {
-                    length++;
-                }
+                if (codePoints[i] >= 65536) length++;
             }
         }
 
         var singleLimit, multiLimit;
         if (encoding === 'gsm7' || encoding === 'gsm7ex') {
-            singleLimit = 160;
-            multiLimit = 153;
+            singleLimit = 160; multiLimit = 153;
         } else {
-            singleLimit = 70;
-            multiLimit = 67;
+            singleLimit = 70; multiLimit = 67;
         }
 
         var segments, perMessage;
@@ -278,9 +248,7 @@
             segments = Math.ceil(length / multiLimit);
             perMessage = multiLimit;
         }
-
         var remaining = (perMessage * Math.max(segments, 1)) - length;
-
         return { encoding: encoding, length: length, segments: segments, remaining: remaining, perMessage: perMessage };
     }
 
@@ -298,49 +266,26 @@
         if (encodingDisplay === 'GSM7') encodingDisplay = 'GSM-7';
         document.getElementById('encoding').textContent = encodingDisplay;
 
-        // Visual feedback for encoding type
         var infoBox = document.getElementById('segmentInfo');
         if (result.encoding === 'ucs2') {
-            infoBox.className = 'well well-sm bg-warning';
+            infoBox.style.borderColor = '#ff9800';
+            infoBox.style.background = 'rgba(255,152,0,.06)';
         } else {
-            infoBox.className = 'well well-sm';
+            infoBox.style.borderColor = '';
+            infoBox.style.background = '';
         }
     }
 
-    // Attach event listeners
     var messageField = document.getElementById('message');
     var channelField = document.getElementById('channel');
-
     if (messageField) {
         messageField.addEventListener('input', updateCounter);
         messageField.addEventListener('keyup', updateCounter);
-        messageField.addEventListener('paste', function() {
-            setTimeout(updateCounter, 10);
-        });
+        messageField.addEventListener('paste', function() { setTimeout(updateCounter, 10); });
     }
-
     if (channelField) {
         channelField.addEventListener('change', updateCounter);
     }
-
-    // Initial count
     updateCounter();
 })();
 </script>
-
-<style>
-.sms-suite-send .well {
-    margin-bottom: 0;
-}
-.sms-suite-send .well strong {
-    font-size: 1.5em;
-    color: #333;
-}
-.sms-suite-send .bg-warning {
-    background-color: #fcf8e3;
-    border-color: #faebcc;
-}
-.sms-suite-send .panel-info .panel-body p {
-    margin-bottom: 5px;
-}
-</style>

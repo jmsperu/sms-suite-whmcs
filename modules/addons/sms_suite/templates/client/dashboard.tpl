@@ -1,74 +1,70 @@
 {$sms_css nofilter}
 <div class="sms-suite-dashboard">
-    <div class="row">
-        <div class="col-sm-12">
-            <h2>{$lang.module_name}</h2>
+    <div class="sms-page-header">
+        <h2><i class="fas fa-tachometer-alt"></i> {$lang.module_name}</h2>
+        <div>
+            <a href="{$modulelink}&action=send" class="btn btn-primary">
+                <i class="fas fa-paper-plane"></i> {$lang.menu_send_sms}
+            </a>
         </div>
     </div>
 
     <!-- Navigation -->
-    <div class="row" style="margin-bottom: 20px;">
-        <div class="col-sm-12">
-            <ul class="nav nav-pills">
-                <li class="active"><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
-                <li><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
-                <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
-                <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
-                <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
-                <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
-                <li><a href="{$modulelink}&action=sender_ids">{$lang.menu_sender_ids}</a></li>
-                <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
-                <li><a href="{$modulelink}&action=api_keys">{$lang.menu_api_keys}</a></li>
-                <li><a href="{$modulelink}&action=billing">{$lang.menu_billing}</a></li>
-            </ul>
-        </div>
-    </div>
+    <ul class="sms-nav">
+        <li class="active"><a href="{$modulelink}">{$lang.menu_dashboard}</a></li>
+        <li><a href="{$modulelink}&action=send">{$lang.menu_send_sms}</a></li>
+        <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
+        <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
+        <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
+        <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
+        <li><a href="{$modulelink}&action=sender_ids">{$lang.menu_sender_ids}</a></li>
+        <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
+        <li><a href="{$modulelink}&action=api_keys">{$lang.menu_api_keys}</a></li>
+        <li><a href="{$modulelink}&action=billing">{$lang.menu_billing}</a></li>
+    </ul>
 
     <!-- Stats Cards -->
-    <div class="row">
-        <div class="col-sm-3">
-            <div class="panel panel-primary">
-                <div class="panel-heading">
-                    <h4>{$total_messages}</h4>
-                    <p>{$lang.total_messages}</p>
-                </div>
+    <div class="row" style="margin-bottom: 24px;">
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-purple"><i class="fas fa-envelope"></i></div>
+                <h3 class="stat-value">{$total_messages}</h3>
+                <p class="stat-label">{$lang.total_messages}</p>
             </div>
         </div>
-        <div class="col-sm-3">
-            <div class="panel panel-success">
-                <div class="panel-heading">
-                    <h4>{$delivered_messages}</h4>
-                    <p>{$lang.delivered}</p>
-                </div>
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-green"><i class="fas fa-check-double"></i></div>
+                <h3 class="stat-value">{$delivered_messages}</h3>
+                <p class="stat-label">{$lang.delivered}</p>
             </div>
         </div>
-        <div class="col-sm-3">
-            <div class="panel panel-info">
-                <div class="panel-heading">
-                    <h4>{$today_messages}</h4>
-                    <p>{$lang.messages_today}</p>
-                </div>
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-blue"><i class="fas fa-calendar-day"></i></div>
+                <h3 class="stat-value">{$today_messages}</h3>
+                <p class="stat-label">{$lang.messages_today}</p>
             </div>
         </div>
-        <div class="col-sm-3">
-            <div class="panel panel-warning">
-                <div class="panel-heading">
-                    <h4>{$balance|number_format:4}</h4>
-                    <p>{$lang.wallet_balance}</p>
-                </div>
+        <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
+            <div class="sms-stat-card">
+                <div class="stat-icon bg-orange"><i class="fas fa-wallet"></i></div>
+                <h3 class="stat-value">{$balance|number_format:4}</h3>
+                <p class="stat-label">{$lang.wallet_balance}</p>
             </div>
         </div>
     </div>
 
     <div class="row">
         <!-- Recent Messages -->
-        <div class="col-sm-8">
+        <div class="col-md-8" style="margin-bottom: 24px;">
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    <h3 class="panel-title">{$lang.client_recent_messages}</h3>
+                    <h3 class="panel-title"><i class="fas fa-clock"></i> {$lang.client_recent_messages}</h3>
                 </div>
                 <div class="panel-body">
                     {if $recent_messages|count > 0}
+                    <div class="table-responsive">
                         <table class="table table-striped">
                             <thead>
                                 <tr>
@@ -79,51 +75,58 @@
                             </thead>
                             <tbody>
                                 {foreach $recent_messages as $msg}
-                                    <tr>
-                                        <td>{$msg->to_number}</td>
-                                        <td>
-                                            {if $msg->status == 'delivered'}
-                                                <span class="label label-success">{$msg->status|ucfirst}</span>
-                                            {elseif $msg->status == 'failed' || $msg->status == 'rejected'}
-                                                <span class="label label-danger">{$msg->status|ucfirst}</span>
-                                            {else}
-                                                <span class="label label-default">{$msg->status|ucfirst}</span>
-                                            {/if}
-                                        </td>
-                                        <td>{$msg->created_at}</td>
-                                    </tr>
+                                <tr>
+                                    <td><strong>{$msg->to_number}</strong></td>
+                                    <td>
+                                        {if $msg->status == 'delivered'}
+                                            <span class="label label-success">{$msg->status|ucfirst}</span>
+                                        {elseif $msg->status == 'failed' || $msg->status == 'rejected'}
+                                            <span class="label label-danger">{$msg->status|ucfirst}</span>
+                                        {else}
+                                            <span class="label label-default">{$msg->status|ucfirst}</span>
+                                        {/if}
+                                    </td>
+                                    <td>{$msg->created_at}</td>
+                                </tr>
                                 {/foreach}
                             </tbody>
                         </table>
-                        <a href="{$modulelink}&action=logs" class="btn btn-default btn-sm">{$lang.view} {$lang.all}</a>
+                    </div>
+                    <a href="{$modulelink}&action=logs" class="btn btn-default btn-sm">
+                        {$lang.view} {$lang.all} <i class="fas fa-arrow-right"></i>
+                    </a>
                     {else}
-                        <p class="text-muted">{$lang.no_results}</p>
+                    <div class="text-center text-muted" style="padding: 40px 20px;">
+                        <i class="fas fa-inbox" style="font-size: 2.5rem; color: #cbd5e1;"></i>
+                        <p style="margin-top: 12px;">{$lang.no_results}</p>
+                    </div>
                     {/if}
                 </div>
             </div>
         </div>
 
-        <!-- Quick Actions -->
-        <div class="col-sm-4">
+        <!-- Sidebar -->
+        <div class="col-md-4">
+            <!-- Quick Actions -->
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    <h3 class="panel-title">{$lang.quick_links}</h3>
+                    <h3 class="panel-title"><i class="fas fa-bolt"></i> {$lang.quick_links}</h3>
                 </div>
                 <div class="panel-body">
-                    <a href="{$modulelink}&action=send" class="btn btn-primary btn-block">
-                        <i class="fa fa-paper-plane"></i> {$lang.menu_send_sms}
+                    <a href="{$modulelink}&action=send" class="btn btn-primary btn-block" style="margin-bottom: 10px;">
+                        <i class="fas fa-paper-plane"></i> {$lang.menu_send_sms}
                     </a>
-                    <a href="{$modulelink}&action=inbox" class="btn btn-info btn-block">
-                        <i class="fa fa-inbox"></i> Inbox
+                    <a href="{$modulelink}&action=inbox" class="btn btn-info btn-block" style="margin-bottom: 10px;">
+                        <i class="fas fa-inbox"></i> Inbox
                     </a>
-                    <a href="{$modulelink}&action=campaigns" class="btn btn-default btn-block">
-                        <i class="fa fa-bullhorn"></i> {$lang.menu_campaigns}
+                    <a href="{$modulelink}&action=campaigns" class="btn btn-default btn-block" style="margin-bottom: 10px;">
+                        <i class="fas fa-bullhorn"></i> {$lang.menu_campaigns}
                     </a>
-                    <a href="{$modulelink}&action=contacts" class="btn btn-default btn-block">
-                        <i class="fa fa-users"></i> {$lang.menu_contacts}
+                    <a href="{$modulelink}&action=contacts" class="btn btn-default btn-block" style="margin-bottom: 10px;">
+                        <i class="fas fa-users"></i> {$lang.menu_contacts}
                     </a>
                     <a href="{$modulelink}&action=billing" class="btn btn-default btn-block">
-                        <i class="fa fa-credit-card"></i> {$lang.menu_billing}
+                        <i class="fas fa-credit-card"></i> {$lang.menu_billing}
                     </a>
                 </div>
             </div>
@@ -131,17 +134,19 @@
             <!-- Sender IDs -->
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    <h3 class="panel-title">{$lang.sender_ids}</h3>
+                    <h3 class="panel-title"><i class="fas fa-id-badge"></i> {$lang.sender_ids}</h3>
                 </div>
                 <div class="panel-body">
                     {if $sender_ids|count > 0}
-                        <ul class="list-unstyled">
-                            {foreach $sender_ids as $sid}
-                                <li><i class="fa fa-check-circle text-success"></i> {$sid->sender_id}</li>
-                            {/foreach}
-                        </ul>
+                    <ul class="list-unstyled" style="margin-bottom: 12px;">
+                        {foreach $sender_ids as $sid}
+                        <li style="padding: 6px 0; border-bottom: 1px solid #f1f5f9;">
+                            <i class="fas fa-check-circle" style="color: var(--sms-success);"></i> {$sid->sender_id}
+                        </li>
+                        {/foreach}
+                    </ul>
                     {else}
-                        <p class="text-muted">{$lang.no_results}</p>
+                    <p class="text-muted">{$lang.no_results}</p>
                     {/if}
                     <a href="{$modulelink}&action=sender_ids" class="btn btn-default btn-sm">{$lang.sender_id_request}</a>
                 </div>
