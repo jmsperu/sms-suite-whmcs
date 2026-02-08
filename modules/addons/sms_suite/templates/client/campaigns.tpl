@@ -106,6 +106,7 @@
                         <td>
                             {if $campaign->status eq 'sending'}
                             <form method="post" style="display: inline;">
+                                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                 <input type="hidden" name="pause_campaign" value="1">
                                 <input type="hidden" name="campaign_id" value="{$campaign->id}">
                                 <button type="submit" class="btn btn-xs btn-warning" title="{$lang.campaign_pause}">
@@ -114,6 +115,7 @@
                             </form>
                             {elseif $campaign->status eq 'paused'}
                             <form method="post" style="display: inline;">
+                                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                 <input type="hidden" name="resume_campaign" value="1">
                                 <input type="hidden" name="campaign_id" value="{$campaign->id}">
                                 <button type="submit" class="btn btn-xs btn-success" title="{$lang.campaign_resume}">
@@ -124,6 +126,7 @@
 
                             {if $campaign->status neq 'completed' && $campaign->status neq 'cancelled'}
                             <form method="post" style="display: inline;" onsubmit="return confirm('Cancel this campaign?');">
+                                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                 <input type="hidden" name="cancel_campaign" value="1">
                                 <input type="hidden" name="campaign_id" value="{$campaign->id}">
                                 <button type="submit" class="btn btn-xs btn-danger" title="{$lang.campaign_cancel}">
@@ -148,6 +151,7 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="post">
+                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                 <input type="hidden" name="create_campaign" value="1">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal">&times;</button>

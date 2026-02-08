@@ -73,6 +73,7 @@
                 {/if}
 
                 <form method="post" style="display: inline; margin-left: 20px;">
+                    <input type="hidden" name="csrf_token" value="{$csrf_token}">
                     <input type="hidden" name="export_csv" value="1">
                     <input type="hidden" name="export_group_id" value="{$filters.group_id}">
                     <button type="submit" class="btn btn-default">
@@ -128,6 +129,7 @@
                                 <i class="fas fa-paper-plane"></i>
                             </a>
                             <form method="post" style="display: inline;" onsubmit="return confirm('{$lang.confirm_delete}');">
+                                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                 <input type="hidden" name="delete_contact" value="1">
                                 <input type="hidden" name="contact_id" value="{$contact->id}">
                                 <button type="submit" class="btn btn-xs btn-danger" title="{$lang.delete}">
@@ -177,6 +179,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="post">
+                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                 <input type="hidden" name="add_contact" value="1">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -229,6 +232,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="post" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{$csrf_token}">
                 <input type="hidden" name="import_csv" value="1">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal">&times;</button>

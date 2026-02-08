@@ -87,6 +87,7 @@
                                 <td>
                                     {if $key.status eq 'active'}
                                     <form method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to revoke this API key?');">
+                                        <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                         <input type="hidden" name="revoke_key" value="1">
                                         <input type="hidden" name="key_id" value="{$key.id}">
                                         <button type="submit" class="btn btn-xs btn-danger">{$lang.api_key_revoke}</button>
@@ -110,6 +111,7 @@
                 </div>
                 <div class="panel-body">
                     <form method="post">
+                        <input type="hidden" name="csrf_token" value="{$csrf_token}">
                         <input type="hidden" name="create_key" value="1">
 
                         <div class="form-group">

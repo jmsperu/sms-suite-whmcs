@@ -458,6 +458,8 @@ function sms_suite_clientarea($vars)
 .btn-xs{padding:.125rem .375rem;font-size:.75rem;border-radius:.2rem}
 .help-block{display:block;margin-top:.25rem;color:#6c757d;font-size:.875em}
 .form-control-static{min-height:calc(1.5em + .75rem + 2px);padding-top:calc(.375rem + 1px);margin-bottom:0}
+.col-xs-1{flex:0 0 8.333%;max-width:8.333%}.col-xs-2{flex:0 0 16.667%;max-width:16.667%}.col-xs-3{flex:0 0 25%;max-width:25%}.col-xs-4{flex:0 0 33.333%;max-width:33.333%}.col-xs-6{flex:0 0 50%;max-width:50%}.col-xs-12{flex:0 0 100%;max-width:100%}
+[class*="col-xs-"]{position:relative;width:100%;padding-right:15px;padding-left:15px}
 .sms-suite-dashboard .panel-heading h4{margin:0;font-size:1.75rem;font-weight:700}
 .sms-suite-dashboard .panel-heading p{margin:0;font-size:.875rem;opacity:.9}
 </style>';
