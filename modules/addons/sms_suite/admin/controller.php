@@ -22,6 +22,16 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
 {
     $modulelink = $vars['modulelink'];
 
+    // Handle AJAX routes before rendering navigation (they return JSON and exit)
+    switch ($action) {
+        case 'ajax_search_clients':
+            sms_suite_ajax_search_clients();
+            return;
+        case 'ajax_search_sender_ids':
+            sms_suite_ajax_search_sender_ids();
+            return;
+    }
+
     // Build navigation
     sms_suite_admin_nav($modulelink, $action, $lang);
 
@@ -215,14 +225,19 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
  */
 function sms_suite_admin_select2_init()
 {
+    // Get the modulelink for AJAX URLs
+    $modulelink = isset($_GET['module']) ? 'addonmodules.php?module=' . urlencode($_GET['module']) : 'addonmodules.php?module=sms_suite';
+
     echo '<script>
     jQuery(document).ready(function($) {
         if (!$.fn.select2) { return; }
 
+        var ajaxBase = "' . $modulelink . '";
+
         // Helper: init Select2 on elements, with modal dropdownParent if inside a .modal
         function initS2(selector, opts) {
             $(selector).each(function() {
-                if ($(this).data("select2")) { return; } // already initialized
+                if ($(this).data("select2")) { return; }
                 var o = $.extend({ width: "100%", allowClear: true, placeholder: $(this).find("option:first").text() || "Select..." }, opts || {});
                 var modal = $(this).closest(".modal");
                 if (modal.length) { o.dropdownParent = modal; }
@@ -230,9 +245,38 @@ function sms_suite_admin_select2_init()
             });
         }
 
-        // --- Client selectors (can have hundreds of options) ---
-        initS2("#assign_client_select", { placeholder: "Search for a client..." });
-        initS2("select[name=\"client_id\"]", { placeholder: "Search for a client..." });
+        // Helper: init AJAX-based Select2 for large datasets
+        function initS2Ajax(selector, ajaxAction, placeholder) {
+            $(selector).each(function() {
+                if ($(this).data("select2")) { return; }
+                var opts = {
+                    width: "100%",
+                    allowClear: true,
+                    placeholder: placeholder || "Search...",
+                    minimumInputLength: 0,
+                    ajax: {
+                        url: ajaxBase + "&action=" + ajaxAction,
+                        dataType: "json",
+                        delay: 300,
+                        data: function(params) { return { q: params.term || "", page: params.page || 1 }; },
+                        processResults: function(data) { return { results: data.results || [], pagination: { more: data.pagination ? data.pagination.more : false } }; },
+                        cache: true
+                    }
+                };
+                var modal = $(this).closest(".modal");
+                if (modal.length) { opts.dropdownParent = modal; }
+                $(this).select2(opts);
+            });
+        }
+
+        // --- Client selectors: AJAX-based for reliable search across all clients ---
+        initS2Ajax("#assign_client_select", "ajax_search_clients", "Search for a client...");
+        initS2Ajax("select[name=\"client_id\"]", "ajax_search_clients", "Search for a client...");
+
+        // --- Sender ID selectors: AJAX-based to include both tables ---
+        initS2Ajax("#edit_sender", "ajax_search_sender_ids", "Search sender ID...");
+        initS2Ajax("select[name=\"assigned_sender_id\"]", "ajax_search_sender_ids", "Search sender ID...");
+        initS2Ajax("select[name=\"sender_id\"]", "ajax_search_sender_ids", "Search sender ID...");
 
         // --- Gateway selectors ---
         initS2("select[name=\"gateway_id\"]", { placeholder: "Select gateway..." });
@@ -240,11 +284,7 @@ function sms_suite_admin_select2_init()
         initS2("#edit_pool_gateway", { placeholder: "Select gateway..." });
         initS2("#approve_gateway", { placeholder: "Select gateway..." });
         initS2("#edit_gateway", { placeholder: "Select gateway..." });
-
-        // --- Sender ID selectors ---
-        initS2("select[name=\"sender_id\"]", { placeholder: "Select sender ID..." });
-        initS2("#edit_sender", { placeholder: "Select sender ID..." });
-        initS2("select[name=\"assigned_sender_id\"]", { placeholder: "Select sender ID..." });
+        initS2("select[name=\"assigned_gateway_id\"]", { placeholder: "Select gateway..." });
 
         // --- WHMCS Hook / Trigger selectors (large lists) ---
         initS2("#tpl_trigger", { placeholder: "Select trigger hook..." });
@@ -270,9 +310,6 @@ function sms_suite_admin_select2_init()
         initS2("select[name=\"currency_id\"]", { placeholder: "Select currency..." });
         initS2("#edit_pkg_currency", { placeholder: "Select currency..." });
 
-        // --- Billing mode selectors ---
-        initS2("select[name=\"assigned_gateway_id\"]", { placeholder: "Select gateway..." });
-
         // --- Network prefix modals ---
         initS2("select[name=\"dest_network\"]", { placeholder: "Select network..." });
 
@@ -284,7 +321,6 @@ function sms_suite_admin_select2_init()
             $(e.target).find("select").each(function() {
                 if (!$(this).data("select2")) {
                     var opts = { width: "100%", allowClear: true, dropdownParent: $(e.target), placeholder: $(this).find("option:first").text() || "Select..." };
-                    // Only init selects that have more than 4 options (skip tiny selects)
                     if ($(this).find("option").length > 4) {
                         $(this).select2(opts);
                     }
@@ -2923,8 +2959,22 @@ function sms_suite_admin_clients($vars, $lang)
     // Get gateways for dropdown
     $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
 
-    // Get sender IDs for dropdown
+    // Get sender IDs for dropdown (from both old table and pool)
     $senderIds = Capsule::table('mod_sms_sender_ids')->where('status', 'active')->orderBy('sender_id')->get();
+    try {
+        $poolSenderIds = Capsule::table('mod_sms_sender_id_pool')->where('status', 'active')->orderBy('sender_id')->get();
+        // Merge pool IDs, avoiding duplicates
+        $existingIds = $senderIds->pluck('sender_id')->toArray();
+        foreach ($poolSenderIds as $pid) {
+            if (!in_array($pid->sender_id, $existingIds)) {
+                $pid->client_id = null; // Pool IDs are global
+                $senderIds->push($pid);
+                $existingIds[] = $pid->sender_id;
+            }
+        }
+    } catch (\Exception $e) {
+        // Pool table might not exist
+    }
 
     echo '<div class="panel panel-default">';
     echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-users"></i> Client SMS Settings</h3></div>';
@@ -6223,6 +6273,112 @@ function sms_suite_admin_billing_rates($vars, $lang)
 /**
  * AJAX: Get message details
  */
+/**
+ * AJAX: Search clients for Select2 dropdowns
+ */
+function sms_suite_ajax_search_clients()
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    $term = trim($_GET['q'] ?? '');
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $perPage = 25;
+
+    $query = Capsule::table('tblclients')
+        ->select(['id', 'firstname', 'lastname', 'companyname', 'email']);
+
+    if (!empty($term)) {
+        $query->where(function ($q) use ($term) {
+            $q->where('firstname', 'LIKE', "%{$term}%")
+              ->orWhere('lastname', 'LIKE', "%{$term}%")
+              ->orWhere('companyname', 'LIKE', "%{$term}%")
+              ->orWhere('email', 'LIKE', "%{$term}%")
+              ->orWhere('id', '=', $term);
+        });
+    }
+
+    $total = $query->count();
+    $clients = $query->orderBy('firstname')->orderBy('lastname')
+        ->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+    $results = [];
+    foreach ($clients as $c) {
+        $name = trim($c->firstname . ' ' . $c->lastname);
+        if ($c->companyname) {
+            $name .= ' (' . $c->companyname . ')';
+        }
+        $results[] = [
+            'id' => $c->id,
+            'text' => $name . ' - ' . $c->email,
+        ];
+    }
+
+    echo json_encode([
+        'results' => $results,
+        'pagination' => ['more' => ($page * $perPage) < $total],
+    ]);
+    exit;
+}
+
+/**
+ * AJAX: Search sender IDs for Select2 dropdowns
+ */
+function sms_suite_ajax_search_sender_ids()
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    $term = trim($_GET['q'] ?? '');
+
+    // Get from both mod_sms_sender_ids AND mod_sms_sender_id_pool
+    $results = [];
+
+    // Old table
+    $senderIds = Capsule::table('mod_sms_sender_ids')
+        ->where('status', 'active')
+        ->when(!empty($term), function ($q) use ($term) {
+            $q->where('sender_id', 'LIKE', "%{$term}%");
+        })
+        ->orderBy('sender_id')
+        ->limit(50)
+        ->get();
+
+    foreach ($senderIds as $sid) {
+        $label = $sid->sender_id;
+        if ($sid->client_id) {
+            $label .= ' (Client)';
+        } else {
+            $label .= ' (Global)';
+        }
+        $results[] = ['id' => $sid->sender_id, 'text' => $label];
+    }
+
+    // Pool table
+    try {
+        $poolIds = Capsule::table('mod_sms_sender_id_pool')
+            ->where('status', 'active')
+            ->when(!empty($term), function ($q) use ($term) {
+                $q->where('sender_id', 'LIKE', "%{$term}%");
+            })
+            ->orderBy('sender_id')
+            ->limit(50)
+            ->get();
+
+        foreach ($poolIds as $pid) {
+            // Avoid duplicates
+            $existing = array_column($results, 'id');
+            $label = $pid->sender_id . ' [' . ($pid->network ?? 'all') . ']';
+            if (!in_array($pid->sender_id, $existing)) {
+                $results[] = ['id' => $pid->sender_id, 'text' => $label . ' (Pool)'];
+            }
+        }
+    } catch (\Exception $e) {
+        // Pool table might not exist yet
+    }
+
+    echo json_encode(['results' => $results]);
+    exit;
+}
+
 function sms_suite_ajax_message_detail()
 {
     header('Content-Type: text/html; charset=utf-8');
