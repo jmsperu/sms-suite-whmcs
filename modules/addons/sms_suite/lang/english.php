@@ -170,6 +170,34 @@ $_LANG = [
     'group_deleted' => 'Group deleted successfully',
     'group_fields' => 'Custom Fields',
 
+    // Tags
+    'tags' => 'Tags',
+    'tag' => 'Tag',
+    'tag_create' => 'Create Tag',
+    'tag_edit' => 'Edit Tag',
+    'tag_name' => 'Tag Name',
+    'tag_color' => 'Color',
+    'tag_description' => 'Description',
+    'tag_contacts' => 'Contacts',
+    'tag_saved' => 'Tag saved successfully',
+    'tag_deleted' => 'Tag deleted successfully',
+    'tag_assigned' => 'Tag assigned successfully',
+    'tag_removed' => 'Tag removed successfully',
+
+    // Segments
+    'segments' => 'Segments',
+    'segment' => 'Segment',
+    'segment_create' => 'Create Segment',
+    'segment_name' => 'Segment Name',
+    'segment_match_type' => 'Match Type',
+    'segment_match_all' => 'Match ALL conditions',
+    'segment_match_any' => 'Match ANY condition',
+    'segment_conditions' => 'Conditions',
+    'segment_add_condition' => 'Add Condition',
+    'segment_saved' => 'Segment saved successfully',
+    'segment_deleted' => 'Segment deleted successfully',
+    'segment_recalculated' => 'Segment count recalculated',
+
     // Campaigns
     'campaign' => 'Campaign',
     'campaigns' => 'Campaigns',

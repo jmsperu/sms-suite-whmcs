@@ -53,17 +53,19 @@ class CampaignService
                 'message' => $data['message'],
                 'sender_id' => $data['sender_id'] ?? null,
                 'gateway_id' => $data['gateway_id'] ?? null,
-                'recipient_type' => $data['recipient_type'] ?? 'manual', // manual, group, all
+                'recipient_type' => $data['recipient_type'] ?? 'manual',
                 'recipient_group_id' => $data['recipient_group_id'] ?? null,
+                'segment_id' => $data['segment_id'] ?? null,
+                'recipient_tag_id' => $data['recipient_tag_id'] ?? null,
                 'recipient_list' => json_encode($data['recipients'] ?? []),
                 'total_recipients' => 0,
                 'sent_count' => 0,
                 'delivered_count' => 0,
                 'failed_count' => 0,
                 'status' => self::STATUS_DRAFT,
-                'scheduled_at' => $data['scheduled_at'] ?? null,
+                'schedule_time' => $data['scheduled_at'] ?? null,
                 'batch_size' => $data['batch_size'] ?? 100,
-                'batch_delay' => $data['batch_delay'] ?? 1, // seconds between batches
+                'batch_delay' => $data['batch_delay'] ?? 1,
                 'started_at' => null,
                 'completed_at' => null,
                 'created_at' => date('Y-m-d H:i:s'),
@@ -103,8 +105,8 @@ class CampaignService
         $updateData = ['updated_at' => date('Y-m-d H:i:s')];
 
         $allowedFields = ['name', 'message', 'channel', 'sender_id', 'gateway_id',
-                          'recipient_type', 'recipient_group_id', 'scheduled_at',
-                          'batch_size', 'batch_delay'];
+                          'recipient_type', 'recipient_group_id', 'segment_id',
+                          'recipient_tag_id', 'schedule_time', 'batch_size', 'batch_delay'];
 
         foreach ($allowedFields as $field) {
             if (isset($data[$field])) {
@@ -177,7 +179,7 @@ class CampaignService
                 'status' => $status,
                 'total_recipients' => count($recipients),
                 'recipient_list' => json_encode($recipients),
-                'scheduled_at' => $scheduledAt,
+                'schedule_time' => $scheduledAt,
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
 
@@ -197,8 +199,8 @@ class CampaignService
         $campaigns = Capsule::table('mod_sms_campaigns')
             ->whereIn('status', [self::STATUS_QUEUED, self::STATUS_SCHEDULED])
             ->where(function ($query) {
-                $query->whereNull('scheduled_at')
-                      ->orWhere('scheduled_at', '<=', date('Y-m-d H:i:s'));
+                $query->whereNull('schedule_time')
+                      ->orWhere('schedule_time', '<=', date('Y-m-d H:i:s'));
             })
             ->limit(5)
             ->get();
@@ -250,6 +252,7 @@ class CampaignService
             ->pluck('to_number')
             ->toArray();
 
+        $currentStatus = self::STATUS_SENDING;
         $batch = 0;
         foreach ($recipients as $phone) {
             // Check if paused or cancelled
@@ -282,7 +285,7 @@ class CampaignService
                 $sentCount++;
 
                 // Update A/B test stats if variant was used
-                if ($messageData['variant'] && $campaign->ab_testing) {
+                if ($messageData['variant'] && !empty($campaign->ab_testing)) {
                     Capsule::table('mod_sms_campaign_ab_tests')
                         ->where('campaign_id', $campaignId)
                         ->where('variant', $messageData['variant'])
@@ -450,9 +453,16 @@ class CampaignService
                 return [];
 
             case 'segment':
-                if ($campaign->segment_id) {
+                if (!empty($campaign->segment_id)) {
                     require_once __DIR__ . '/AdvancedCampaignService.php';
                     return AdvancedCampaignService::getSegmentContacts($campaign->segment_id);
+                }
+                return [];
+
+            case 'tag':
+                if (!empty($campaign->recipient_tag_id)) {
+                    require_once dirname(__DIR__) . '/Contacts/TagService.php';
+                    return \SMSSuite\Contacts\TagService::getTagContacts($campaign->recipient_tag_id, $campaign->client_id);
                 }
                 return [];
 
@@ -460,7 +470,7 @@ class CampaignService
                 // All active contacts for client
                 return Capsule::table('mod_sms_contacts')
                     ->where('client_id', $campaign->client_id)
-                    ->where('status', 'subscribed')
+                    ->whereIn('status', ['active', 'subscribed'])
                     ->pluck('phone')
                     ->toArray();
 
@@ -480,11 +490,11 @@ class CampaignService
     public static function getCampaignMessage(object $campaign, string $phone): array
     {
         $message = $campaign->message;
-        $senderId = $campaign->sender_id;
+        $senderId = $campaign->sender_id ?? '';
         $variant = null;
 
         // Check for A/B testing
-        if ($campaign->ab_testing) {
+        if (!empty($campaign->ab_testing)) {
             require_once __DIR__ . '/AdvancedCampaignService.php';
             $abVariant = AdvancedCampaignService::getABVariant($campaign->id);
             if ($abVariant) {
@@ -527,7 +537,7 @@ class CampaignService
         $message = \SMSSuite\Core\TemplateService::render($message, $templateData);
 
         // Apply link tracking if enabled
-        if ($campaign->track_links) {
+        if (!empty($campaign->track_links)) {
             require_once __DIR__ . '/AdvancedCampaignService.php';
             $message = AdvancedCampaignService::processMessageLinks($message, $campaign->id);
         }

@@ -39,6 +39,12 @@ function sms_suite_client_dispatch($vars, $action, $clientId, $lang)
         case 'contact_groups':
             return sms_suite_client_contact_groups($vars, $clientId, $lang);
 
+        case 'tags':
+            return sms_suite_client_tags($vars, $clientId, $lang);
+
+        case 'segments':
+            return sms_suite_client_segments($vars, $clientId, $lang);
+
         case 'sender_ids':
             return sms_suite_client_sender_ids($vars, $clientId, $lang);
 
@@ -70,6 +76,216 @@ function sms_suite_client_dispatch($vars, $action, $clientId, $lang)
         default:
             return sms_suite_client_dashboard($vars, $clientId, $lang);
     }
+}
+
+/**
+ * Get client currency info from WHMCS
+ */
+function sms_suite_get_client_currency($clientId)
+{
+    $client = Capsule::table('tblclients')->where('id', $clientId)->first();
+    $currency = $client ? Capsule::table('tblcurrencies')->where('id', $client->currency)->first() : null;
+    return [
+        'code' => $currency ? ($currency->code ?? 'USD') : 'USD',
+        'symbol' => $currency ? ($currency->prefix ?? '$') : '$',
+    ];
+}
+
+/**
+ * Get all active sender IDs for a client (merged from all sources)
+ * Sources: mod_sms_sender_ids (client-requested), mod_sms_client_sender_ids (admin-assigned),
+ *          mod_sms_settings.assigned_sender_id (legacy assignment)
+ */
+function sms_suite_get_client_sender_ids_merged($clientId)
+{
+    $seen = [];
+    $result = [];
+
+    // 1. Client-requested sender IDs (approved)
+    $requested = Capsule::table('mod_sms_sender_ids')
+        ->where('client_id', $clientId)
+        ->where('status', 'active')
+        ->orderBy('sender_id')
+        ->get();
+
+    foreach ($requested as $sid) {
+        $key = strtolower($sid->sender_id);
+        if (!isset($seen[$key])) {
+            $seen[$key] = true;
+            $result[] = $sid;
+        }
+    }
+
+    // 2. Admin-assigned sender IDs (from mod_sms_client_sender_ids)
+    $assigned = Capsule::table('mod_sms_client_sender_ids')
+        ->where('client_id', $clientId)
+        ->where('status', 'active')
+        ->orderBy('sender_id')
+        ->get();
+
+    foreach ($assigned as $sid) {
+        $key = strtolower($sid->sender_id);
+        if (!isset($seen[$key])) {
+            $seen[$key] = true;
+            $sid->source = 'assigned';
+            $result[] = $sid;
+        }
+    }
+
+    // 3. Legacy: assigned_sender_id from mod_sms_settings
+    $settings = Capsule::table('mod_sms_settings')
+        ->where('client_id', $clientId)
+        ->first();
+
+    if ($settings && !empty($settings->assigned_sender_id)) {
+        $key = strtolower($settings->assigned_sender_id);
+        if (!isset($seen[$key])) {
+            $seen[$key] = true;
+            $result[] = (object)[
+                'id' => 0,
+                'sender_id' => $settings->assigned_sender_id,
+                'type' => 'alphanumeric',
+                'status' => 'active',
+                'source' => 'admin',
+            ];
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Parse phone numbers from a string (supports comma, newline, tab, space, semicolon separators)
+ */
+function sms_suite_parse_phone_numbers($input)
+{
+    if (empty($input)) {
+        return [];
+    }
+
+    // Split by common delimiters: comma, newline, tab, semicolon, pipe, space
+    $parts = preg_split('/[,\n\r\t;|]+/', $input);
+    $numbers = [];
+
+    foreach ($parts as $part) {
+        // Trim and clean — keep only digits, plus sign, and spaces (then strip spaces)
+        $cleaned = trim($part);
+        if (empty($cleaned)) {
+            continue;
+        }
+
+        // Remove any non-phone characters but keep + and digits
+        $phone = preg_replace('/[^\d+]/', '', $cleaned);
+
+        // Basic validation: at least 7 digits
+        if (preg_match('/^\+?\d{7,15}$/', $phone)) {
+            $numbers[] = $phone;
+        }
+    }
+
+    return $numbers;
+}
+
+/**
+ * Parse phone numbers from an uploaded file (CSV, TXT, XLSX)
+ */
+function sms_suite_parse_recipients_file($file)
+{
+    $numbers = [];
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    $maxSize = 5 * 1024 * 1024; // 5MB
+
+    if ($file['size'] > $maxSize) {
+        return [];
+    }
+
+    if (in_array($ext, ['csv', 'txt'])) {
+        $content = file_get_contents($file['tmp_name']);
+        if ($content === false) {
+            return [];
+        }
+        // Parse CSV/TXT — each line may have one number or multiple comma-separated
+        $lines = preg_split('/[\r\n]+/', $content);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (empty($line)) {
+                continue;
+            }
+
+            // Try to parse as CSV row
+            $fields = str_getcsv($line);
+            foreach ($fields as $field) {
+                $parsed = sms_suite_parse_phone_numbers($field);
+                $numbers = array_merge($numbers, $parsed);
+            }
+        }
+    } elseif ($ext === 'xlsx') {
+        // Basic XLSX parsing (XLSX = ZIP with XML inside)
+        $numbers = sms_suite_parse_xlsx_phones($file['tmp_name']);
+    } elseif ($ext === 'xls') {
+        // Old Excel format — not supported natively, try as CSV
+        $content = file_get_contents($file['tmp_name']);
+        if ($content) {
+            $numbers = sms_suite_parse_phone_numbers($content);
+        }
+    }
+
+    return $numbers;
+}
+
+/**
+ * Extract phone numbers from XLSX file
+ */
+function sms_suite_parse_xlsx_phones($filepath)
+{
+    $numbers = [];
+
+    $zip = new \ZipArchive();
+    if ($zip->open($filepath) !== true) {
+        return [];
+    }
+
+    // Read shared strings (text values are stored here)
+    $sharedStrings = [];
+    $ssXml = $zip->getFromName('xl/sharedStrings.xml');
+    if ($ssXml) {
+        $xml = @simplexml_load_string($ssXml);
+        if ($xml) {
+            foreach ($xml->si as $si) {
+                $sharedStrings[] = (string)$si->t;
+            }
+        }
+    }
+
+    // Read first sheet
+    $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+    if ($sheetXml) {
+        $xml = @simplexml_load_string($sheetXml);
+        if ($xml && isset($xml->sheetData->row)) {
+            foreach ($xml->sheetData->row as $row) {
+                foreach ($row->c as $cell) {
+                    $value = '';
+                    $type = (string)($cell['t'] ?? '');
+
+                    if ($type === 's') {
+                        // Shared string reference
+                        $idx = (int)(string)$cell->v;
+                        $value = $sharedStrings[$idx] ?? '';
+                    } else {
+                        $value = (string)($cell->v ?? '');
+                    }
+
+                    if (!empty($value)) {
+                        $parsed = sms_suite_parse_phone_numbers($value);
+                        $numbers = array_merge($numbers, $parsed);
+                    }
+                }
+            }
+        }
+    }
+
+    $zip->close();
+    return $numbers;
 }
 
 /**
@@ -232,11 +448,11 @@ function sms_suite_client_dashboard($vars, $clientId, $lang)
         ->limit(5)
         ->get();
 
-    // Get active sender IDs
-    $senderIds = Capsule::table('mod_sms_sender_ids')
-        ->where('client_id', $clientId)
-        ->where('status', 'active')
-        ->get();
+    // Get all active sender IDs (merged from all sources)
+    $senderIds = sms_suite_get_client_sender_ids_merged($clientId);
+
+    // Get client currency
+    $currency = sms_suite_get_client_currency($clientId);
 
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['client_dashboard'],
@@ -254,6 +470,8 @@ function sms_suite_client_dashboard($vars, $clientId, $lang)
             'balance' => $balance,
             'recent_messages' => $recentMessages,
             'sender_ids' => $senderIds,
+            'currency_symbol' => $currency['symbol'],
+            'currency_code' => $currency['code'],
         ],
     ];
 }
@@ -278,34 +496,73 @@ function sms_suite_client_send($vars, $clientId, $lang)
         if (!SecurityHelper::verifyCsrfPost()) {
             $error = 'Security token invalid. Please refresh and try again.';
         } else {
-            $to = trim($_POST['to'] ?? '');
+            $toRaw = trim($_POST['to'] ?? '');
             $message = trim($_POST['message'] ?? '');
             $channel = $_POST['channel'] ?? 'sms';
             $senderId = $_POST['sender_id'] ?? null;
             $gatewayId = !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null;
 
+            // Collect numbers from textarea input
+            $numbers = sms_suite_parse_phone_numbers($toRaw);
+
+            // Collect numbers from file upload (CSV, TXT, XLSX)
+            if (!empty($_FILES['recipients_file']) && $_FILES['recipients_file']['error'] === UPLOAD_ERR_OK) {
+                $fileNumbers = sms_suite_parse_recipients_file($_FILES['recipients_file']);
+                $numbers = array_merge($numbers, $fileNumbers);
+            }
+
+            // Deduplicate
+            $numbers = array_unique($numbers);
+
             // Validate
-            if (empty($to)) {
+            if (empty($numbers)) {
                 $error = $lang['error_recipient_required'];
             } elseif (empty($message)) {
                 $error = $lang['error_message_required'];
+            } elseif (count($numbers) > 10000) {
+                $error = 'Maximum 10,000 recipients per send. Use Campaigns for larger lists.';
             } else {
-                // Send message
-                $result = \SMSSuite\Core\MessageService::send($clientId, $to, $message, [
-                    'channel' => $channel,
-                    'sender_id' => $senderId,
-                    'gateway_id' => $gatewayId,
-                    'send_now' => true,
-                ]);
+                $sent = 0;
+                $failed = 0;
+                $errors = [];
 
-                if ($result['success']) {
-                    $success = $lang['message_sent'];
-                    $segmentInfo = [
-                        'segments' => $result['segments'] ?? 1,
-                        'encoding' => $result['encoding'] ?? 'gsm7',
-                    ];
+                foreach ($numbers as $to) {
+                    $result = \SMSSuite\Core\MessageService::send($clientId, $to, $message, [
+                        'channel' => $channel,
+                        'sender_id' => $senderId,
+                        'gateway_id' => $gatewayId,
+                        'send_now' => true,
+                    ]);
+
+                    if ($result['success']) {
+                        $sent++;
+                        if (!$segmentInfo) {
+                            $segmentInfo = [
+                                'segments' => $result['segments'] ?? 1,
+                                'encoding' => $result['encoding'] ?? 'gsm7',
+                            ];
+                        }
+                    } else {
+                        $failed++;
+                        $errMsg = $result['error'] ?? 'Unknown error';
+                        if (!isset($errors[$errMsg])) {
+                            $errors[$errMsg] = 0;
+                        }
+                        $errors[$errMsg]++;
+                    }
+                }
+
+                if ($sent > 0) {
+                    $success = $sent . ' message' . ($sent > 1 ? 's' : '') . ' sent successfully.';
+                    if ($failed > 0) {
+                        $success .= ' ' . $failed . ' failed.';
+                    }
                 } else {
-                    $error = $result['error'] ?? $lang['message_failed'];
+                    $error = 'All ' . $failed . ' message(s) failed.';
+                    $firstError = array_key_first($errors);
+                    if ($firstError) {
+                        $error .= ' Error: ' . $firstError;
+                    }
                 }
             }
         }
@@ -317,17 +574,22 @@ function sms_suite_client_send($vars, $clientId, $lang)
         ->orderBy('name')
         ->get();
 
-    // Get client's sender IDs
-    $senderIds = Capsule::table('mod_sms_sender_ids')
-        ->where('client_id', $clientId)
-        ->where('status', 'active')
-        ->orderBy('sender_id')
-        ->get();
+    // Get all active sender IDs (merged from all sources)
+    $senderIds = sms_suite_get_client_sender_ids_merged($clientId);
 
     // Get client settings
     $settings = Capsule::table('mod_sms_settings')
         ->where('client_id', $clientId)
         ->first();
+
+    // Get wallet balance
+    $wallet = Capsule::table('mod_sms_wallet')
+        ->where('client_id', $clientId)
+        ->first();
+    $balance = $wallet ? $wallet->balance : 0;
+
+    // Get client currency
+    $currency = sms_suite_get_client_currency($clientId);
 
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['menu_send_sms'],
@@ -343,10 +605,13 @@ function sms_suite_client_send($vars, $clientId, $lang)
             'gateways' => $gateways,
             'sender_ids' => $senderIds,
             'settings' => $settings,
+            'balance' => $balance,
             'success' => $success,
             'error' => $error,
             'segment_info' => $segmentInfo,
             'posted' => $_POST,
+            'currency_symbol' => $currency['symbol'],
+            'currency_code' => $currency['code'],
             'csrf_token' => SecurityHelper::getCsrfToken(),
         ],
     ];
@@ -377,6 +642,7 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
                 $recipients = preg_split('/[\n,]+/', $_POST['recipients']);
                 $recipients = array_map('trim', $recipients);
                 $recipients = array_filter($recipients);
+                $recipients = array_values($recipients);
             }
 
             $result = \SMSSuite\Campaigns\CampaignService::create($clientId, [
@@ -387,6 +653,8 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
                 'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
                 'recipient_type' => $_POST['recipient_type'] ?? 'manual',
                 'recipient_group_id' => !empty($_POST['group_id']) ? (int)$_POST['group_id'] : null,
+                'segment_id' => !empty($_POST['segment_id']) ? (int)$_POST['segment_id'] : null,
+                'recipient_tag_id' => !empty($_POST['recipient_tag_id']) ? (int)$_POST['recipient_tag_id'] : null,
                 'recipients' => $recipients,
                 'scheduled_at' => !empty($_POST['scheduled_at']) ? $_POST['scheduled_at'] : null,
             ]);
@@ -394,11 +662,62 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
             if ($result['success']) {
                 // If send now is checked, schedule immediately
                 if (!empty($_POST['send_now'])) {
-                    \SMSSuite\Campaigns\CampaignService::schedule($result['id'], $clientId);
+                    $schedResult = \SMSSuite\Campaigns\CampaignService::schedule($result['id'], $clientId);
+                    if (!empty($schedResult['success'])) {
+                        $success = 'Campaign created and queued for sending (' . $schedResult['recipients'] . ' recipients).';
+                    } else {
+                        $error = 'Campaign created but could not be sent: ' . ($schedResult['error'] ?? 'Unknown error');
+                    }
+                } else {
+                    $success = $lang['campaign_saved'] ?? 'Campaign saved as draft.';
                 }
-                $success = $lang['campaign_saved'];
             } else {
                 $error = $result['error'];
+            }
+        }
+
+        // Update campaign
+        elseif (isset($_POST['update_campaign'])) {
+            $campaignId = (int)$_POST['campaign_id'];
+            $recipients = [];
+            if (!empty($_POST['recipients'])) {
+                $recipients = preg_split('/[\n,]+/', $_POST['recipients']);
+                $recipients = array_map('trim', $recipients);
+                $recipients = array_filter($recipients);
+                $recipients = array_values($recipients);
+            }
+
+            $updateData = [
+                'name' => $_POST['name'] ?? '',
+                'message' => $_POST['message'] ?? '',
+                'channel' => $_POST['channel'] ?? 'sms',
+                'sender_id' => $_POST['sender_id'] ?? null,
+                'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
+                'recipient_type' => $_POST['recipient_type'] ?? 'manual',
+                'recipient_group_id' => !empty($_POST['group_id']) ? (int)$_POST['group_id'] : null,
+                'segment_id' => !empty($_POST['segment_id']) ? (int)$_POST['segment_id'] : null,
+                'recipient_tag_id' => !empty($_POST['recipient_tag_id']) ? (int)$_POST['recipient_tag_id'] : null,
+                'recipients' => $recipients,
+            ];
+
+            $result = \SMSSuite\Campaigns\CampaignService::update($campaignId, $clientId, $updateData);
+
+            if ($result['success']) {
+                $success = 'Campaign updated successfully.';
+            } else {
+                $error = $result['error'];
+            }
+        }
+
+        // Send campaign (schedule a draft)
+        elseif (isset($_POST['send_campaign'])) {
+            $campaignId = (int)$_POST['campaign_id'];
+            $scheduledAt = !empty($_POST['scheduled_at']) ? $_POST['scheduled_at'] : null;
+            $schedResult = \SMSSuite\Campaigns\CampaignService::schedule($campaignId, $clientId, $scheduledAt);
+            if (!empty($schedResult['success'])) {
+                $success = 'Campaign queued for sending (' . $schedResult['recipients'] . ' recipients).';
+            } else {
+                $error = $schedResult['error'] ?? 'Failed to send campaign.';
             }
         }
 
@@ -406,7 +725,7 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
         elseif (isset($_POST['pause_campaign'])) {
             $campaignId = (int)$_POST['campaign_id'];
             if (\SMSSuite\Campaigns\CampaignService::pause($campaignId, $clientId)) {
-                $success = $lang['campaign_paused_msg'];
+                $success = $lang['campaign_paused_msg'] ?? 'Campaign paused.';
             }
         }
 
@@ -414,7 +733,7 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
         elseif (isset($_POST['resume_campaign'])) {
             $campaignId = (int)$_POST['campaign_id'];
             if (\SMSSuite\Campaigns\CampaignService::resume($campaignId, $clientId)) {
-                $success = $lang['campaign_started'];
+                $success = $lang['campaign_started'] ?? 'Campaign resumed.';
             }
         }
 
@@ -422,13 +741,94 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
         elseif (isset($_POST['cancel_campaign'])) {
             $campaignId = (int)$_POST['campaign_id'];
             if (\SMSSuite\Campaigns\CampaignService::cancel($campaignId, $clientId)) {
-                $success = $lang['campaign_cancelled_msg'];
+                $success = $lang['campaign_cancelled_msg'] ?? 'Campaign cancelled.';
+            }
+        }
+
+        // Delete campaign (draft only)
+        elseif (isset($_POST['delete_campaign'])) {
+            $campaignId = (int)$_POST['campaign_id'];
+            $campaign = Capsule::table('mod_sms_campaigns')
+                ->where('id', $campaignId)
+                ->where('client_id', $clientId)
+                ->first();
+            if ($campaign && in_array($campaign->status, ['draft', 'cancelled'])) {
+                Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->delete();
+                $success = 'Campaign deleted.';
+            } else {
+                $error = 'Only draft or cancelled campaigns can be deleted.';
             }
         }
     }
 
+    // Check if viewing a specific campaign
+    if (!empty($_GET['campaign_id'])) {
+        return sms_suite_client_campaign_detail($vars, $clientId, $lang, (int)$_GET['campaign_id'], $success, $error);
+    }
+
     // Get campaigns
     $campaignData = \SMSSuite\Campaigns\CampaignService::getCampaigns($clientId);
+
+    // Get groups for recipient selection
+    $groups = \SMSSuite\Contacts\ContactService::getGroups($clientId);
+
+    // Get segments and tags for recipient selection
+    require_once __DIR__ . '/../lib/Campaigns/AdvancedCampaignService.php';
+    require_once __DIR__ . '/../lib/Contacts/TagService.php';
+    $segments = \SMSSuite\Campaigns\AdvancedCampaignService::getSegments($clientId);
+    $tags = \SMSSuite\Contacts\TagService::getTags($clientId);
+
+    // Get gateways
+    $gateways = Capsule::table('mod_sms_gateways')
+        ->where('status', 1)
+        ->orderBy('name')
+        ->get();
+
+    // Get all active sender IDs (merged from all sources)
+    $senderIds = sms_suite_get_client_sender_ids_merged($clientId);
+
+    return [
+        'pagetitle' => $lang['module_name'] . ' - ' . ($lang['campaigns'] ?? 'Campaigns'),
+        'breadcrumb' => [
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=campaigns' => $lang['campaigns'] ?? 'Campaigns',
+        ],
+        'templatefile' => 'templates/client/campaigns',
+        'vars' => [
+            'modulelink' => $modulelink,
+            'lang' => $lang,
+            'client_id' => $clientId,
+            'campaigns' => $campaignData['campaigns'],
+            'groups' => $groups,
+            'segments' => $segments,
+            'tags' => $tags,
+            'gateways' => $gateways,
+            'sender_ids' => $senderIds,
+            'success' => $success,
+            'error' => $error,
+            'csrf_token' => SecurityHelper::getCsrfToken(),
+        ],
+    ];
+}
+
+/**
+ * Campaign detail/edit view
+ */
+function sms_suite_client_campaign_detail($vars, $clientId, $lang, $campaignId, $success = null, $error = null)
+{
+    require_once __DIR__ . '/../lib/Campaigns/CampaignService.php';
+    require_once __DIR__ . '/../lib/Contacts/ContactService.php';
+
+    $modulelink = $vars['modulelink'];
+
+    $campaign = \SMSSuite\Campaigns\CampaignService::getCampaign($campaignId, $clientId);
+    if (!$campaign) {
+        // Redirect to campaigns list
+        return sms_suite_client_campaigns($vars, $clientId, $lang);
+    }
+
+    // Decode recipient list
+    $recipientList = json_decode($campaign->recipient_list ?? '[]', true) ?: [];
 
     // Get groups for recipient selection
     $groups = \SMSSuite\Contacts\ContactService::getGroups($clientId);
@@ -440,27 +840,38 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
         ->get();
 
     // Get sender IDs
-    $senderIds = Capsule::table('mod_sms_sender_ids')
-        ->where('client_id', $clientId)
-        ->where('status', 'active')
-        ->orderBy('sender_id')
-        ->get();
+    $senderIds = sms_suite_get_client_sender_ids_merged($clientId);
+
+    // Get campaign messages (sent log)
+    $messages = Capsule::table('mod_sms_messages')
+        ->where('campaign_id', $campaignId)
+        ->orderBy('created_at', 'desc')
+        ->limit(100)
+        ->get()
+        ->toArray();
+
+    $isEditable = in_array($campaign->status, ['draft', 'scheduled']);
 
     return [
-        'pagetitle' => $lang['module_name'] . ' - ' . $lang['campaigns'],
+        'pagetitle' => $lang['module_name'] . ' - ' . $campaign->name,
         'breadcrumb' => [
             $modulelink => $lang['module_name'],
-            $modulelink . '&action=campaigns' => $lang['campaigns'],
+            $modulelink . '&action=campaigns' => $lang['campaigns'] ?? 'Campaigns',
+            '' => $campaign->name,
         ],
-        'templatefile' => 'templates/client/campaigns',
+        'templatefile' => 'templates/client/campaign_detail',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
             'client_id' => $clientId,
-            'campaigns' => $campaignData['campaigns'],
+            'campaign' => $campaign,
+            'recipient_list' => $recipientList,
+            'recipients_text' => implode("\n", $recipientList),
+            'is_editable' => $isEditable,
             'groups' => $groups,
             'gateways' => $gateways,
             'sender_ids' => $senderIds,
+            'messages' => $messages,
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),
@@ -512,18 +923,83 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
             }
         }
 
-        // Import CSV with security validation
+        // Import contacts (file upload or paste)
+        elseif (isset($_POST['import_contacts'])) {
+            $groupId = !empty($_POST['import_group_id']) ? (int)$_POST['import_group_id'] : null;
+            $imported = 0;
+            $skipped = 0;
+
+            // Handle file upload
+            if (!empty($_FILES['import_file']['tmp_name'])) {
+                $file = $_FILES['import_file'];
+                $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+                if ($ext === 'xlsx') {
+                    // Parse Excel
+                    $phones = sms_suite_parse_recipients_file($file);
+                    foreach ($phones as $phone) {
+                        $res = \SMSSuite\Contacts\ContactService::createContact($clientId, [
+                            'phone' => $phone, 'group_id' => $groupId,
+                        ]);
+                        if (!empty($res['success'])) { $imported++; } else { $skipped++; }
+                    }
+                } else {
+                    // CSV/TXT
+                    $csvData = file_get_contents($file['tmp_name']);
+                    $result = \SMSSuite\Contacts\ContactService::importCsv($clientId, $csvData, $groupId);
+                    $imported = $result['imported'];
+                    $skipped = $result['skipped'];
+                }
+            }
+
+            // Handle pasted numbers
+            if (!empty($_POST['paste_numbers'])) {
+                $phones = sms_suite_parse_phone_numbers($_POST['paste_numbers']);
+                foreach ($phones as $phone) {
+                    $res = \SMSSuite\Contacts\ContactService::createContact($clientId, [
+                        'phone' => $phone, 'group_id' => $groupId,
+                    ]);
+                    if (!empty($res['success'])) { $imported++; } else { $skipped++; }
+                }
+            }
+
+            if ($imported > 0 || $skipped > 0) {
+                $success = sprintf('%d contacts imported, %d skipped (duplicates/invalid).', $imported, $skipped);
+            } else {
+                $error = 'No contacts to import. Please upload a file or paste phone numbers.';
+            }
+        }
+
+        // Legacy import CSV support
         elseif (isset($_POST['import_csv']) && isset($_FILES['csv_file'])) {
             $file = $_FILES['csv_file'];
-            $validation = SecurityHelper::validateCsvUpload($file);
+            $csvData = file_get_contents($file['tmp_name']);
+            $groupId = !empty($_POST['import_group_id']) ? (int)$_POST['import_group_id'] : null;
+            $result = \SMSSuite\Contacts\ContactService::importCsv($clientId, $csvData, $groupId);
+            $success = sprintf('%d contacts imported, %d skipped.', $result['imported'], $result['skipped']);
+        }
 
-            if (!$validation['valid']) {
-                $error = $validation['error'];
+        // Assign tag to contact
+        elseif (isset($_POST['assign_tag'])) {
+            require_once __DIR__ . '/../lib/Contacts/TagService.php';
+            $contactId = (int)$_POST['contact_id'];
+            $tagId = (int)$_POST['tag_id'];
+            if (\SMSSuite\Contacts\TagService::assignTag($contactId, $tagId)) {
+                $success = $lang['tag_assigned'] ?? 'Tag assigned successfully.';
             } else {
-                $csvData = file_get_contents($file['tmp_name']);
-                $groupId = !empty($_POST['import_group_id']) ? (int)$_POST['import_group_id'] : null;
-                $result = \SMSSuite\Contacts\ContactService::importCsv($clientId, $csvData, $groupId);
-                $success = sprintf('%d contacts imported, %d skipped.', $result['imported'], $result['skipped']);
+                $error = 'Failed to assign tag.';
+            }
+        }
+
+        // Remove tag from contact
+        elseif (isset($_POST['remove_tag'])) {
+            require_once __DIR__ . '/../lib/Contacts/TagService.php';
+            $contactId = (int)$_POST['contact_id'];
+            $tagId = (int)$_POST['tag_id'];
+            if (\SMSSuite\Contacts\TagService::removeTag($contactId, $tagId)) {
+                $success = $lang['tag_removed'] ?? 'Tag removed successfully.';
+            } else {
+                $error = 'Failed to remove tag.';
             }
         }
 
@@ -552,6 +1028,18 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
     $contactData = \SMSSuite\Contacts\ContactService::getContacts($clientId, $filters, $limit, $offset);
     $groups = \SMSSuite\Contacts\ContactService::getGroups($clientId);
 
+    // Load tags for contact tag display
+    require_once __DIR__ . '/../lib/Contacts/TagService.php';
+    $allTags = \SMSSuite\Contacts\TagService::getTags($clientId);
+
+    // Build contact_tags map: contact_id => [tag objects]
+    $contactTags = [];
+    if (!empty($contactData['contacts'])) {
+        foreach ($contactData['contacts'] as $contact) {
+            $contactTags[$contact->id] = \SMSSuite\Contacts\TagService::getContactTags($contact->id);
+        }
+    }
+
     $totalPages = ceil($contactData['total'] / $limit);
 
     return [
@@ -567,6 +1055,8 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
             'client_id' => $clientId,
             'contacts' => $contactData['contacts'],
             'groups' => $groups,
+            'all_tags' => $allTags,
+            'contact_tags' => $contactTags,
             'total' => $contactData['total'],
             'page' => $page,
             'total_pages' => $totalPages,
@@ -579,10 +1069,12 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
 }
 
 /**
- * Contact groups page (stub)
+ * Contact groups page
  */
 function sms_suite_client_contact_groups($vars, $clientId, $lang)
 {
+    require_once __DIR__ . '/../lib/Contacts/ContactService.php';
+
     $modulelink = $vars['modulelink'];
     $success = null;
     $error = null;
@@ -637,8 +1129,6 @@ function sms_suite_client_contact_groups($vars, $clientId, $lang)
         // Delete group
         elseif (isset($_POST['delete_group'])) {
             $groupId = (int)($_POST['group_id'] ?? 0);
-
-            // Check if group has contacts
             $contactCount = Capsule::table('mod_sms_contacts')
                 ->where('group_id', $groupId)
                 ->where('client_id', $clientId)
@@ -654,6 +1144,74 @@ function sms_suite_client_contact_groups($vars, $clientId, $lang)
                 $success = 'Contact group deleted successfully.';
             }
         }
+        // Import contacts to group
+        elseif (isset($_POST['import_to_group'])) {
+            $groupId = (int)($_POST['group_id'] ?? 0);
+            $imported = 0;
+            $skipped = 0;
+
+            // File upload
+            if (!empty($_FILES['import_file']['tmp_name'])) {
+                $file = $_FILES['import_file'];
+                $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+                if ($ext === 'xlsx') {
+                    $phones = sms_suite_parse_recipients_file($file);
+                    foreach ($phones as $phone) {
+                        $res = \SMSSuite\Contacts\ContactService::createContact($clientId, [
+                            'phone' => $phone, 'group_id' => $groupId,
+                        ]);
+                        if (!empty($res['success'])) { $imported++; } else { $skipped++; }
+                    }
+                } else {
+                    $csvData = file_get_contents($file['tmp_name']);
+                    $result = \SMSSuite\Contacts\ContactService::importCsv($clientId, $csvData, $groupId);
+                    $imported = $result['imported'];
+                    $skipped = $result['skipped'];
+                }
+            }
+
+            // Pasted numbers
+            if (!empty($_POST['paste_numbers'])) {
+                $phones = sms_suite_parse_phone_numbers($_POST['paste_numbers']);
+                foreach ($phones as $phone) {
+                    $res = \SMSSuite\Contacts\ContactService::createContact($clientId, [
+                        'phone' => $phone, 'group_id' => $groupId,
+                    ]);
+                    if (!empty($res['success'])) { $imported++; } else { $skipped++; }
+                }
+            }
+
+            if ($imported > 0 || $skipped > 0) {
+                $success = sprintf('%d contacts imported to group, %d skipped.', $imported, $skipped);
+            } else {
+                $error = 'No contacts to import.';
+            }
+        }
+        // Add existing contact to group
+        elseif (isset($_POST['add_contact_to_group'])) {
+            $groupId = (int)($_POST['group_id'] ?? 0);
+            $contactId = (int)($_POST['contact_id'] ?? 0);
+            Capsule::table('mod_sms_contacts')
+                ->where('id', $contactId)
+                ->where('client_id', $clientId)
+                ->update(['group_id' => $groupId, 'updated_at' => date('Y-m-d H:i:s')]);
+            $success = 'Contact added to group.';
+        }
+        // Remove contact from group
+        elseif (isset($_POST['remove_from_group'])) {
+            $contactId = (int)($_POST['contact_id'] ?? 0);
+            Capsule::table('mod_sms_contacts')
+                ->where('id', $contactId)
+                ->where('client_id', $clientId)
+                ->update(['group_id' => null, 'updated_at' => date('Y-m-d H:i:s')]);
+            $success = 'Contact removed from group.';
+        }
+    }
+
+    // Check if viewing a specific group
+    if (!empty($_GET['group_id'])) {
+        return sms_suite_client_group_detail($vars, $clientId, $lang, (int)$_GET['group_id'], $success, $error);
     }
 
     // Get groups with contact counts
@@ -665,10 +1223,10 @@ function sms_suite_client_contact_groups($vars, $clientId, $lang)
         ->get();
 
     return [
-        'pagetitle' => $lang['module_name'] . ' - ' . $lang['contact_groups'],
+        'pagetitle' => $lang['module_name'] . ' - ' . ($lang['contact_groups'] ?? 'Groups'),
         'breadcrumb' => [
             $modulelink => $lang['module_name'],
-            $modulelink . '&action=contact_groups' => $lang['contact_groups'],
+            $modulelink . '&action=contact_groups' => $lang['contact_groups'] ?? 'Groups',
         ],
         'templatefile' => 'templates/client/contact_groups',
         'vars' => [
@@ -676,6 +1234,238 @@ function sms_suite_client_contact_groups($vars, $clientId, $lang)
             'lang' => $lang,
             'client_id' => $clientId,
             'groups' => $groups,
+            'success' => $success,
+            'error' => $error,
+            'csrf_token' => SecurityHelper::getCsrfToken(),
+        ],
+    ];
+}
+
+/**
+ * Tags management page
+ */
+function sms_suite_client_tags($vars, $clientId, $lang)
+{
+    require_once __DIR__ . '/../lib/Contacts/TagService.php';
+
+    $modulelink = $vars['modulelink'];
+    $success = null;
+    $error = null;
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Security token invalid. Please refresh and try again.';
+        }
+        // Create tag
+        elseif (isset($_POST['create_tag'])) {
+            $result = \SMSSuite\Contacts\TagService::createTag($clientId, [
+                'name' => $_POST['tag_name'] ?? '',
+                'color' => $_POST['tag_color'] ?? '#667eea',
+                'description' => $_POST['description'] ?? '',
+            ]);
+            if ($result['success']) {
+                $success = $lang['tag_saved'] ?? 'Tag created successfully.';
+            } else {
+                $error = $result['error'];
+            }
+        }
+        // Update tag
+        elseif (isset($_POST['update_tag'])) {
+            $tagId = (int)($_POST['tag_id'] ?? 0);
+            $result = \SMSSuite\Contacts\TagService::updateTag($tagId, $clientId, [
+                'name' => $_POST['tag_name'] ?? '',
+                'color' => $_POST['tag_color'] ?? '#667eea',
+                'description' => $_POST['description'] ?? '',
+            ]);
+            if ($result['success']) {
+                $success = $lang['tag_saved'] ?? 'Tag updated successfully.';
+            } else {
+                $error = $result['error'];
+            }
+        }
+        // Delete tag
+        elseif (isset($_POST['delete_tag'])) {
+            $tagId = (int)($_POST['tag_id'] ?? 0);
+            if (\SMSSuite\Contacts\TagService::deleteTag($tagId, $clientId)) {
+                $success = $lang['tag_deleted'] ?? 'Tag deleted successfully.';
+            } else {
+                $error = 'Failed to delete tag.';
+            }
+        }
+    }
+
+    $tags = \SMSSuite\Contacts\TagService::getTags($clientId);
+
+    return [
+        'pagetitle' => $lang['module_name'] . ' - ' . ($lang['tags'] ?? 'Tags'),
+        'breadcrumb' => [
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=tags' => $lang['tags'] ?? 'Tags',
+        ],
+        'templatefile' => 'templates/client/tags',
+        'vars' => [
+            'modulelink' => $modulelink,
+            'lang' => $lang,
+            'client_id' => $clientId,
+            'tags' => $tags,
+            'success' => $success,
+            'error' => $error,
+            'csrf_token' => SecurityHelper::getCsrfToken(),
+        ],
+    ];
+}
+
+/**
+ * Segments management page
+ */
+function sms_suite_client_segments($vars, $clientId, $lang)
+{
+    require_once __DIR__ . '/../lib/Campaigns/AdvancedCampaignService.php';
+    require_once __DIR__ . '/../lib/Contacts/TagService.php';
+    require_once __DIR__ . '/../lib/Contacts/ContactService.php';
+
+    $modulelink = $vars['modulelink'];
+    $success = null;
+    $error = null;
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Security token invalid. Please refresh and try again.';
+        }
+        // Create segment
+        elseif (isset($_POST['create_segment'])) {
+            $conditions = [];
+            if (!empty($_POST['conditions']) && is_array($_POST['conditions'])) {
+                foreach ($_POST['conditions'] as $cond) {
+                    if (!empty($cond['field']) && !empty($cond['operator'])) {
+                        $conditions[] = [
+                            'field' => $cond['field'],
+                            'operator' => $cond['operator'],
+                            'value' => $cond['value'] ?? '',
+                            'logic' => 'AND',
+                        ];
+                    }
+                }
+            }
+
+            $result = \SMSSuite\Campaigns\AdvancedCampaignService::createSegment($clientId, [
+                'name' => $_POST['segment_name'] ?? '',
+                'description' => $_POST['description'] ?? '',
+                'match_type' => $_POST['match_type'] ?? 'all',
+                'conditions' => $conditions,
+            ]);
+            if ($result['success']) {
+                $success = $lang['segment_saved'] ?? 'Segment created successfully.';
+            } else {
+                $error = $result['error'];
+            }
+        }
+        // Delete segment
+        elseif (isset($_POST['delete_segment'])) {
+            $segmentId = (int)($_POST['segment_id'] ?? 0);
+            $segment = Capsule::table('mod_sms_segments')
+                ->where('id', $segmentId)
+                ->where('client_id', $clientId)
+                ->first();
+            if ($segment) {
+                Capsule::table('mod_sms_segment_conditions')->where('segment_id', $segmentId)->delete();
+                Capsule::table('mod_sms_segments')->where('id', $segmentId)->delete();
+                $success = $lang['segment_deleted'] ?? 'Segment deleted successfully.';
+            } else {
+                $error = 'Segment not found.';
+            }
+        }
+        // Recalculate segment count
+        elseif (isset($_POST['recalculate_segment'])) {
+            $segmentId = (int)($_POST['segment_id'] ?? 0);
+            $segment = Capsule::table('mod_sms_segments')
+                ->where('id', $segmentId)
+                ->where('client_id', $clientId)
+                ->first();
+            if ($segment) {
+                \SMSSuite\Campaigns\AdvancedCampaignService::calculateSegmentCount($segmentId);
+                $success = $lang['segment_recalculated'] ?? 'Segment count recalculated.';
+            }
+        }
+    }
+
+    $segments = \SMSSuite\Campaigns\AdvancedCampaignService::getSegments($clientId);
+    $tags = \SMSSuite\Contacts\TagService::getTags($clientId);
+    $groups = \SMSSuite\Contacts\ContactService::getGroups($clientId);
+
+    return [
+        'pagetitle' => $lang['module_name'] . ' - ' . ($lang['segments'] ?? 'Segments'),
+        'breadcrumb' => [
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=segments' => $lang['segments'] ?? 'Segments',
+        ],
+        'templatefile' => 'templates/client/segments',
+        'vars' => [
+            'modulelink' => $modulelink,
+            'lang' => $lang,
+            'client_id' => $clientId,
+            'segments' => $segments,
+            'tags' => $tags,
+            'tags_json' => json_encode(array_values($tags)),
+            'groups' => $groups,
+            'groups_json' => json_encode(array_values($groups)),
+            'success' => $success,
+            'error' => $error,
+            'csrf_token' => SecurityHelper::getCsrfToken(),
+        ],
+    ];
+}
+
+/**
+ * Group detail view with contacts, import, and management
+ */
+function sms_suite_client_group_detail($vars, $clientId, $lang, $groupId, $success = null, $error = null)
+{
+    $modulelink = $vars['modulelink'];
+
+    $group = Capsule::table('mod_sms_contact_groups')
+        ->where('id', $groupId)
+        ->where('client_id', $clientId)
+        ->first();
+
+    if (!$group) {
+        return sms_suite_client_contact_groups($vars, $clientId, $lang);
+    }
+
+    // Get contacts in this group
+    $contacts = Capsule::table('mod_sms_contacts')
+        ->where('group_id', $groupId)
+        ->where('client_id', $clientId)
+        ->orderBy('created_at', 'desc')
+        ->get()
+        ->toArray();
+
+    // Get contacts NOT in this group (for "add existing" feature)
+    $ungroupedContacts = Capsule::table('mod_sms_contacts')
+        ->where('client_id', $clientId)
+        ->where(function ($q) use ($groupId) {
+            $q->whereNull('group_id')->orWhere('group_id', '!=', $groupId);
+        })
+        ->orderBy('phone')
+        ->limit(200)
+        ->get()
+        ->toArray();
+
+    return [
+        'pagetitle' => $lang['module_name'] . ' - ' . $group->name,
+        'breadcrumb' => [
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=contact_groups' => $lang['contact_groups'] ?? 'Groups',
+            '' => $group->name,
+        ],
+        'templatefile' => 'templates/client/group_detail',
+        'vars' => [
+            'modulelink' => $modulelink,
+            'lang' => $lang,
+            'client_id' => $clientId,
+            'group' => $group,
+            'contacts' => $contacts,
+            'ungrouped_contacts' => $ungroupedContacts,
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),
@@ -750,12 +1540,51 @@ function sms_suite_client_sender_ids($vars, $clientId, $lang)
         }
     }
 
-    // Get sender IDs
+    // Get client-requested sender IDs (all statuses for display)
     $senderIds = \SMSSuite\Core\SenderIdService::getClientSenderIds($clientId);
+
+    // Get admin-assigned sender IDs from mod_sms_client_sender_ids
+    $assignedIds = Capsule::table('mod_sms_client_sender_ids')
+        ->where('client_id', $clientId)
+        ->orderBy('sender_id')
+        ->get();
+
+    // Get legacy assigned_sender_id from settings
+    $settings = Capsule::table('mod_sms_settings')
+        ->where('client_id', $clientId)
+        ->first();
+
+    // Build list of admin-assigned IDs (deduplicated)
+    $adminSenderIds = [];
+    $seenAdmin = [];
+
+    foreach ($assignedIds as $a) {
+        $key = strtolower($a->sender_id);
+        if (!isset($seenAdmin[$key])) {
+            $seenAdmin[$key] = true;
+            $adminSenderIds[] = $a;
+        }
+    }
+
+    if ($settings && !empty($settings->assigned_sender_id)) {
+        $key = strtolower($settings->assigned_sender_id);
+        if (!isset($seenAdmin[$key])) {
+            $adminSenderIds[] = (object)[
+                'id' => 0,
+                'sender_id' => $settings->assigned_sender_id,
+                'type' => 'alphanumeric',
+                'status' => 'active',
+                'created_at' => $settings->created_at ?? null,
+            ];
+        }
+    }
 
     // Get pricing
     $alphaPrice = \SMSSuite\Core\SenderIdService::getPrice('alphanumeric');
     $numericPrice = \SMSSuite\Core\SenderIdService::getPrice('numeric');
+
+    // Get client currency
+    $currency = sms_suite_get_client_currency($clientId);
 
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['sender_ids'],
@@ -769,8 +1598,11 @@ function sms_suite_client_sender_ids($vars, $clientId, $lang)
             'lang' => $lang,
             'client_id' => $clientId,
             'sender_ids' => $senderIds,
+            'admin_sender_ids' => $adminSenderIds,
             'alpha_price' => $alphaPrice,
             'numeric_price' => $numericPrice,
+            'currency_symbol' => $currency['symbol'],
+            'currency_code' => $currency['code'],
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),
@@ -1292,6 +2124,9 @@ function sms_suite_client_reports($vars, $clientId, $lang)
     $dailyStats = \SMSSuite\Reports\ReportService::getDailyStats($clientId, $startDate, $endDate);
     $topDestinations = \SMSSuite\Reports\ReportService::getTopDestinations($clientId, $startDate, $endDate);
 
+    // Get client currency
+    $currency = sms_suite_get_client_currency($clientId);
+
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['reports'],
         'breadcrumb' => [
@@ -1308,6 +2143,8 @@ function sms_suite_client_reports($vars, $clientId, $lang)
             'top_destinations' => $topDestinations,
             'start_date' => $startDate,
             'end_date' => $endDate,
+            'currency_symbol' => $currency['symbol'],
+            'currency_code' => $currency['code'],
         ],
     ];
 }

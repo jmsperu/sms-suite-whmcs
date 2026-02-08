@@ -12,14 +12,16 @@
         <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
         <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
         <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
+        <li><a href="{$modulelink}&action=tags">{$lang.tags|default:'Tags'}</a></li>
+        <li><a href="{$modulelink}&action=segments">{$lang.segments|default:'Segments'}</a></li>
         <li class="active"><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
     </ul>
 
-    <div class="panel panel-default">
-        <div class="panel-heading">
-            <h3 class="panel-title"><i class="fas fa-list"></i> {$lang.message_log}</h3>
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-list"></i> {$lang.message_log}</h3>
         </div>
-        <div class="panel-body">
+        <div class="card-body">
             {if $messages|count > 0}
             <div class="table-responsive">
                 <table class="table table-striped">
@@ -41,13 +43,13 @@
                             <td title="{$msg->message|escape:'html'}">{$msg->message|truncate:50}</td>
                             <td>
                                 {if $msg->status == 'delivered'}
-                                    <span class="label label-success">{$msg->status|ucfirst}</span>
+                                    <span class="badge badge-success">{$msg->status|ucfirst}</span>
                                 {elseif $msg->status == 'failed' || $msg->status == 'rejected'}
-                                    <span class="label label-danger">{$msg->status|ucfirst}</span>
+                                    <span class="badge badge-danger">{$msg->status|ucfirst}</span>
                                 {elseif $msg->status == 'queued' || $msg->status == 'sending'}
-                                    <span class="label label-warning">{$msg->status|ucfirst}</span>
+                                    <span class="badge badge-warning">{$msg->status|ucfirst}</span>
                                 {else}
-                                    <span class="label label-default">{$msg->status|ucfirst}</span>
+                                    <span class="badge badge-secondary">{$msg->status|ucfirst}</span>
                                 {/if}
                             </td>
                             <td>{$msg->segments}</td>

@@ -188,6 +188,8 @@ function sms_suite_drop_tables_sql()
         // Advanced campaign tables
         'mod_sms_scheduled',
         'mod_sms_recurring_log',
+        'mod_sms_contact_tags',
+        'mod_sms_tags',
         'mod_sms_segment_conditions',
         'mod_sms_segments',
         'mod_sms_link_clicks',
@@ -330,7 +332,7 @@ function sms_suite_add_performance_indexes()
     $addIndex('mod_sms_scheduled', 'idx_scheduled_status_time', ['status', 'scheduled_at']);
 
     // Drip subscribers - for processing
-    $addIndex('mod_sms_drip_subscribers', 'idx_drip_sub_status', ['status', 'next_step_at']);
+    $addIndex('mod_sms_drip_subscribers', 'idx_drip_sub_status', ['status', 'next_send_at']);
 }
 
 /**
@@ -454,58 +456,59 @@ function sms_suite_clientarea($vars)
 .sms-nav li a:hover{background:#e2e8f0;color:var(--sms-dark);text-decoration:none}
 .sms-nav li.active a{background:linear-gradient(135deg,var(--sms-primary),var(--sms-primary-end));color:#fff;border-color:transparent;box-shadow:0 2px 8px rgba(102,126,234,.35)}
 
-/* ===== Cards (panel compat) ===== */
-.panel{background:#fff;border:none;border-radius:var(--sms-radius);margin-bottom:24px;box-shadow:var(--sms-shadow);overflow:hidden}
-.panel-heading{padding:16px 20px;background:#fff;border-bottom:1px solid var(--sms-border);border-radius:var(--sms-radius) var(--sms-radius) 0 0}
-.panel-body{padding:20px}
-.panel-title{margin:0;font-size:.95rem;font-weight:600;color:var(--sms-dark)}
-.panel-footer{padding:16px 20px;background:var(--sms-light);border-top:1px solid var(--sms-border)}
-.panel-primary .panel-heading{background:linear-gradient(135deg,var(--sms-primary),var(--sms-primary-end));color:#fff;border-bottom:none}
-.panel-primary .panel-heading .panel-title{color:#fff}
-.panel-success .panel-heading{background:linear-gradient(135deg,#00c853,#00e676);color:#fff;border-bottom:none}
-.panel-success .panel-heading .panel-title{color:#fff}
-.panel-info .panel-heading{background:linear-gradient(135deg,#155dfc,#4f8cff);color:#fff;border-bottom:none}
-.panel-info .panel-heading .panel-title{color:#fff}
-.panel-warning .panel-heading{background:linear-gradient(135deg,#ff9800,#ffb74d);color:#fff;border-bottom:none}
-.panel-warning .panel-heading .panel-title{color:#fff}
-.panel-danger .panel-heading{background:linear-gradient(135deg,#ef4444,#f87171);color:#fff;border-bottom:none}
-.panel-danger .panel-heading .panel-title{color:#fff}
+/* ===== Cards ===== */
+[class*="sms-suite"] .card{background:#fff;border:none;border-radius:var(--sms-radius);margin-bottom:24px;box-shadow:var(--sms-shadow);overflow:hidden}
+[class*="sms-suite"] .card-header{padding:16px 20px;background:#fff;border-bottom:1px solid var(--sms-border)}
+[class*="sms-suite"] .card-body{padding:20px}
+[class*="sms-suite"] .card-title{margin:0;font-size:.95rem;font-weight:600;color:var(--sms-dark)}
+[class*="sms-suite"] .card-footer{padding:16px 20px;background:var(--sms-light);border-top:1px solid var(--sms-border)}
+[class*="sms-suite"] .card-header.bg-primary{background:linear-gradient(135deg,var(--sms-primary),var(--sms-primary-end))!important;border-bottom:none}
+[class*="sms-suite"] .card-header.bg-primary .card-title{color:#fff}
+[class*="sms-suite"] .card-header.bg-success{background:linear-gradient(135deg,#00c853,#00e676)!important;border-bottom:none}
+[class*="sms-suite"] .card-header.bg-success .card-title{color:#fff}
+[class*="sms-suite"] .card-header.bg-info{background:linear-gradient(135deg,#155dfc,#4f8cff)!important;border-bottom:none}
+[class*="sms-suite"] .card-header.bg-info .card-title{color:#fff}
+[class*="sms-suite"] .card-header.bg-warning{background:linear-gradient(135deg,#ff9800,#ffb74d)!important;border-bottom:none}
+[class*="sms-suite"] .card-header.bg-warning .card-title{color:#fff}
+[class*="sms-suite"] .card-header.bg-danger{background:linear-gradient(135deg,#ef4444,#f87171)!important;border-bottom:none}
+[class*="sms-suite"] .card-header.bg-danger .card-title{color:#fff}
 
-/* ===== Badges (label compat) ===== */
-.label{display:inline-block;padding:5px 12px;font-size:.75rem;font-weight:600;line-height:1.2;color:#fff;text-align:center;white-space:nowrap;vertical-align:baseline;border-radius:20px;letter-spacing:.02em}
-.label-default{background:#94a3b8;color:#fff}
-.label-primary{background:linear-gradient(135deg,var(--sms-primary),var(--sms-primary-end))}
-.label-success{background:var(--sms-success)}
-.label-info{background:var(--sms-info)}
-.label-warning{background:var(--sms-warning);color:#fff}
-.label-danger{background:var(--sms-danger)}
-
-/* ===== Badges (BS4 compat) ===== */
-.badge{padding:5px 12px;font-size:.75rem;font-weight:600;border-radius:20px}
+/* ===== Badges ===== */
+[class*="sms-suite"] .badge{display:inline-block;padding:5px 12px;font-size:.75rem;font-weight:600;line-height:1.2;color:#fff;text-align:center;white-space:nowrap;vertical-align:baseline;border-radius:20px;letter-spacing:.02em}
+[class*="sms-suite"] .badge-secondary{background:#94a3b8;color:#fff}
+[class*="sms-suite"] .badge-primary{background:linear-gradient(135deg,var(--sms-primary),var(--sms-primary-end))}
+[class*="sms-suite"] .badge-success{background:var(--sms-success)}
+[class*="sms-suite"] .badge-info{background:var(--sms-info)}
+[class*="sms-suite"] .badge-warning{background:var(--sms-warning);color:#fff}
+[class*="sms-suite"] .badge-danger{background:var(--sms-danger)}
 
 /* ===== Buttons ===== */
-.btn{border-radius:var(--sms-radius-sm);font-weight:500;transition:all .2s ease;border:none}
-.btn:focus{box-shadow:0 0 0 3px rgba(102,126,234,.25)}
-.btn-primary{background:linear-gradient(135deg,var(--sms-primary),var(--sms-primary-end));color:#fff;border:none}
-.btn-primary:hover{background:linear-gradient(135deg,#5a72d4,#6a4196);color:#fff;box-shadow:0 4px 12px rgba(102,126,234,.4)}
-.btn-success{background:linear-gradient(135deg,#00c853,#00e676);color:#fff;border:none}
-.btn-success:hover{box-shadow:0 4px 12px rgba(0,200,83,.35)}
-.btn-info{background:linear-gradient(135deg,#155dfc,#4f8cff);color:#fff;border:none}
-.btn-info:hover{box-shadow:0 4px 12px rgba(21,93,252,.35)}
-.btn-warning{background:linear-gradient(135deg,#ff9800,#ffb74d);color:#fff;border:none}
-.btn-default{color:var(--sms-dark);background:#f1f5f9;border:1px solid var(--sms-border)}
-.btn-default:hover{background:#e2e8f0;color:var(--sms-dark)}
-.btn-danger{background:linear-gradient(135deg,#ef4444,#f87171);color:#fff;border:none}
-.btn-xs{padding:4px 10px;font-size:.75rem;border-radius:6px}
-.btn-block{display:block;width:100%;margin-bottom:8px}
-.btn-lg{padding:12px 28px;font-size:1rem}
+[class*="sms-suite"] .btn{border-radius:var(--sms-radius-sm);font-weight:500;transition:all .2s ease;border:none}
+[class*="sms-suite"] .btn:focus{box-shadow:0 0 0 3px rgba(102,126,234,.25)}
+[class*="sms-suite"] .btn-primary{background:linear-gradient(135deg,var(--sms-primary),var(--sms-primary-end))!important;color:#fff!important;border:none!important}
+[class*="sms-suite"] .btn-primary:hover{background:linear-gradient(135deg,#5a72d4,#6a4196)!important;color:#fff!important;box-shadow:0 4px 12px rgba(102,126,234,.4)}
+[class*="sms-suite"] .btn-success{background:linear-gradient(135deg,#00c853,#00e676);color:#fff;border:none}
+[class*="sms-suite"] .btn-success:hover{box-shadow:0 4px 12px rgba(0,200,83,.35)}
+[class*="sms-suite"] .btn-info{background:linear-gradient(135deg,#155dfc,#4f8cff);color:#fff;border:none}
+[class*="sms-suite"] .btn-info:hover{box-shadow:0 4px 12px rgba(21,93,252,.35)}
+[class*="sms-suite"] .btn-warning{background:linear-gradient(135deg,#ff9800,#ffb74d);color:#fff;border:none}
+[class*="sms-suite"] .btn-outline-secondary{color:var(--sms-dark);background:#f1f5f9;border:1px solid var(--sms-border)}
+[class*="sms-suite"] .btn-outline-secondary:hover{background:#e2e8f0;color:var(--sms-dark)}
+[class*="sms-suite"] .btn-danger{background:linear-gradient(135deg,#ef4444,#f87171);color:#fff;border:none}
+[class*="sms-suite"] .btn-block{display:block;width:100%;margin-bottom:8px}
+[class*="sms-suite"] .btn-lg{padding:12px 28px;font-size:1rem}
 
 /* ===== Form Controls ===== */
-[class*="sms-suite"] .form-control{border-radius:var(--sms-radius-sm);border:2px solid var(--sms-border);padding:10px 15px;font-size:.9rem;transition:border-color .2s,box-shadow .2s}
+[class*="sms-suite"] .form-group{margin-bottom:16px}
+[class*="sms-suite"] .form-group>label{display:block;margin-bottom:6px;font-weight:600;font-size:.875rem;color:var(--sms-dark)}
+[class*="sms-suite"] .form-control{display:block;width:100%;border-radius:var(--sms-radius-sm);border:2px solid var(--sms-border);padding:10px 15px;font-size:.9rem;color:var(--sms-dark);background:#fff;transition:border-color .2s,box-shadow .2s;box-sizing:border-box;height:auto;line-height:1.5}
 [class*="sms-suite"] .form-control:focus{border-color:var(--sms-primary);box-shadow:0 0 0 3px rgba(102,126,234,.15);outline:none}
-[class*="sms-suite"] select.form-control{appearance:auto}
-.input-group-addon{background:var(--sms-light);border:2px solid var(--sms-border);border-radius:var(--sms-radius-sm);padding:10px 15px;color:var(--sms-muted)}
-.help-block{display:block;margin-top:6px;color:var(--sms-muted);font-size:.8rem}
+[class*="sms-suite"] select.form-control{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http%3A//www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Cpath fill=%27none%27 stroke=%27%2364748b%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%272%27 d=%27m2 5 6 6 6-6%27/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:14px 10px;padding-right:36px;cursor:pointer}
+[class*="sms-suite"] textarea.form-control{min-height:100px;resize:vertical}
+[class*="sms-suite"] .input-group{display:flex;align-items:stretch}
+[class*="sms-suite"] .input-group .form-control{flex:1 1 auto;width:1%}
+[class*="sms-suite"] .input-group-addon,.input-group-addon{background:var(--sms-light);border:2px solid var(--sms-border);border-radius:var(--sms-radius-sm);padding:10px 15px;color:var(--sms-muted);display:flex;align-items:center}
+[class*="sms-suite"] .form-text{display:block;margin-top:6px;color:var(--sms-muted);font-size:.8rem}
 .form-control-static{min-height:calc(1.5em + .75rem + 2px);padding-top:calc(.375rem + 1px);margin-bottom:0}
 
 /* ===== Well ===== */
@@ -566,9 +569,8 @@ function sms_suite_clientarea($vars)
 .sms-page-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px}
 .sms-page-header h2{margin:0;font-size:1.5rem;font-weight:700;color:var(--sms-dark)}
 
-/* ===== Col-xs (BS3 compat) ===== */
-.col-xs-1{flex:0 0 8.333%;max-width:8.333%}.col-xs-2{flex:0 0 16.667%;max-width:16.667%}.col-xs-3{flex:0 0 25%;max-width:25%}.col-xs-4{flex:0 0 33.333%;max-width:33.333%}.col-xs-6{flex:0 0 50%;max-width:50%}.col-xs-7{flex:0 0 58.333%;max-width:58.333%}.col-xs-8{flex:0 0 66.667%;max-width:66.667%}.col-xs-12{flex:0 0 100%;max-width:100%}
-[class*="col-xs-"]{position:relative;width:100%;padding-right:15px;padding-left:15px}
+/* ===== Progress bar compat ===== */
+[class*="sms-suite"] .progress-bar.bg-success{background:linear-gradient(90deg,var(--sms-success),#00e676)!important}
 
 /* ===== Checkbox/Radio ===== */
 [class*="sms-suite"] .checkbox label,[class*="sms-suite"] .radio label{font-weight:400;cursor:pointer}
@@ -583,7 +585,7 @@ function sms_suite_clientarea($vars)
   [class*="sms-suite"] .table thead th,[class*="sms-suite"] .table tbody td{padding:8px 10px}
   .sms-stat-card{padding:16px}
   .sms-stat-card .stat-value{font-size:1.35rem}
-  .panel-body{padding:16px}
+  [class*="sms-suite"] .card-body{padding:16px}
 }
 @media(max-width:575px){
   .sms-nav li a{padding:5px 10px;font-size:.75rem}
@@ -829,9 +831,14 @@ function sms_suite_create_tables_sql()
                 `channel` VARCHAR(20) DEFAULT 'sms',
                 `direction` VARCHAR(10) DEFAULT 'outbound',
                 `sender_id` VARCHAR(50),
+                `from_number` VARCHAR(30),
                 `to_number` VARCHAR(30) NOT NULL,
                 `message` TEXT NOT NULL,
+                `message_type` VARCHAR(30) DEFAULT 'text',
+                `template_name` VARCHAR(100),
+                `template_params` TEXT,
                 `media_url` TEXT,
+                `media_type` VARCHAR(20),
                 `encoding` VARCHAR(10) DEFAULT 'gsm7',
                 `segments` TINYINT UNSIGNED DEFAULT 1,
                 `units` TINYINT UNSIGNED DEFAULT 1,
@@ -859,6 +866,22 @@ function sms_suite_create_tables_sql()
         if (!$columnExists('mod_sms_messages', 'sent_at')) {
             $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `sent_at` TIMESTAMP NULL AFTER `api_key_id`", "Add sent_at to mod_sms_messages");
         }
+        // WhatsApp columns
+        if (!$columnExists('mod_sms_messages', 'message_type')) {
+            $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `message_type` VARCHAR(30) DEFAULT 'text' AFTER `message`", "Add message_type to mod_sms_messages");
+        }
+        if (!$columnExists('mod_sms_messages', 'template_name')) {
+            $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `template_name` VARCHAR(100) AFTER `message_type`", "Add template_name to mod_sms_messages");
+        }
+        if (!$columnExists('mod_sms_messages', 'template_params')) {
+            $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `template_params` TEXT AFTER `template_name`", "Add template_params to mod_sms_messages");
+        }
+        if (!$columnExists('mod_sms_messages', 'media_type')) {
+            $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `media_type` VARCHAR(20) AFTER `media_url`", "Add media_type to mod_sms_messages");
+        }
+        if (!$columnExists('mod_sms_messages', 'from_number')) {
+            $execSql("ALTER TABLE `mod_sms_messages` ADD COLUMN `from_number` VARCHAR(30) AFTER `sender_id`", "Add from_number to mod_sms_messages");
+        }
     }
 
     // 6. Wallet table
@@ -885,6 +908,7 @@ function sms_suite_create_tables_sql()
                 `client_id` INT UNSIGNED NOT NULL,
                 `type` VARCHAR(30) NOT NULL,
                 `amount` DECIMAL(16,4) NOT NULL,
+                `balance_before` DECIMAL(16,4),
                 `balance_after` DECIMAL(16,4),
                 `description` VARCHAR(255),
                 `reference_type` VARCHAR(50),
@@ -895,6 +919,10 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_client_date` (`client_id`, `created_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_wallet_transactions");
+    } else {
+        if (!$columnExists('mod_sms_wallet_transactions', 'balance_before')) {
+            $execSql("ALTER TABLE `mod_sms_wallet_transactions` ADD COLUMN `balance_before` DECIMAL(16,4) AFTER `amount`", "Add balance_before to mod_sms_wallet_transactions");
+        }
     }
 
     // 8. Contact groups
@@ -948,7 +976,7 @@ function sms_suite_create_tables_sql()
                 `first_name` VARCHAR(100),
                 `last_name` VARCHAR(100),
                 `email` VARCHAR(255),
-                `status` VARCHAR(20) DEFAULT 'subscribed',
+                `status` VARCHAR(20) DEFAULT 'active',
                 `custom_data` TEXT,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -971,6 +999,11 @@ function sms_suite_create_tables_sql()
                 `sender_id` VARCHAR(50),
                 `message` TEXT NOT NULL,
                 `media_url` TEXT,
+                `recipient_type` VARCHAR(20) DEFAULT 'manual',
+                `recipient_group_id` INT UNSIGNED,
+                `segment_id` INT UNSIGNED,
+                `recipient_tag_id` INT UNSIGNED,
+                `recipient_list` LONGTEXT,
                 `status` VARCHAR(20) DEFAULT 'draft',
                 `schedule_time` DATETIME,
                 `schedule_type` VARCHAR(20) DEFAULT 'onetime',
@@ -982,13 +1015,37 @@ function sms_suite_create_tables_sql()
                 `delivered_count` INT UNSIGNED DEFAULT 0,
                 `failed_count` INT UNSIGNED DEFAULT 0,
                 `cost_total` DECIMAL(16,4) DEFAULT 0,
+                `batch_size` INT UNSIGNED DEFAULT 100,
+                `batch_delay` INT UNSIGNED DEFAULT 1,
                 `batch_id` VARCHAR(50),
+                `started_at` DATETIME,
+                `completed_at` DATETIME,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_status_schedule` (`status`, `schedule_time`),
                 INDEX `idx_client_status` (`client_id`, `status`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_campaigns");
+    } else {
+        // Add columns for existing installs
+        $campaignCols = Capsule::select("SHOW COLUMNS FROM `mod_sms_campaigns`");
+        $existingCols = array_map(function($c) { return $c->Field; }, $campaignCols);
+        $newCols = [
+            'recipient_type' => "VARCHAR(20) DEFAULT 'manual' AFTER `media_url`",
+            'recipient_group_id' => "INT UNSIGNED AFTER `recipient_type`",
+            'segment_id' => "INT UNSIGNED AFTER `recipient_group_id`",
+            'recipient_tag_id' => "INT UNSIGNED AFTER `segment_id`",
+            'recipient_list' => "LONGTEXT AFTER `recipient_tag_id`",
+            'batch_size' => "INT UNSIGNED DEFAULT 100 AFTER `cost_total`",
+            'batch_delay' => "INT UNSIGNED DEFAULT 1 AFTER `batch_size`",
+            'started_at' => "DATETIME AFTER `batch_id`",
+            'completed_at' => "DATETIME AFTER `started_at`",
+        ];
+        foreach ($newCols as $col => $def) {
+            if (!in_array($col, $existingCols)) {
+                $execSql("ALTER TABLE `mod_sms_campaigns` ADD COLUMN `{$col}` {$def}", "Add {$col} to mod_sms_campaigns");
+            }
+        }
     }
 
     // 12. Campaign lists (junction)
@@ -1031,8 +1088,11 @@ function sms_suite_create_tables_sql()
                 `client_id` INT UNSIGNED NOT NULL,
                 `name` VARCHAR(100) NOT NULL,
                 `type` VARCHAR(20) DEFAULT 'sms',
+                `channel` VARCHAR(20) DEFAULT 'sms',
                 `category` VARCHAR(50),
                 `content` TEXT NOT NULL,
+                `dlt_template_id` VARCHAR(50),
+                `is_default` TINYINT(1) DEFAULT 0,
                 `status` VARCHAR(20) DEFAULT 'active',
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1040,6 +1100,16 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_type` (`type`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_templates");
+    } else {
+        if (!$columnExists('mod_sms_templates', 'channel')) {
+            $execSql("ALTER TABLE `mod_sms_templates` ADD COLUMN `channel` VARCHAR(20) DEFAULT 'sms' AFTER `type`", "Add channel to mod_sms_templates");
+        }
+        if (!$columnExists('mod_sms_templates', 'dlt_template_id')) {
+            $execSql("ALTER TABLE `mod_sms_templates` ADD COLUMN `dlt_template_id` VARCHAR(50) AFTER `content`", "Add dlt_template_id to mod_sms_templates");
+        }
+        if (!$columnExists('mod_sms_templates', 'is_default')) {
+            $execSql("ALTER TABLE `mod_sms_templates` ADD COLUMN `is_default` TINYINT(1) DEFAULT 0 AFTER `dlt_template_id`", "Add is_default to mod_sms_templates");
+        }
     }
 
     // 15. API keys (must match ApiKeyService column names)
@@ -1321,6 +1391,8 @@ function sms_suite_create_tables_sql()
                 `sender_id` VARCHAR(50),
                 `to_number` VARCHAR(30) NOT NULL,
                 `message` TEXT NOT NULL,
+                `channel` VARCHAR(20) DEFAULT 'sms',
+                `timezone` VARCHAR(50),
                 `status` VARCHAR(20) DEFAULT 'pending',
                 `scheduled_at` TIMESTAMP NOT NULL,
                 `sent_at` TIMESTAMP NULL,
@@ -1331,6 +1403,13 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_client_id` (`client_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_scheduled");
+    } else {
+        if (!$columnExists('mod_sms_scheduled', 'channel')) {
+            $execSql("ALTER TABLE `mod_sms_scheduled` ADD COLUMN `channel` VARCHAR(20) DEFAULT 'sms' AFTER `message`", "Add channel to mod_sms_scheduled");
+        }
+        if (!$columnExists('mod_sms_scheduled', 'timezone')) {
+            $execSql("ALTER TABLE `mod_sms_scheduled` ADD COLUMN `timezone` VARCHAR(50) AFTER `channel`", "Add timezone to mod_sms_scheduled");
+        }
     }
 
     // 26. Notification templates
@@ -1338,23 +1417,35 @@ function sms_suite_create_tables_sql()
         $execSql("
             CREATE TABLE `mod_sms_notification_templates` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `notification_type` VARCHAR(50),
                 `name` VARCHAR(100) NOT NULL,
                 `category` VARCHAR(50) DEFAULT 'general',
                 `type` VARCHAR(20) DEFAULT 'sms',
                 `trigger_hook` VARCHAR(100),
                 `subject` VARCHAR(255),
-                `content` TEXT NOT NULL,
+                `message` TEXT,
+                `content` TEXT,
                 `variables` TEXT,
-                `status` TINYINT(1) DEFAULT 1,
+                `status` VARCHAR(20) DEFAULT 'active',
                 `send_to_client` TINYINT(1) DEFAULT 1,
                 `send_to_admin` TINYINT(1) DEFAULT 0,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_category` (`category`),
                 INDEX `idx_trigger` (`trigger_hook`),
+                INDEX `idx_notification_type` (`notification_type`),
                 INDEX `idx_status` (`status`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_notification_templates");
+    } else {
+        if (!$columnExists('mod_sms_notification_templates', 'notification_type')) {
+            $execSql("ALTER TABLE `mod_sms_notification_templates` ADD COLUMN `notification_type` VARCHAR(50) AFTER `id`", "Add notification_type to mod_sms_notification_templates");
+            $execSql("ALTER TABLE `mod_sms_notification_templates` ADD INDEX `idx_notification_type` (`notification_type`)", "Add notification_type index");
+        }
+        if (!$columnExists('mod_sms_notification_templates', 'message')) {
+            $execSql("ALTER TABLE `mod_sms_notification_templates` ADD COLUMN `message` TEXT AFTER `subject`", "Add message to mod_sms_notification_templates");
+        }
+        // Migrate status from TINYINT to VARCHAR if needed (1→active, 0→inactive)
     }
 
     // 27. Admin notifications log
@@ -1428,11 +1519,20 @@ function sms_suite_create_tables_sql()
                 `task` VARCHAR(50) NOT NULL,
                 `last_run` TIMESTAMP NULL,
                 `is_running` TINYINT(1) DEFAULT 0,
+                `pid` INT UNSIGNED NULL,
                 `started_at` TIMESTAMP NULL,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 UNIQUE KEY `unique_task` (`task`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_cron_status");
+    } else {
+        if (!$columnExists('mod_sms_cron_status', 'pid')) {
+            $execSql("ALTER TABLE `mod_sms_cron_status` ADD COLUMN `pid` INT UNSIGNED NULL AFTER `is_running`", "Add pid to mod_sms_cron_status");
+        }
+        if (!$columnExists('mod_sms_cron_status', 'updated_at')) {
+            $execSql("ALTER TABLE `mod_sms_cron_status` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`", "Add updated_at to mod_sms_cron_status");
+        }
     }
 
     // 29. Countries reference table
@@ -1588,9 +1688,11 @@ function sms_suite_create_tables_sql()
             CREATE TABLE `mod_sms_chatbox` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `client_id` INT UNSIGNED,
+                `gateway_id` INT UNSIGNED,
                 `phone` VARCHAR(30) NOT NULL,
                 `contact_name` VARCHAR(100),
                 `channel` VARCHAR(20) DEFAULT 'sms',
+                `last_message` TEXT,
                 `last_message_at` TIMESTAMP NULL,
                 `unread_count` INT UNSIGNED DEFAULT 0,
                 `status` VARCHAR(20) DEFAULT 'open',
@@ -1598,9 +1700,17 @@ function sms_suite_create_tables_sql()
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`),
                 INDEX `idx_phone` (`phone`),
-                INDEX `idx_status` (`status`)
+                INDEX `idx_status` (`status`),
+                INDEX `idx_last_message_at` (`last_message_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_chatbox");
+    } else {
+        if (!$columnExists('mod_sms_chatbox', 'gateway_id')) {
+            $execSql("ALTER TABLE `mod_sms_chatbox` ADD COLUMN `gateway_id` INT UNSIGNED AFTER `client_id`", "Add gateway_id to mod_sms_chatbox");
+        }
+        if (!$columnExists('mod_sms_chatbox', 'last_message')) {
+            $execSql("ALTER TABLE `mod_sms_chatbox` ADD COLUMN `last_message` TEXT AFTER `channel`", "Add last_message to mod_sms_chatbox");
+        }
     }
 
     // 37. Chatbox messages
@@ -2076,14 +2186,23 @@ function sms_suite_create_tables_sql()
                 `name` VARCHAR(100) NOT NULL,
                 `description` TEXT,
                 `type` VARCHAR(20) DEFAULT 'dynamic',
+                `conditions` TEXT,
+                `match_type` VARCHAR(10) DEFAULT 'all',
                 `contact_count` INT UNSIGNED DEFAULT 0,
-                `last_calculated` TIMESTAMP NULL,
+                `last_calculated_at` TIMESTAMP NULL,
                 `status` TINYINT(1) DEFAULT 1,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_client_id` (`client_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_segments");
+    } else {
+        if (!$columnExists('mod_sms_segments', 'conditions')) {
+            $execSql("ALTER TABLE `mod_sms_segments` ADD COLUMN `conditions` TEXT AFTER `type`", "Add conditions to mod_sms_segments");
+        }
+        if (!$columnExists('mod_sms_segments', 'match_type')) {
+            $execSql("ALTER TABLE `mod_sms_segments` ADD COLUMN `match_type` VARCHAR(10) DEFAULT 'all' AFTER `conditions`", "Add match_type to mod_sms_segments");
+        }
     }
 
     // 50. Segment conditions
@@ -2103,13 +2222,52 @@ function sms_suite_create_tables_sql()
         ", "Create mod_sms_segment_conditions");
     }
 
-    // 51. Link tracking
+    // Migrate last_calculated → last_calculated_at
+    if ($tableExists('mod_sms_segments') && $columnExists('mod_sms_segments', 'last_calculated') && !$columnExists('mod_sms_segments', 'last_calculated_at')) {
+        $execSql("ALTER TABLE `mod_sms_segments` CHANGE `last_calculated` `last_calculated_at` TIMESTAMP NULL", "Rename last_calculated to last_calculated_at in mod_sms_segments");
+    }
+
+    // 52. Tags
+    if (!$tableExists('mod_sms_tags')) {
+        $execSql("
+            CREATE TABLE `mod_sms_tags` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(50) NOT NULL,
+                `color` VARCHAR(7) DEFAULT '#667eea',
+                `description` VARCHAR(255),
+                `contact_count` INT UNSIGNED DEFAULT 0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client_tag` (`client_id`, `name`),
+                INDEX `idx_client_id` (`client_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_tags");
+    }
+
+    // 53. Contact-Tag junction
+    if (!$tableExists('mod_sms_contact_tags')) {
+        $execSql("
+            CREATE TABLE `mod_sms_contact_tags` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `contact_id` INT UNSIGNED NOT NULL,
+                `tag_id` INT UNSIGNED NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_contact_tag` (`contact_id`, `tag_id`),
+                INDEX `idx_tag_id` (`tag_id`),
+                INDEX `idx_contact_id` (`contact_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_contact_tags");
+    }
+
+    // 54. Link tracking
     if (!$tableExists('mod_sms_tracking_links')) {
         $execSql("
             CREATE TABLE `mod_sms_tracking_links` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `client_id` INT UNSIGNED NOT NULL,
                 `campaign_id` INT UNSIGNED,
+                `message_id` INT UNSIGNED,
                 `original_url` TEXT NOT NULL,
                 `short_code` VARCHAR(20) NOT NULL,
                 `click_count` INT UNSIGNED DEFAULT 0,
@@ -2119,6 +2277,10 @@ function sms_suite_create_tables_sql()
                 UNIQUE KEY `unique_short_code` (`short_code`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_tracking_links");
+    } else {
+        if (!$columnExists('mod_sms_tracking_links', 'message_id')) {
+            $execSql("ALTER TABLE `mod_sms_tracking_links` ADD COLUMN `message_id` INT UNSIGNED AFTER `campaign_id`", "Add message_id to mod_sms_tracking_links");
+        }
     }
 
     // 52. Link clicks
@@ -2128,14 +2290,31 @@ function sms_suite_create_tables_sql()
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `link_id` INT UNSIGNED NOT NULL,
                 `contact_id` INT UNSIGNED,
+                `phone` VARCHAR(30),
                 `message_id` INT UNSIGNED,
                 `ip_address` VARCHAR(45),
                 `user_agent` TEXT,
+                `country` VARCHAR(5),
+                `device` VARCHAR(50),
+                `clicked_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX `idx_link_id` (`link_id`),
                 INDEX `idx_contact_id` (`contact_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_link_clicks");
+    } else {
+        if (!$columnExists('mod_sms_link_clicks', 'phone')) {
+            $execSql("ALTER TABLE `mod_sms_link_clicks` ADD COLUMN `phone` VARCHAR(30) AFTER `contact_id`", "Add phone to mod_sms_link_clicks");
+        }
+        if (!$columnExists('mod_sms_link_clicks', 'country')) {
+            $execSql("ALTER TABLE `mod_sms_link_clicks` ADD COLUMN `country` VARCHAR(5) AFTER `user_agent`", "Add country to mod_sms_link_clicks");
+        }
+        if (!$columnExists('mod_sms_link_clicks', 'device')) {
+            $execSql("ALTER TABLE `mod_sms_link_clicks` ADD COLUMN `device` VARCHAR(50) AFTER `country`", "Add device to mod_sms_link_clicks");
+        }
+        if (!$columnExists('mod_sms_link_clicks', 'clicked_at')) {
+            $execSql("ALTER TABLE `mod_sms_link_clicks` ADD COLUMN `clicked_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `device`", "Add clicked_at to mod_sms_link_clicks");
+        }
     }
 
     // 53. Drip campaigns
@@ -2146,8 +2325,10 @@ function sms_suite_create_tables_sql()
                 `client_id` INT UNSIGNED NOT NULL,
                 `name` VARCHAR(100) NOT NULL,
                 `description` TEXT,
+                `channel` VARCHAR(20) DEFAULT 'sms',
                 `trigger_type` VARCHAR(50),
                 `trigger_config` TEXT,
+                `trigger_group_id` INT UNSIGNED,
                 `status` VARCHAR(20) DEFAULT 'draft',
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2155,6 +2336,13 @@ function sms_suite_create_tables_sql()
                 INDEX `idx_status` (`status`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_drip_campaigns");
+    } else {
+        if (!$columnExists('mod_sms_drip_campaigns', 'channel')) {
+            $execSql("ALTER TABLE `mod_sms_drip_campaigns` ADD COLUMN `channel` VARCHAR(20) DEFAULT 'sms' AFTER `description`", "Add channel to mod_sms_drip_campaigns");
+        }
+        if (!$columnExists('mod_sms_drip_campaigns', 'trigger_group_id')) {
+            $execSql("ALTER TABLE `mod_sms_drip_campaigns` ADD COLUMN `trigger_group_id` INT UNSIGNED AFTER `trigger_config`", "Add trigger_group_id to mod_sms_drip_campaigns");
+        }
     }
 
     // 54. Drip campaign steps
@@ -2162,18 +2350,26 @@ function sms_suite_create_tables_sql()
         $execSql("
             CREATE TABLE `mod_sms_drip_steps` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                `drip_id` INT UNSIGNED NOT NULL,
+                `drip_campaign_id` INT UNSIGNED NOT NULL,
                 `step_order` INT NOT NULL,
                 `delay_value` INT DEFAULT 0,
                 `delay_unit` VARCHAR(10) DEFAULT 'days',
                 `message` TEXT NOT NULL,
                 `sender_id` VARCHAR(50),
+                `gateway_id` INT UNSIGNED,
                 `condition_type` VARCHAR(50),
                 `condition_config` TEXT,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX `idx_drip_id` (`drip_id`)
+                INDEX `idx_drip_campaign_id` (`drip_campaign_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_drip_steps");
+    } else {
+        if ($columnExists('mod_sms_drip_steps', 'drip_id') && !$columnExists('mod_sms_drip_steps', 'drip_campaign_id')) {
+            $execSql("ALTER TABLE `mod_sms_drip_steps` CHANGE COLUMN `drip_id` `drip_campaign_id` INT UNSIGNED NOT NULL", "Rename drip_id to drip_campaign_id in mod_sms_drip_steps");
+        }
+        if (!$columnExists('mod_sms_drip_steps', 'gateway_id')) {
+            $execSql("ALTER TABLE `mod_sms_drip_steps` ADD COLUMN `gateway_id` INT UNSIGNED AFTER `sender_id`", "Add gateway_id to mod_sms_drip_steps");
+        }
     }
 
     // 55. Drip subscribers
@@ -2181,20 +2377,27 @@ function sms_suite_create_tables_sql()
         $execSql("
             CREATE TABLE `mod_sms_drip_subscribers` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                `drip_id` INT UNSIGNED NOT NULL,
+                `drip_campaign_id` INT UNSIGNED NOT NULL,
                 `contact_id` INT UNSIGNED,
                 `phone` VARCHAR(30) NOT NULL,
                 `current_step` INT DEFAULT 0,
                 `status` VARCHAR(20) DEFAULT 'active',
-                `next_step_at` TIMESTAMP NULL,
+                `next_send_at` TIMESTAMP NULL,
                 `completed_at` TIMESTAMP NULL,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX `idx_drip_id` (`drip_id`),
+                INDEX `idx_drip_campaign_id` (`drip_campaign_id`),
                 INDEX `idx_status` (`status`),
-                INDEX `idx_next_step` (`status`, `next_step_at`)
+                INDEX `idx_next_send` (`status`, `next_send_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_drip_subscribers");
+    } else {
+        if ($columnExists('mod_sms_drip_subscribers', 'drip_id') && !$columnExists('mod_sms_drip_subscribers', 'drip_campaign_id')) {
+            $execSql("ALTER TABLE `mod_sms_drip_subscribers` CHANGE COLUMN `drip_id` `drip_campaign_id` INT UNSIGNED NOT NULL", "Rename drip_id to drip_campaign_id in mod_sms_drip_subscribers");
+        }
+        if ($columnExists('mod_sms_drip_subscribers', 'next_step_at') && !$columnExists('mod_sms_drip_subscribers', 'next_send_at')) {
+            $execSql("ALTER TABLE `mod_sms_drip_subscribers` CHANGE COLUMN `next_step_at` `next_send_at` TIMESTAMP NULL", "Rename next_step_at to next_send_at in mod_sms_drip_subscribers");
+        }
     }
 
     // 56. Campaign A/B tests
@@ -2211,9 +2414,14 @@ function sms_suite_create_tables_sql()
                 `delivered_count` INT UNSIGNED DEFAULT 0,
                 `clicked_count` INT UNSIGNED DEFAULT 0,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_campaign_id` (`campaign_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_campaign_ab_tests");
+    } else {
+        if (!$columnExists('mod_sms_campaign_ab_tests', 'updated_at')) {
+            $execSql("ALTER TABLE `mod_sms_campaign_ab_tests` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`", "Add updated_at to mod_sms_campaign_ab_tests");
+        }
     }
 
     // 57. Recurring campaign log
@@ -2222,14 +2430,31 @@ function sms_suite_create_tables_sql()
             CREATE TABLE `mod_sms_recurring_log` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 `campaign_id` INT UNSIGNED NOT NULL,
+                `run_number` INT UNSIGNED DEFAULT 1,
                 `run_at` TIMESTAMP NOT NULL,
+                `started_at` TIMESTAMP NULL,
+                `completed_at` TIMESTAMP NULL,
                 `recipients` INT UNSIGNED DEFAULT 0,
                 `sent` INT UNSIGNED DEFAULT 0,
                 `failed` INT UNSIGNED DEFAULT 0,
+                `status` VARCHAR(20) DEFAULT 'running',
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX `idx_campaign_id` (`campaign_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_recurring_log");
+    } else {
+        if (!$columnExists('mod_sms_recurring_log', 'run_number')) {
+            $execSql("ALTER TABLE `mod_sms_recurring_log` ADD COLUMN `run_number` INT UNSIGNED DEFAULT 1 AFTER `campaign_id`", "Add run_number to mod_sms_recurring_log");
+        }
+        if (!$columnExists('mod_sms_recurring_log', 'started_at')) {
+            $execSql("ALTER TABLE `mod_sms_recurring_log` ADD COLUMN `started_at` TIMESTAMP NULL AFTER `run_at`", "Add started_at to mod_sms_recurring_log");
+        }
+        if (!$columnExists('mod_sms_recurring_log', 'completed_at')) {
+            $execSql("ALTER TABLE `mod_sms_recurring_log` ADD COLUMN `completed_at` TIMESTAMP NULL AFTER `started_at`", "Add completed_at to mod_sms_recurring_log");
+        }
+        if (!$columnExists('mod_sms_recurring_log', 'status')) {
+            $execSql("ALTER TABLE `mod_sms_recurring_log` ADD COLUMN `status` VARCHAR(20) DEFAULT 'running' AFTER `failed`", "Add status to mod_sms_recurring_log");
+        }
     }
 
     // Log creation result
@@ -2430,7 +2655,7 @@ function sms_suite_create_tables()
             $table->string('first_name', 100)->nullable();
             $table->string('last_name', 100)->nullable();
             $table->string('email', 255)->nullable();
-            $table->string('status', 20)->default('subscribed'); // subscribed, unsubscribed
+            $table->string('status', 20)->default('active'); // active, unsubscribed
             $table->text('custom_data')->nullable(); // JSON
             $table->timestamps();
             $table->index(['client_id', 'phone']);
@@ -2449,6 +2674,9 @@ function sms_suite_create_tables()
             $table->string('sender_id', 50)->nullable();
             $table->text('message');
             $table->text('media_url')->nullable();
+            $table->string('recipient_type', 30)->default('group'); // group, list, all
+            $table->unsignedInteger('recipient_group_id')->nullable();
+            $table->text('recipient_list')->nullable();
             $table->string('status', 20)->default('draft'); // draft, scheduled, queued, sending, paused, completed, failed, cancelled
             $table->dateTime('schedule_time')->nullable();
             $table->string('schedule_type', 20)->default('onetime'); // onetime, recurring
@@ -2461,6 +2689,10 @@ function sms_suite_create_tables()
             $table->unsignedInteger('failed_count')->default(0);
             $table->decimal('cost_total', 16, 4)->default(0);
             $table->string('batch_id', 50)->nullable();
+            $table->unsignedInteger('batch_size')->default(100);
+            $table->unsignedInteger('batch_delay')->default(1);
+            $table->timestamp('started_at')->nullable();
+            $table->timestamp('completed_at')->nullable();
             $table->timestamps();
             $table->index(['status', 'schedule_time']);
             $table->index(['client_id', 'status']);
@@ -2530,7 +2762,10 @@ function sms_suite_create_tables()
             $table->unsignedInteger('gateway_id')->nullable();
             $table->string('gateway_type', 50);
             $table->text('payload');
+            $table->mediumText('raw_payload')->nullable();
+            $table->string('ip_address', 45)->nullable();
             $table->boolean('processed')->default(false);
+            $table->timestamp('processed_at')->nullable();
             $table->text('error')->nullable();
             $table->timestamp('created_at')->useCurrent();
             $table->index(['processed', 'created_at']);
@@ -2632,14 +2867,13 @@ function sms_suite_create_tables()
         $schema->create('mod_sms_plan_credits', function ($table) {
             $table->increments('id');
             $table->unsignedInteger('client_id');
-            $table->unsignedInteger('product_id');
-            $table->unsignedInteger('service_id');
-            $table->integer('credits_total')->default(0);
-            $table->integer('credits_used')->default(0);
-            $table->date('reset_date')->nullable();
+            $table->unsignedInteger('service_id')->nullable();
+            $table->unsignedInteger('total')->default(0);
+            $table->unsignedInteger('remaining')->default(0);
+            $table->timestamp('expires_at')->nullable();
             $table->timestamps();
             $table->index('client_id');
-            $table->unique(['client_id', 'service_id']);
+            $table->index('expires_at');
         });
     }
 
@@ -2965,6 +3199,34 @@ function sms_suite_create_tables()
         });
     }
 
+    // Tags
+    if (!$schema->hasTable('mod_sms_tags')) {
+        $schema->create('mod_sms_tags', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('client_id');
+            $table->string('name', 50);
+            $table->string('color', 7)->default('#667eea');
+            $table->string('description', 255)->nullable();
+            $table->unsignedInteger('contact_count')->default(0);
+            $table->timestamps();
+            $table->unique(['client_id', 'name']);
+            $table->index('client_id');
+        });
+    }
+
+    // Contact Tags
+    if (!$schema->hasTable('mod_sms_contact_tags')) {
+        $schema->create('mod_sms_contact_tags', function ($table) {
+            $table->increments('id');
+            $table->unsignedInteger('contact_id');
+            $table->unsignedInteger('tag_id');
+            $table->timestamp('created_at')->useCurrent();
+            $table->unique(['contact_id', 'tag_id']);
+            $table->index('tag_id');
+            $table->index('contact_id');
+        });
+    }
+
     // Recurring Campaign Log
     if (!$schema->hasTable('mod_sms_recurring_log')) {
         $schema->create('mod_sms_recurring_log', function ($table) {
@@ -3201,7 +3463,7 @@ function sms_suite_create_tables()
             $table->unsignedInteger('currency_id')->nullable();
             $table->decimal('bonus_credits', 10, 0)->default(0); // Bonus credits included
             $table->integer('validity_days')->default(0); // 0 = never expires
-            $table->boolean('is_featured')->default(false);
+            $table->boolean('popular')->default(false);
             $table->integer('sort_order')->default(0);
             $table->boolean('status')->default(true);
             $table->timestamps();
@@ -3441,9 +3703,14 @@ function sms_suite_create_tables()
                 $table->unsignedInteger('segment_id')->nullable()->after('recipient_group_id');
             });
         }
+        if (!$schema->hasColumn('mod_sms_campaigns', 'recipient_tag_id')) {
+            $schema->table('mod_sms_campaigns', function ($table) {
+                $table->unsignedInteger('recipient_tag_id')->nullable()->after('segment_id');
+            });
+        }
         if (!$schema->hasColumn('mod_sms_campaigns', 'recipient_list')) {
             $schema->table('mod_sms_campaigns', function ($table) {
-                $table->text('recipient_list')->nullable()->after('segment_id');
+                $table->text('recipient_list')->nullable()->after('recipient_tag_id');
             });
         }
         if (!$schema->hasColumn('mod_sms_campaigns', 'batch_size')) {
@@ -3678,7 +3945,9 @@ function sms_suite_diagnose_tables()
         'mod_sms_drip_campaigns',
         'mod_sms_drip_steps',
         'mod_sms_drip_subscribers',
-        // Segments & Tracking
+        // Tags, Segments & Tracking
+        'mod_sms_tags',
+        'mod_sms_contact_tags',
         'mod_sms_segments',
         'mod_sms_segment_conditions',
         'mod_sms_tracking_links',

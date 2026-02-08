@@ -12,6 +12,8 @@
         <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
         <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
         <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
+        <li><a href="{$modulelink}&action=tags">{$lang.tags|default:'Tags'}</a></li>
+        <li><a href="{$modulelink}&action=segments">{$lang.segments|default:'Segments'}</a></li>
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
     </ul>
 
@@ -32,12 +34,12 @@
 
     <div class="row">
         <div class="col-md-8" style="margin-bottom: 24px;">
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-edit"></i> {$lang.compose_message}</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-edit"></i> {$lang.compose_message}</h3>
                 </div>
-                <div class="panel-body">
-                    <form method="post" action="{$modulelink}&action=send" id="smsForm">
+                <div class="card-body">
+                    <form method="post" action="{$modulelink}&action=send" id="smsForm" enctype="multipart/form-data">
                         <input type="hidden" name="csrf_token" value="{$csrf_token}">
                         <input type="hidden" name="send_message" value="1">
 
@@ -50,13 +52,23 @@
                             </select>
                         </div>
 
-                        <!-- Recipient -->
+                        <!-- Recipients -->
                         <div class="form-group">
-                            <label for="to">{$lang.recipient} <span class="text-danger">*</span></label>
-                            <input type="text" name="to" id="to" class="form-control"
-                                   placeholder="+1234567890"
-                                   value="{$posted.to|escape:'html'}" required>
-                            <span class="help-block">{$lang.recipient_help}</span>
+                            <label for="to">{$lang.recipient|default:'Recipients'} <span class="text-danger">*</span></label>
+                            <textarea name="to" id="to" class="form-control" rows="3"
+                                      placeholder="Enter phone numbers (one per line, or comma/space/tab separated)">{$posted.to|escape:'html'}</textarea>
+                            <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap;">
+                                <span class="form-text text-muted" style="margin: 0;">
+                                    <span id="recipientCount" style="font-weight: 600; color: var(--sms-primary, #667eea);">0</span> recipient(s)
+                                </span>
+                                <span class="form-text text-muted" style="margin: 0;">|</span>
+                                <label for="recipients_file" style="margin: 0; cursor: pointer; color: var(--sms-primary, #667eea); font-size: .8rem; font-weight: 500;">
+                                    <i class="fas fa-file-upload"></i> Upload file (CSV, TXT, XLSX)
+                                </label>
+                                <input type="file" name="recipients_file" id="recipients_file" accept=".csv,.txt,.xlsx,.xls"
+                                       style="display: none;" onchange="handleFileSelect(this)">
+                                <span id="fileName" class="form-text text-muted" style="margin: 0; font-style: italic;"></span>
+                            </div>
                         </div>
 
                         <!-- Sender ID -->
@@ -66,8 +78,9 @@
                             <select name="sender_id" id="sender_id" class="form-control">
                                 <option value="">{$lang.default_sender}</option>
                                 {foreach $sender_ids as $sid}
-                                <option value="{$sid->sender_id}" {if $posted.sender_id eq $sid->sender_id}selected{/if}>
+                                <option value="{$sid->sender_id}" {if ($posted.sender_id eq $sid->sender_id) || ($smarty.get.sender_id eq $sid->sender_id)}selected{/if}>
                                     {$sid->sender_id|escape:'html'}
+                                    {if $sid->source|default:'' eq 'assigned' || $sid->source|default:'' eq 'admin'} (Admin){/if}
                                 </option>
                                 {/foreach}
                             </select>
@@ -102,19 +115,19 @@
                         <!-- Segment Counter -->
                         <div id="segmentInfo" style="background: var(--sms-light, #f8fafc); border: 1px solid var(--sms-border, #e2e8f0); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
                             <div class="row">
-                                <div class="col-xs-3 text-center">
+                                <div class="col-3 text-center">
                                     <strong id="charCount" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">0</strong><br>
                                     <small style="color: var(--sms-muted, #64748b);">{$lang.characters}</small>
                                 </div>
-                                <div class="col-xs-3 text-center">
+                                <div class="col-3 text-center">
                                     <strong id="segmentCount" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">0</strong><br>
                                     <small style="color: var(--sms-muted, #64748b);">{$lang.segments}</small>
                                 </div>
-                                <div class="col-xs-3 text-center">
+                                <div class="col-3 text-center">
                                     <strong id="encoding" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">GSM-7</strong><br>
                                     <small style="color: var(--sms-muted, #64748b);">{$lang.encoding}</small>
                                 </div>
-                                <div class="col-xs-3 text-center">
+                                <div class="col-3 text-center">
                                     <strong id="remaining" style="font-size: 1.35rem; color: var(--sms-dark, #1e293b);">160</strong><br>
                                     <small style="color: var(--sms-muted, #64748b);">{$lang.remaining}</small>
                                 </div>
@@ -126,7 +139,7 @@
                             <button type="submit" class="btn btn-primary btn-lg">
                                 <i class="fas fa-paper-plane"></i> {$lang.send_message}
                             </button>
-                            <a href="{$modulelink}" class="btn btn-default btn-lg">{$lang.cancel}</a>
+                            <a href="{$modulelink}" class="btn btn-outline-secondary btn-lg">{$lang.cancel}</a>
                         </div>
                     </form>
                 </div>
@@ -135,27 +148,21 @@
 
         <!-- Sidebar -->
         <div class="col-md-4">
-            <div class="panel panel-info">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-info-circle"></i> {$lang.quick_info}</h3>
+            <div class="card border-info">
+                <div class="card-header bg-info text-white">
+                    <h3 class="card-title"><i class="fas fa-info-circle"></i> {$lang.quick_info}</h3>
                 </div>
-                <div class="panel-body">
-                    <p><strong>{$lang.wallet_balance}:</strong>
-                       {if $settings && $settings->currency}
-                           {$settings->currency}
-                       {else}
-                           $
-                       {/if}{$balance|default:0|number_format:2}
-                    </p>
-                    <p style="margin-bottom: 0;"><strong>{$lang.active_sender_ids}:</strong> {$sender_ids|@count|default:0}</p>
+                <div class="card-body">
+                    <p><strong>{$lang.wallet_balance}:</strong> {$currency_symbol}{$balance|default:0|number_format:2}</p>
+                    <p style="margin-bottom: 0;"><strong>{$lang.active_sender_ids}:</strong> <a href="{$modulelink}&action=sender_ids">{$sender_ids|@count|default:0}</a></p>
                 </div>
             </div>
 
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-book"></i> {$lang.encoding_guide}</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-book"></i> {$lang.encoding_guide}</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <p style="margin-bottom: 4px;"><strong>GSM-7:</strong></p>
                     <ul class="small" style="padding-left: 18px; margin-bottom: 12px;">
                         <li>160 {$lang.chars_single}</li>
@@ -175,6 +182,69 @@
 </div>
 
 <script>
+{literal}
+function countRecipients() {
+    var toField = document.getElementById('to');
+    if (!toField) return;
+    var val = toField.value.trim();
+    if (!val) {
+        document.getElementById('recipientCount').textContent = '0';
+        return;
+    }
+    var parts = val.split(/[,\n\r\t;|]+/);
+    var count = 0;
+    for (var i = 0; i < parts.length; i++) {
+        var num = parts[i].replace(/[^\d+]/g, '');
+        if (/^\+?\d{7,15}$/.test(num)) count++;
+    }
+    document.getElementById('recipientCount').textContent = count;
+}
+
+function handleFileSelect(input) {
+    var nameSpan = document.getElementById('fileName');
+    if (input.files && input.files[0]) {
+        var file = input.files[0];
+        nameSpan.textContent = file.name + ' (' + Math.round(file.size/1024) + ' KB)';
+
+        // For CSV/TXT files, also preview numbers in the textarea
+        var ext = file.name.split('.').pop().toLowerCase();
+        if (ext === 'csv' || ext === 'txt') {
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var content = e.target.result;
+                var toField = document.getElementById('to');
+                var existing = toField.value.trim();
+                // Extract numbers from file content
+                var lines = content.split(/[\r\n]+/);
+                var numbers = [];
+                for (var i = 0; i < lines.length; i++) {
+                    var fields = lines[i].split(/[,\t;|]+/);
+                    for (var j = 0; j < fields.length; j++) {
+                        var num = fields[j].trim().replace(/[^\d+]/g, '');
+                        if (/^\+?\d{7,15}$/.test(num)) numbers.push(num);
+                    }
+                }
+                if (numbers.length > 0) {
+                    toField.value = (existing ? existing + '\n' : '') + numbers.join('\n');
+                    countRecipients();
+                }
+            };
+            reader.readAsText(file);
+        }
+    } else {
+        nameSpan.textContent = '';
+    }
+}
+
+var toField = document.getElementById('to');
+if (toField) {
+    toField.addEventListener('input', countRecipients);
+    toField.addEventListener('keyup', countRecipients);
+    toField.addEventListener('paste', function() { setTimeout(countRecipients, 10); });
+    countRecipients();
+}
+{/literal}
+
 (function() {
     var gsm7Chars = [
         10, 12, 13, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,

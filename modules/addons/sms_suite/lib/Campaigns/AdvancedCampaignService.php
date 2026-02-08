@@ -217,6 +217,12 @@ class AdvancedCampaignService
                 return ['success' => false, 'error' => 'Contact already subscribed'];
             }
 
+            // Get contact phone (required for drip subscribers)
+            $contact = Capsule::table('mod_sms_contacts')->where('id', $contactId)->first();
+            if (!$contact || empty($contact->phone)) {
+                return ['success' => false, 'error' => 'Contact has no phone number'];
+            }
+
             // Get first step delay
             $firstStep = Capsule::table('mod_sms_drip_steps')
                 ->where('drip_campaign_id', $dripCampaignId)
@@ -228,6 +234,7 @@ class AdvancedCampaignService
             $id = Capsule::table('mod_sms_drip_subscribers')->insertGetId([
                 'drip_campaign_id' => $dripCampaignId,
                 'contact_id' => $contactId,
+                'phone' => $contact->phone,
                 'current_step' => 0,
                 'next_send_at' => $nextSendAt,
                 'status' => 'active',
@@ -680,7 +687,7 @@ class AdvancedCampaignService
 
         $query = Capsule::table('mod_sms_contacts')
             ->where('client_id', $segment->client_id)
-            ->where('status', 'subscribed');
+            ->whereIn('status', ['active', 'subscribed']);
 
         if ($segment->match_type === 'all') {
             // All conditions must match (AND)
@@ -718,6 +725,21 @@ class AdvancedCampaignService
         $operator = $condition->operator;
         $value = $condition->value;
 
+        // Handle tag field — route to has_tag/not_has_tag
+        if ($field === 'tag') {
+            $tagOperator = ($operator === 'not_equals' || $operator === 'not_has_tag') ? 'not_has_tag' : 'has_tag';
+            switch ($tagOperator) {
+                case 'has_tag':
+                    return $query->whereIn('id', function ($sub) use ($value) {
+                        $sub->select('contact_id')->from('mod_sms_contact_tags')->where('tag_id', (int)$value);
+                    });
+                case 'not_has_tag':
+                    return $query->whereNotIn('id', function ($sub) use ($value) {
+                        $sub->select('contact_id')->from('mod_sms_contact_tags')->where('tag_id', (int)$value);
+                    });
+            }
+        }
+
         // Handle custom fields
         if (strpos($field, 'custom_') === 0) {
             $field = "JSON_EXTRACT(custom_data, '$.{$field}')";
@@ -750,6 +772,14 @@ class AdvancedCampaignService
                     return $query->whereBetween($field, [trim($values[0]), trim($values[1])]);
                 }
                 return $query;
+            case 'has_tag':
+                return $query->whereIn('id', function ($sub) use ($value) {
+                    $sub->select('contact_id')->from('mod_sms_contact_tags')->where('tag_id', (int)$value);
+                });
+            case 'not_has_tag':
+                return $query->whereNotIn('id', function ($sub) use ($value) {
+                    $sub->select('contact_id')->from('mod_sms_contact_tags')->where('tag_id', (int)$value);
+                });
             default:
                 return $query;
         }

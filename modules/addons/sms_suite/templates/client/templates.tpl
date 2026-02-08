@@ -12,6 +12,8 @@
         <li><a href="{$modulelink}&action=campaigns">{$lang.menu_campaigns}</a></li>
         <li><a href="{$modulelink}&action=contacts">{$lang.menu_contacts}</a></li>
         <li><a href="{$modulelink}&action=contact_groups">{$lang.contact_groups|default:'Groups'}</a></li>
+        <li><a href="{$modulelink}&action=tags">{$lang.tags|default:'Tags'}</a></li>
+        <li><a href="{$modulelink}&action=segments">{$lang.segments|default:'Segments'}</a></li>
         <li><a href="{$modulelink}&action=sender_ids">{$lang.menu_sender_ids}</a></li>
         <li class="active"><a href="{$modulelink}&action=templates">{$lang.templates|default:'Templates'}</a></li>
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
@@ -19,11 +21,11 @@
         <li><a href="{$modulelink}&action=billing">{$lang.menu_billing}</a></li>
     </ul>
 
-    <div class="panel panel-default">
-        <div class="panel-heading">
-            <h3 class="panel-title"><i class="fas fa-list"></i> {$lang.templates|default:'Message Templates'}</h3>
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-list"></i> {$lang.templates|default:'Message Templates'}</h3>
         </div>
-        <div class="panel-body">
+        <div class="card-body">
             {if $templates|@count > 0}
             <div class="table-responsive">
                 <table class="table table-striped">
@@ -41,7 +43,7 @@
                             <td>{$tpl->message|truncate:80:'...'}</td>
                             <td>
                                 {if $tpl->category}
-                                <span class="label label-info">{$tpl->category}</span>
+                                <span class="badge badge-info">{$tpl->category}</span>
                                 {else}
                                 <span class="text-muted">-</span>
                                 {/if}
