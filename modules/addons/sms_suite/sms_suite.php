@@ -415,8 +415,8 @@ function sms_suite_clientarea($vars)
     if (!$clientId) {
         return [
             'pagetitle' => 'SMS Suite',
-            'breadcrumb' => ['index.php?m=sms_suite' => 'SMS Suite'],
-            'templatefile' => 'error',
+            'breadcrumb' => [$modulelink => 'SMS Suite'],
+            'templatefile' => 'client/error',
             'vars' => [
                 'error' => 'You must be logged in to access this page.',
             ],
@@ -438,8 +438,8 @@ function sms_suite_clientarea($vars)
     // Fallback basic output
     return [
         'pagetitle' => 'SMS Suite',
-        'breadcrumb' => ['index.php?m=sms_suite' => 'SMS Suite'],
-        'templatefile' => 'dashboard',
+        'breadcrumb' => [$modulelink => 'SMS Suite'],
+        'templatefile' => 'client/dashboard',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,

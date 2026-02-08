@@ -241,9 +241,9 @@ function sms_suite_client_dashboard($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['client_dashboard'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
+            $modulelink => $lang['module_name'],
         ],
-        'templatefile' => 'dashboard',
+        'templatefile' => 'client/dashboard',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -332,10 +332,10 @@ function sms_suite_client_send($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['menu_send_sms'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=send' => $lang['menu_send_sms'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=send' => $lang['menu_send_sms'],
         ],
-        'templatefile' => 'send',
+        'templatefile' => 'client/send',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -449,10 +449,10 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['campaigns'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=campaigns' => $lang['campaigns'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=campaigns' => $lang['campaigns'],
         ],
-        'templatefile' => 'campaigns',
+        'templatefile' => 'client/campaigns',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -557,10 +557,10 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['contacts'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=contacts' => $lang['contacts'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=contacts' => $lang['contacts'],
         ],
-        'templatefile' => 'contacts',
+        'templatefile' => 'client/contacts',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -667,10 +667,10 @@ function sms_suite_client_contact_groups($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['contact_groups'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=contact_groups' => $lang['contact_groups'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=contact_groups' => $lang['contact_groups'],
         ],
-        'templatefile' => 'contact_groups',
+        'templatefile' => 'client/contact_groups',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -760,10 +760,10 @@ function sms_suite_client_sender_ids($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['sender_ids'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=sender_ids' => $lang['sender_ids'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=sender_ids' => $lang['sender_ids'],
         ],
-        'templatefile' => 'sender_ids',
+        'templatefile' => 'client/sender_ids',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -794,10 +794,10 @@ function sms_suite_client_templates($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['templates'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=templates' => $lang['templates'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=templates' => $lang['templates'],
         ],
-        'templatefile' => 'templates',
+        'templatefile' => 'client/templates',
         'vars' => [
             'modulelink' => $vars['modulelink'],
             'lang' => $lang,
@@ -821,10 +821,10 @@ function sms_suite_client_logs($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['message_log'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=logs' => $lang['message_log'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=logs' => $lang['message_log'],
         ],
-        'templatefile' => 'logs',
+        'templatefile' => 'client/logs',
         'vars' => [
             'modulelink' => $vars['modulelink'],
             'lang' => $lang,
@@ -899,10 +899,10 @@ function sms_suite_client_api_keys($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['api_keys'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=api_keys' => $lang['api_keys'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=api_keys' => $lang['api_keys'],
         ],
-        'templatefile' => 'api_keys',
+        'templatefile' => 'client/api_keys',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -999,10 +999,10 @@ function sms_suite_client_inbox($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - Inbox',
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=inbox' => 'Inbox',
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=inbox' => 'Inbox',
         ],
-        'templatefile' => 'inbox',
+        'templatefile' => 'client/inbox',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1088,11 +1088,11 @@ function sms_suite_client_conversation($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - Chat with ' . ($contact ? trim($contact->first_name . ' ' . $contact->last_name) : $phone),
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=inbox' => 'Inbox',
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=inbox' => 'Inbox',
             '' => 'Conversation',
         ],
-        'templatefile' => 'conversation',
+        'templatefile' => 'client/conversation',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1227,10 +1227,10 @@ function sms_suite_client_billing($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['billing'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=billing' => $lang['billing'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=billing' => $lang['billing'],
         ],
-        'templatefile' => 'billing',
+        'templatefile' => 'client/billing',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1295,10 +1295,10 @@ function sms_suite_client_reports($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['reports'],
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=reports' => $lang['reports'],
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=reports' => $lang['reports'],
         ],
-        'templatefile' => 'reports',
+        'templatefile' => 'client/reports',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1479,10 +1479,10 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . ($lang['preferences'] ?? 'Notification Preferences'),
         'breadcrumb' => [
-            'index.php?m=sms_suite' => $lang['module_name'],
-            'index.php?m=sms_suite&action=preferences' => $lang['preferences'] ?? 'Preferences',
+            $modulelink => $lang['module_name'],
+            $modulelink . '&action=preferences' => $lang['preferences'] ?? 'Preferences',
         ],
-        'templatefile' => 'preferences',
+        'templatefile' => 'client/preferences',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
