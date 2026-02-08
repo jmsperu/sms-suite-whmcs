@@ -1557,13 +1557,13 @@ function sms_suite_create_tables_sql()
             $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `network` VARCHAR(20) DEFAULT 'all' AFTER `type`", "Add network to mod_sms_sender_id_pool");
         }
         if (!$columnExists('mod_sms_sender_id_pool', 'price_setup')) {
-            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_setup` DECIMAL(10,2) DEFAULT 0 AFTER `country_codes`", "Add price_setup to mod_sms_sender_id_pool");
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_setup` DECIMAL(10,2) DEFAULT 0", "Add price_setup to mod_sms_sender_id_pool");
         }
         if (!$columnExists('mod_sms_sender_id_pool', 'price_monthly')) {
-            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_monthly` DECIMAL(10,2) DEFAULT 0 AFTER `price_setup`", "Add price_monthly to mod_sms_sender_id_pool");
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_monthly` DECIMAL(10,2) DEFAULT 0", "Add price_monthly to mod_sms_sender_id_pool");
         }
         if (!$columnExists('mod_sms_sender_id_pool', 'price_yearly')) {
-            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_yearly` DECIMAL(10,2) DEFAULT 0 AFTER `price_monthly`", "Add price_yearly to mod_sms_sender_id_pool");
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_yearly` DECIMAL(10,2) DEFAULT 0", "Add price_yearly to mod_sms_sender_id_pool");
         }
         if (!$columnExists('mod_sms_sender_id_pool', 'telco_status')) {
             $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_status` VARCHAR(20) DEFAULT 'approved' AFTER `is_shared`", "Add telco_status to mod_sms_sender_id_pool");
@@ -2949,17 +2949,17 @@ function sms_suite_create_tables()
         }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'price_setup')) {
             $schema->table('mod_sms_sender_id_pool', function ($table) {
-                $table->decimal('price_setup', 10, 2)->default(0)->after('country_codes');
+                $table->decimal('price_setup', 10, 2)->default(0);
             });
         }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'price_monthly')) {
             $schema->table('mod_sms_sender_id_pool', function ($table) {
-                $table->decimal('price_monthly', 10, 2)->default(0)->after('price_setup');
+                $table->decimal('price_monthly', 10, 2)->default(0);
             });
         }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'price_yearly')) {
             $schema->table('mod_sms_sender_id_pool', function ($table) {
-                $table->decimal('price_yearly', 10, 2)->default(0)->after('price_monthly');
+                $table->decimal('price_yearly', 10, 2)->default(0);
             });
         }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'telco_status')) {

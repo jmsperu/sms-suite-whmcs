@@ -3044,6 +3044,7 @@ function sms_suite_admin_diagnostics($vars, $lang)
             $issues = [];
             if (!empty($result['still_missing'])) $issues[] = 'Tables: ' . implode(', ', $result['still_missing']);
             if (!empty($result['columns_still_missing'])) $issues[] = 'Columns: ' . implode(', ', $result['columns_still_missing']);
+            if (!empty($result['errors'])) $issues[] = 'Errors: ' . implode('; ', $result['errors']);
             $repairMessage = 'Auto-repair attempted but some issues remain. ' . implode('. ', $issues);
             $repairType = 'warning';
         }
@@ -3065,6 +3066,7 @@ function sms_suite_admin_diagnostics($vars, $lang)
             $issues = [];
             if (!empty($result['still_missing'])) $issues[] = 'Tables: ' . implode(', ', $result['still_missing']);
             if (!empty($result['columns_still_missing'])) $issues[] = 'Columns: ' . implode(', ', $result['columns_still_missing']);
+            if (!empty($result['errors'])) $issues[] = 'Errors: ' . implode('; ', $result['errors']);
             $repairMessage = 'Database repair completed with issues. ' . implode('. ', $issues);
             $repairType = 'warning';
         }
