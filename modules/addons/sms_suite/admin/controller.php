@@ -158,6 +158,9 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_dashboard($vars, $lang);
             break;
     }
+
+    // Global Select2 initialization for all searchable dropdowns
+    sms_suite_admin_select2_init();
 }
 
 /**
@@ -189,6 +192,11 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'settings' => ['icon' => 'fa-cog', 'label' => $lang['menu_settings']],
     ];
 
+    // Load Select2 CSS/JS for searchable dropdowns
+    echo '<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />';
+    echo '<style>.select2-container { min-width: 100%; } .select2-container .select2-selection--single { height: 34px; border: 1px solid #ccc; border-radius: 4px; } .select2-container .select2-selection--single .select2-selection__rendered { line-height: 34px; } .select2-container .select2-selection--single .select2-selection__arrow { height: 32px; } .select2-container--default .select2-selection--multiple { border: 1px solid #ccc; border-radius: 4px; min-height: 34px; }</style>';
+    echo '<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>';
+
     echo '<ul class="nav nav-tabs admin-tabs" role="tablist">';
     foreach ($menuItems as $action => $item) {
         $active = ($currentAction === $action) ? 'active' : '';
@@ -200,6 +208,91 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
     }
     echo '</ul>';
     echo '<div class="tab-content admin-tabs-content" style="margin-top: 20px;">';
+}
+
+/**
+ * Global Select2 initialization for all searchable dropdowns
+ */
+function sms_suite_admin_select2_init()
+{
+    echo '<script>
+    jQuery(document).ready(function($) {
+        if (!$.fn.select2) { return; }
+
+        // Helper: init Select2 on elements, with modal dropdownParent if inside a .modal
+        function initS2(selector, opts) {
+            $(selector).each(function() {
+                if ($(this).data("select2")) { return; } // already initialized
+                var o = $.extend({ width: "100%", allowClear: true, placeholder: $(this).find("option:first").text() || "Select..." }, opts || {});
+                var modal = $(this).closest(".modal");
+                if (modal.length) { o.dropdownParent = modal; }
+                $(this).select2(o);
+            });
+        }
+
+        // --- Client selectors (can have hundreds of options) ---
+        initS2("#assign_client_select", { placeholder: "Search for a client..." });
+        initS2("select[name=\"client_id\"]", { placeholder: "Search for a client..." });
+
+        // --- Gateway selectors ---
+        initS2("select[name=\"gateway_id\"]", { placeholder: "Select gateway..." });
+        initS2("#auto_gateway", { placeholder: "Select gateway..." });
+        initS2("#edit_pool_gateway", { placeholder: "Select gateway..." });
+        initS2("#approve_gateway", { placeholder: "Select gateway..." });
+        initS2("#edit_gateway", { placeholder: "Select gateway..." });
+
+        // --- Sender ID selectors ---
+        initS2("select[name=\"sender_id\"]", { placeholder: "Select sender ID..." });
+        initS2("#edit_sender", { placeholder: "Select sender ID..." });
+        initS2("select[name=\"assigned_sender_id\"]", { placeholder: "Select sender ID..." });
+
+        // --- WHMCS Hook / Trigger selectors (large lists) ---
+        initS2("#tpl_trigger", { placeholder: "Select trigger hook..." });
+        initS2("#auto_hook", { placeholder: "Select WHMCS hook..." });
+        initS2("#auto_trigger", { placeholder: "Select trigger type..." });
+
+        // --- Country / Operator selectors ---
+        initS2("select[name=\"country_code\"]", { placeholder: "Select country..." });
+        initS2("select[name=\"filter_country\"]", { placeholder: "All Countries" });
+        initS2("select[name=\"filter_operator\"]", { placeholder: "All Operators" });
+
+        // --- Contact group selectors ---
+        initS2("select[name=\"group_id\"]", { placeholder: "Select group..." });
+        initS2("select[name=\"import_group_id\"]", { placeholder: "Select group..." });
+
+        // --- Template category ---
+        initS2("#tpl_category", { placeholder: "Select category..." });
+
+        // --- Gateway type on gateway edit ---
+        initS2("#gateway_type", { placeholder: "Select gateway type..." });
+
+        // --- Currency selectors ---
+        initS2("select[name=\"currency_id\"]", { placeholder: "Select currency..." });
+        initS2("#edit_pkg_currency", { placeholder: "Select currency..." });
+
+        // --- Billing mode selectors ---
+        initS2("select[name=\"assigned_gateway_id\"]", { placeholder: "Select gateway..." });
+
+        // --- Network prefix modals ---
+        initS2("select[name=\"dest_network\"]", { placeholder: "Select network..." });
+
+        // --- Reports gateway filter ---
+        initS2("#report_gateway", { placeholder: "All Gateways" });
+
+        // Re-init Select2 when modals open (for dynamically populated selects)
+        $(document).on("shown.bs.modal", function(e) {
+            $(e.target).find("select").each(function() {
+                if (!$(this).data("select2")) {
+                    var opts = { width: "100%", allowClear: true, dropdownParent: $(e.target), placeholder: $(this).find("option:first").text() || "Select..." };
+                    // Only init selects that have more than 4 options (skip tiny selects)
+                    if ($(this).find("option").length > 4) {
+                        $(this).select2(opts);
+                    }
+                }
+            });
+        });
+    });
+    </script>';
 }
 
 /**
@@ -5107,17 +5200,6 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
         jQuery("#assignSenderIdModal").modal("show");
     }
 
-    // Initialize Select2 on the client dropdown for searchable selection
-    jQuery(document).ready(function() {
-        if (jQuery.fn.select2) {
-            jQuery("#assign_client_select").select2({
-                placeholder: "Search for a client...",
-                allowClear: true,
-                width: "100%",
-                dropdownParent: jQuery("#assignSenderIdModal")
-            });
-        }
-    });
     </script>';
 }
 
