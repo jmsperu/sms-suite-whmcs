@@ -59,7 +59,7 @@ class ApiController
 
                 // Contacts
                 'contacts' => $method === 'GET' ? $this->getContacts($params) : $this->createContact($params),
-                'contacts/groups' => $this->getContactGroups($params),
+                'contacts/groups' => $method === 'GET' ? $this->getContactGroups($params) : $this->createContactGroup($params),
                 'contacts/import' => $this->importContacts($params),
 
                 // Campaigns
@@ -495,6 +495,38 @@ class ApiController
             ->toArray();
 
         return $this->success(['groups' => $groups]);
+    }
+
+    /**
+     * Create contact group
+     */
+    private function createContactGroup(array $params): array
+    {
+        if (!ApiKeyService::hasScope($this->apiKey, 'contacts')) {
+            return $this->error('Insufficient permissions', 403);
+        }
+
+        $name = $params['name'] ?? null;
+
+        if (empty($name)) {
+            return $this->error('Missing required parameter: name', 400);
+        }
+
+        $id = Capsule::table('mod_sms_contact_groups')->insertGetId([
+            'client_id' => $this->apiKey['client_id'],
+            'name' => $name,
+            'description' => $params['description'] ?? null,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_create_contact_group', [
+            'client_id' => $this->apiKey['client_id'],
+            'key_id' => $this->apiKey['key_id'],
+            'group_id' => $id,
+        ]);
+
+        return $this->success(['id' => $id], 201);
     }
 
     /**
