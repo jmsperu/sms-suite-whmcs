@@ -243,7 +243,7 @@ function sms_suite_client_dashboard($vars, $clientId, $lang)
         'breadcrumb' => [
             $modulelink => $lang['module_name'],
         ],
-        'templatefile' => 'client/dashboard',
+        'templatefile' => 'templates/client/dashboard',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -335,7 +335,7 @@ function sms_suite_client_send($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=send' => $lang['menu_send_sms'],
         ],
-        'templatefile' => 'client/send',
+        'templatefile' => 'templates/client/send',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -452,7 +452,7 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=campaigns' => $lang['campaigns'],
         ],
-        'templatefile' => 'client/campaigns',
+        'templatefile' => 'templates/client/campaigns',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -560,7 +560,7 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=contacts' => $lang['contacts'],
         ],
-        'templatefile' => 'client/contacts',
+        'templatefile' => 'templates/client/contacts',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -670,7 +670,7 @@ function sms_suite_client_contact_groups($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=contact_groups' => $lang['contact_groups'],
         ],
-        'templatefile' => 'client/contact_groups',
+        'templatefile' => 'templates/client/contact_groups',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -763,7 +763,7 @@ function sms_suite_client_sender_ids($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=sender_ids' => $lang['sender_ids'],
         ],
-        'templatefile' => 'client/sender_ids',
+        'templatefile' => 'templates/client/sender_ids',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -797,7 +797,7 @@ function sms_suite_client_templates($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=templates' => $lang['templates'],
         ],
-        'templatefile' => 'client/templates',
+        'templatefile' => 'templates/client/templates',
         'vars' => [
             'modulelink' => $vars['modulelink'],
             'lang' => $lang,
@@ -824,7 +824,7 @@ function sms_suite_client_logs($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=logs' => $lang['message_log'],
         ],
-        'templatefile' => 'client/logs',
+        'templatefile' => 'templates/client/logs',
         'vars' => [
             'modulelink' => $vars['modulelink'],
             'lang' => $lang,
@@ -902,7 +902,7 @@ function sms_suite_client_api_keys($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=api_keys' => $lang['api_keys'],
         ],
-        'templatefile' => 'client/api_keys',
+        'templatefile' => 'templates/client/api_keys',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1002,7 +1002,7 @@ function sms_suite_client_inbox($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=inbox' => 'Inbox',
         ],
-        'templatefile' => 'client/inbox',
+        'templatefile' => 'templates/client/inbox',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1092,7 +1092,7 @@ function sms_suite_client_conversation($vars, $clientId, $lang)
             $modulelink . '&action=inbox' => 'Inbox',
             '' => 'Conversation',
         ],
-        'templatefile' => 'client/conversation',
+        'templatefile' => 'templates/client/conversation',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1230,7 +1230,7 @@ function sms_suite_client_billing($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=billing' => $lang['billing'],
         ],
-        'templatefile' => 'client/billing',
+        'templatefile' => 'templates/client/billing',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1298,7 +1298,7 @@ function sms_suite_client_reports($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=reports' => $lang['reports'],
         ],
-        'templatefile' => 'client/reports',
+        'templatefile' => 'templates/client/reports',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
@@ -1482,7 +1482,7 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
             $modulelink => $lang['module_name'],
             $modulelink . '&action=preferences' => $lang['preferences'] ?? 'Preferences',
         ],
-        'templatefile' => 'client/preferences',
+        'templatefile' => 'templates/client/preferences',
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,

@@ -416,7 +416,7 @@ function sms_suite_clientarea($vars)
         return [
             'pagetitle' => 'SMS Suite',
             'breadcrumb' => [$modulelink => 'SMS Suite'],
-            'templatefile' => 'client/error',
+            'templatefile' => 'templates/client/error',
             'vars' => [
                 'error' => 'You must be logged in to access this page.',
             ],
@@ -431,7 +431,11 @@ function sms_suite_clientarea($vars)
     if (file_exists($clientController)) {
         require_once $clientController;
         if (function_exists('sms_suite_client_dispatch')) {
-            return sms_suite_client_dispatch($vars, $action, $clientId, $lang);
+            $result = sms_suite_client_dispatch($vars, $action, $clientId, $lang);
+            // Ensure WHMCS login/SSL properties are set
+            $result['requirelogin'] = true;
+            $result['forcessl'] = false;
+            return $result;
         }
     }
 
@@ -439,7 +443,9 @@ function sms_suite_clientarea($vars)
     return [
         'pagetitle' => 'SMS Suite',
         'breadcrumb' => [$modulelink => 'SMS Suite'],
-        'templatefile' => 'client/dashboard',
+        'templatefile' => 'templates/client/dashboard',
+        'requirelogin' => true,
+        'forcessl' => false,
         'vars' => [
             'modulelink' => $modulelink,
             'lang' => $lang,
