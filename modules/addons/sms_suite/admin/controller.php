@@ -3056,23 +3056,54 @@ function sms_suite_admin_diagnostics($vars, $lang)
     // Handle manual repair action
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['repair_database'])) {
         $result = sms_suite_repair_tables();
+
+        // Fallback: directly add any still-missing columns via Capsule::statement
+        $colCheck = sms_suite_diagnose_columns();
+        $directFixed = 0;
+        if (!empty($colCheck['missing'])) {
+            $columnDefs = [
+                'mod_sms_sender_id_pool.country_codes' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `country_codes` TEXT NULL",
+                'mod_sms_sender_id_pool.description' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `description` TEXT NULL",
+                'mod_sms_sender_id_pool.price_setup' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_setup` DECIMAL(10,2) NOT NULL DEFAULT 0",
+                'mod_sms_sender_id_pool.price_monthly' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_monthly` DECIMAL(10,2) NOT NULL DEFAULT 0",
+                'mod_sms_sender_id_pool.price_yearly' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_yearly` DECIMAL(10,2) NOT NULL DEFAULT 0",
+                'mod_sms_sender_id_pool.requires_approval' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `requires_approval` TINYINT(1) NOT NULL DEFAULT 1",
+                'mod_sms_sender_id_pool.is_shared' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `is_shared` TINYINT(1) NOT NULL DEFAULT 0",
+                'mod_sms_sender_id_pool.network' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `network` VARCHAR(20) NOT NULL DEFAULT 'all'",
+                'mod_sms_sender_id_pool.telco_status' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_status` VARCHAR(20) NOT NULL DEFAULT 'approved'",
+                'mod_sms_sender_id_pool.telco_approved_date' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_approved_date` DATE NULL",
+                'mod_sms_sender_id_pool.telco_reference' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_reference` VARCHAR(100) NULL",
+            ];
+            foreach ($colCheck['missing'] as $missingCol) {
+                if (isset($columnDefs[$missingCol])) {
+                    try {
+                        Capsule::statement($columnDefs[$missingCol]);
+                        $directFixed++;
+                    } catch (\Exception $e) {
+                        $result['errors'][] = "Direct fix {$missingCol}: " . $e->getMessage();
+                    }
+                }
+            }
+        }
+
         $parts = [];
         if ($result['repaired'] > 0) $parts[] = $result['repaired'] . ' tables created';
-        if (($result['columns_repaired'] ?? 0) > 0) $parts[] = ($result['columns_repaired'] ?? 0) . ' columns added';
-        if ($result['success']) {
-            $repairMessage = 'Database repair completed successfully. ' . (implode(', ', $parts) ?: 'All tables and columns verified.') ;
+        $totalColFixed = ($result['columns_repaired'] ?? 0) + $directFixed;
+        if ($totalColFixed > 0) $parts[] = $totalColFixed . ' columns added';
+        // Re-diagnose after repair
+        $diagnosis = sms_suite_diagnose_tables();
+        $colDiagnosis = sms_suite_diagnose_columns();
+        if (empty($diagnosis['missing']) && empty($colDiagnosis['missing'])) {
+            $repairMessage = 'Database repair completed successfully. ' . (implode(', ', $parts) ?: 'All tables and columns verified.');
             $repairType = 'success';
         } else {
             $issues = [];
-            if (!empty($result['still_missing'])) $issues[] = 'Tables: ' . implode(', ', $result['still_missing']);
-            if (!empty($result['columns_still_missing'])) $issues[] = 'Columns: ' . implode(', ', $result['columns_still_missing']);
+            if (!empty($diagnosis['missing'])) $issues[] = 'Tables: ' . implode(', ', $diagnosis['missing']);
+            if (!empty($colDiagnosis['missing'])) $issues[] = 'Columns: ' . implode(', ', $colDiagnosis['missing']);
             if (!empty($result['errors'])) $issues[] = 'Errors: ' . implode('; ', $result['errors']);
             $repairMessage = 'Database repair completed with issues. ' . implode('. ', $issues);
             $repairType = 'warning';
         }
-        // Re-diagnose after repair
-        $diagnosis = sms_suite_diagnose_tables();
-        $colDiagnosis = sms_suite_diagnose_columns();
     }
 
     echo '<div class="panel panel-default">';
