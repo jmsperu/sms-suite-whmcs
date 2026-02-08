@@ -3924,6 +3924,7 @@ function sms_suite_diagnose_tables()
         'mod_sms_api_rate_limits',
         'mod_sms_rate_limits',
         'mod_sms_verification_tokens',
+        'mod_sms_verification_templates',
         'mod_sms_verification_logs',
         'mod_sms_blacklist',
         'mod_sms_optouts',
