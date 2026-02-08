@@ -154,6 +154,17 @@ class SecurityHelper
     }
 
     /**
+     * Sanitize a general string input (trim whitespace, strip tags)
+     *
+     * @param string $value
+     * @return string
+     */
+    public static function sanitize(string $value): string
+    {
+        return trim(strip_tags($value));
+    }
+
+    /**
      * Sanitize phone number
      *
      * @param string $phone
