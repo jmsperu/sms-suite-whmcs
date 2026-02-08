@@ -1557,9 +1557,15 @@ function sms_suite_create_tables_sql()
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_sender_id_pool");
     } else {
-        // Add missing columns to existing table
+        // Add missing columns to existing table (no AFTER clauses — target columns may not exist)
         if (!$columnExists('mod_sms_sender_id_pool', 'network')) {
-            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `network` VARCHAR(20) DEFAULT 'all' AFTER `type`", "Add network to mod_sms_sender_id_pool");
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `network` VARCHAR(20) DEFAULT 'all'", "Add network to mod_sms_sender_id_pool");
+        }
+        if (!$columnExists('mod_sms_sender_id_pool', 'country_codes')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `country_codes` TEXT", "Add country_codes to mod_sms_sender_id_pool");
+        }
+        if (!$columnExists('mod_sms_sender_id_pool', 'description')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `description` TEXT", "Add description to mod_sms_sender_id_pool");
         }
         if (!$columnExists('mod_sms_sender_id_pool', 'price_setup')) {
             $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_setup` DECIMAL(10,2) DEFAULT 0", "Add price_setup to mod_sms_sender_id_pool");
@@ -1570,14 +1576,20 @@ function sms_suite_create_tables_sql()
         if (!$columnExists('mod_sms_sender_id_pool', 'price_yearly')) {
             $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_yearly` DECIMAL(10,2) DEFAULT 0", "Add price_yearly to mod_sms_sender_id_pool");
         }
+        if (!$columnExists('mod_sms_sender_id_pool', 'requires_approval')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `requires_approval` TINYINT(1) DEFAULT 1", "Add requires_approval to mod_sms_sender_id_pool");
+        }
+        if (!$columnExists('mod_sms_sender_id_pool', 'is_shared')) {
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `is_shared` TINYINT(1) DEFAULT 0", "Add is_shared to mod_sms_sender_id_pool");
+        }
         if (!$columnExists('mod_sms_sender_id_pool', 'telco_status')) {
-            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_status` VARCHAR(20) DEFAULT 'approved' AFTER `is_shared`", "Add telco_status to mod_sms_sender_id_pool");
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_status` VARCHAR(20) DEFAULT 'approved'", "Add telco_status to mod_sms_sender_id_pool");
         }
         if (!$columnExists('mod_sms_sender_id_pool', 'telco_approved_date')) {
-            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_approved_date` DATE AFTER `telco_status`", "Add telco_approved_date to mod_sms_sender_id_pool");
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_approved_date` DATE", "Add telco_approved_date to mod_sms_sender_id_pool");
         }
         if (!$columnExists('mod_sms_sender_id_pool', 'telco_reference')) {
-            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_reference` VARCHAR(100) AFTER `telco_approved_date`", "Add telco_reference to mod_sms_sender_id_pool");
+            $execSql("ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `telco_reference` VARCHAR(100)", "Add telco_reference to mod_sms_sender_id_pool");
         }
     }
 
@@ -2945,11 +2957,21 @@ function sms_suite_create_tables()
         });
     }
 
-    // Add network column to existing mod_sms_sender_id_pool if it exists
+    // Add missing columns to existing mod_sms_sender_id_pool (no after() — target columns may not exist)
     if ($schema->hasTable('mod_sms_sender_id_pool')) {
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'network')) {
             $schema->table('mod_sms_sender_id_pool', function ($table) {
-                $table->string('network', 20)->default('all')->after('type');
+                $table->string('network', 20)->default('all');
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'country_codes')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->text('country_codes')->nullable();
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'description')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->text('description')->nullable();
             });
         }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'price_setup')) {
@@ -2967,19 +2989,29 @@ function sms_suite_create_tables()
                 $table->decimal('price_yearly', 10, 2)->default(0);
             });
         }
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'requires_approval')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->boolean('requires_approval')->default(true);
+            });
+        }
+        if (!$schema->hasColumn('mod_sms_sender_id_pool', 'is_shared')) {
+            $schema->table('mod_sms_sender_id_pool', function ($table) {
+                $table->boolean('is_shared')->default(false);
+            });
+        }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'telco_status')) {
             $schema->table('mod_sms_sender_id_pool', function ($table) {
-                $table->string('telco_status', 20)->default('approved')->after('is_shared');
+                $table->string('telco_status', 20)->default('approved');
             });
         }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'telco_approved_date')) {
             $schema->table('mod_sms_sender_id_pool', function ($table) {
-                $table->date('telco_approved_date')->nullable()->after('telco_status');
+                $table->date('telco_approved_date')->nullable();
             });
         }
         if (!$schema->hasColumn('mod_sms_sender_id_pool', 'telco_reference')) {
             $schema->table('mod_sms_sender_id_pool', function ($table) {
-                $table->string('telco_reference', 100)->nullable()->after('telco_approved_date');
+                $table->string('telco_reference', 100)->nullable();
             });
         }
     }
@@ -3533,7 +3565,7 @@ function sms_suite_diagnose_columns()
         'mod_sms_wallet_transactions' => ['client_id', 'type', 'amount', 'balance_after', 'description'],
         'mod_sms_sender_id_requests' => ['client_id', 'sender_id', 'pool_id', 'business_name', 'billing_cycle', 'setup_fee', 'recurring_fee', 'invoice_id', 'status', 'approved_by', 'approved_at', 'expires_at'],
         'mod_sms_sender_id_billing' => ['client_sender_id', 'client_id', 'billing_type', 'amount', 'invoice_id', 'period_start', 'period_end', 'status'],
-        'mod_sms_sender_id_pool' => ['sender_id', 'type', 'network', 'gateway_id', 'price_setup', 'price_monthly', 'price_yearly', 'telco_status', 'status'],
+        'mod_sms_sender_id_pool' => ['sender_id', 'type', 'network', 'gateway_id', 'country_codes', 'description', 'price_setup', 'price_monthly', 'price_yearly', 'requires_approval', 'is_shared', 'telco_status', 'status'],
         'mod_sms_destination_rates' => ['country_code', 'network', 'sms_rate', 'whatsapp_rate', 'credit_cost', 'status'],
         'mod_sms_client_rates' => ['client_id', 'gateway_id', 'country_code', 'network_prefix', 'sms_rate', 'whatsapp_rate', 'status', 'priority'],
         'mod_sms_api_keys' => ['client_id', 'name', 'key_id', 'secret_hash', 'scopes', 'rate_limit', 'status', 'last_used_at', 'expires_at'],
