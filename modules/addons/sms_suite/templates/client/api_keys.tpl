@@ -1,3 +1,4 @@
+{$sms_css nofilter}
 <div class="sms-suite-api-keys">
     <div class="row">
         <div class="col-sm-12">

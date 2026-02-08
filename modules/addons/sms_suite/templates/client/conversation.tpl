@@ -1,3 +1,4 @@
+{$sms_css nofilter}
 <div class="sms-suite-conversation">
     <!-- Header -->
     <div class="panel panel-default">

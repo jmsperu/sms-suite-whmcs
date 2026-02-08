@@ -1,3 +1,4 @@
+{$sms_css nofilter}
 <div class="sms-suite-billing">
     <div class="row">
         <div class="col-sm-12">

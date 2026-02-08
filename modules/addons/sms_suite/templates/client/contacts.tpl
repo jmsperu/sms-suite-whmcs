@@ -1,3 +1,4 @@
+{$sms_css nofilter}
 <div class="sms-suite-contacts">
     <div class="row">
         <div class="col-sm-8">

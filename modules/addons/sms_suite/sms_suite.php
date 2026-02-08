@@ -426,6 +426,42 @@ function sms_suite_clientarea($vars)
     // Load language
     $lang = sms_suite_load_language();
 
+    // Bootstrap 3 → 4/5 compatibility CSS for client templates
+    $smsCss = '<style>
+/* SMS Suite - Bootstrap Compatibility */
+.nav-pills{display:flex;flex-wrap:wrap;padding-left:0;margin-bottom:1.5rem;list-style:none;gap:.25rem}
+.nav-pills>li{list-style:none}
+.nav-pills>li>a{display:block;padding:.5rem 1rem;border-radius:.375rem;color:#495057;text-decoration:none;background-color:#f8f9fa;transition:all .15s}
+.nav-pills>li>a:hover{background-color:#e2e6ea;color:#212529}
+.nav-pills>li.active>a,.nav-pills>li>a.active{background-color:#007bff;color:#fff}
+.panel{background:#fff;border:1px solid rgba(0,0,0,.125);border-radius:.375rem;margin-bottom:1.5rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.panel-heading{padding:.75rem 1.25rem;background-color:#f8f9fa;border-bottom:1px solid rgba(0,0,0,.125);border-radius:.375rem .375rem 0 0}
+.panel-body{padding:1.25rem}
+.panel-title{margin:0;font-size:1rem;font-weight:600}
+.panel-footer{padding:.75rem 1.25rem;background-color:#f8f9fa;border-top:1px solid rgba(0,0,0,.125)}
+.panel-primary .panel-heading{background-color:#007bff;color:#fff;border-color:#007bff}
+.panel-success .panel-heading{background-color:#28a745;color:#fff;border-color:#28a745}
+.panel-info .panel-heading{background-color:#17a2b8;color:#fff;border-color:#17a2b8}
+.panel-warning .panel-heading{background-color:#ffc107;color:#333;border-color:#ffc107}
+.panel-danger .panel-heading{background-color:#dc3545;color:#fff;border-color:#dc3545}
+.label{display:inline-block;padding:.35em .65em;font-size:.75em;font-weight:700;line-height:1;color:#fff;text-align:center;white-space:nowrap;vertical-align:baseline;border-radius:.375rem}
+.label-default{background-color:#6c757d}
+.label-primary{background-color:#007bff}
+.label-success{background-color:#28a745}
+.label-info{background-color:#17a2b8}
+.label-warning{background-color:#ffc107;color:#333}
+.label-danger{background-color:#dc3545}
+.well{min-height:20px;padding:1rem;margin-bottom:1rem;background-color:#f8f9fa;border:1px solid #dee2e6;border-radius:.375rem}
+.well-sm{padding:.75rem}
+.btn-default{color:#333;background-color:#f8f9fa;border-color:#dee2e6}
+.btn-default:hover{color:#333;background-color:#e2e6ea;border-color:#dae0e5}
+.btn-xs{padding:.125rem .375rem;font-size:.75rem;border-radius:.2rem}
+.help-block{display:block;margin-top:.25rem;color:#6c757d;font-size:.875em}
+.form-control-static{min-height:calc(1.5em + .75rem + 2px);padding-top:calc(.375rem + 1px);margin-bottom:0}
+.sms-suite-dashboard .panel-heading h4{margin:0;font-size:1.75rem;font-weight:700}
+.sms-suite-dashboard .panel-heading p{margin:0;font-size:.875rem;opacity:.9}
+</style>';
+
     // Include client controller
     $clientController = __DIR__ . '/client/controller.php';
     if (file_exists($clientController)) {
@@ -435,6 +471,8 @@ function sms_suite_clientarea($vars)
             // Ensure WHMCS login/SSL properties are set
             $result['requirelogin'] = true;
             $result['forcessl'] = false;
+            // Inject CSS compatibility layer
+            $result['vars']['sms_css'] = $smsCss;
             return $result;
         }
     }
@@ -450,6 +488,7 @@ function sms_suite_clientarea($vars)
             'modulelink' => $modulelink,
             'lang' => $lang,
             'client_id' => $clientId,
+            'sms_css' => $smsCss,
         ],
     ];
 }
