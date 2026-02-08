@@ -53,7 +53,7 @@
  */
 
 // Bootstrap WHMCS
-$whmcsPath = dirname(dirname(dirname(dirname(__DIR__))));
+$whmcsPath = dirname(__DIR__, 3);
 require_once $whmcsPath . '/init.php';
 require_once $whmcsPath . '/includes/api.php';
 
