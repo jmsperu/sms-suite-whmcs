@@ -3700,11 +3700,33 @@ function sms_suite_admin_client_settings($vars, $lang)
     $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
     $senderIds = Capsule::table('mod_sms_sender_ids')
         ->where(function($q) use ($clientId) {
-            $q->whereNull('client_id')->orWhere('client_id', $clientId);
+            $q->whereNull('client_id')->orWhere('client_id', 0)->orWhere('client_id', $clientId);
         })
         ->where('status', 'active')
         ->orderBy('sender_id')
         ->get();
+
+    // Also include sender IDs assigned from the pool
+    $poolAssigned = Capsule::table('mod_sms_client_sender_ids')
+        ->where('client_id', $clientId)
+        ->where('status', 'active')
+        ->get();
+    foreach ($poolAssigned as $pa) {
+        // Avoid duplicates
+        $exists = false;
+        foreach ($senderIds as $existing) {
+            if ($existing->sender_id === $pa->sender_id) {
+                $exists = true;
+                break;
+            }
+        }
+        if (!$exists) {
+            $obj = new \stdClass();
+            $obj->sender_id = $pa->sender_id;
+            $obj->client_id = $clientId;
+            $senderIds[] = $obj;
+        }
+    }
 
     // Get wallet balance
     $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
@@ -5084,6 +5106,18 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
         document.getElementById("assign_network_select").value = network;
         jQuery("#assignSenderIdModal").modal("show");
     }
+
+    // Initialize Select2 on the client dropdown for searchable selection
+    jQuery(document).ready(function() {
+        if (jQuery.fn.select2) {
+            jQuery("#assign_client_select").select2({
+                placeholder: "Search for a client...",
+                allowClear: true,
+                width: "100%",
+                dropdownParent: jQuery("#assignSenderIdModal")
+            });
+        }
+    });
     </script>';
 }
 
