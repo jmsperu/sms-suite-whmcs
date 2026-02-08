@@ -225,14 +225,9 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
  */
 function sms_suite_admin_select2_init()
 {
-    // Get the modulelink for AJAX URLs
-    $modulelink = isset($_GET['module']) ? 'addonmodules.php?module=' . urlencode($_GET['module']) : 'addonmodules.php?module=sms_suite';
-
     echo '<script>
     jQuery(document).ready(function($) {
         if (!$.fn.select2) { return; }
-
-        var ajaxBase = "' . $modulelink . '";
 
         // Helper: init Select2 on elements, with modal dropdownParent if inside a .modal
         function initS2(selector, opts) {
@@ -245,38 +240,14 @@ function sms_suite_admin_select2_init()
             });
         }
 
-        // Helper: init AJAX-based Select2 for large datasets
-        function initS2Ajax(selector, ajaxAction, placeholder) {
-            $(selector).each(function() {
-                if ($(this).data("select2")) { return; }
-                var opts = {
-                    width: "100%",
-                    allowClear: true,
-                    placeholder: placeholder || "Search...",
-                    minimumInputLength: 0,
-                    ajax: {
-                        url: ajaxBase + "&action=" + ajaxAction,
-                        dataType: "json",
-                        delay: 300,
-                        data: function(params) { return { q: params.term || "", page: params.page || 1 }; },
-                        processResults: function(data) { return { results: data.results || [], pagination: { more: data.pagination ? data.pagination.more : false } }; },
-                        cache: true
-                    }
-                };
-                var modal = $(this).closest(".modal");
-                if (modal.length) { opts.dropdownParent = modal; }
-                $(this).select2(opts);
-            });
-        }
+        // --- Client selectors ---
+        initS2("#assign_client_select", { placeholder: "Search for a client..." });
+        initS2("select[name=\"client_id\"]", { placeholder: "Search for a client..." });
 
-        // --- Client selectors: AJAX-based for reliable search across all clients ---
-        initS2Ajax("#assign_client_select", "ajax_search_clients", "Search for a client...");
-        initS2Ajax("select[name=\"client_id\"]", "ajax_search_clients", "Search for a client...");
-
-        // --- Sender ID selectors: AJAX-based to include both tables ---
-        initS2Ajax("#edit_sender", "ajax_search_sender_ids", "Search sender ID...");
-        initS2Ajax("select[name=\"assigned_sender_id\"]", "ajax_search_sender_ids", "Search sender ID...");
-        initS2Ajax("select[name=\"sender_id\"]", "ajax_search_sender_ids", "Search sender ID...");
+        // --- Sender ID selectors ---
+        initS2("select[name=\"sender_id\"]", { placeholder: "Select sender ID..." });
+        initS2("#edit_sender", { placeholder: "Select sender ID..." });
+        initS2("select[name=\"assigned_sender_id\"]", { placeholder: "Select sender ID..." });
 
         // --- Gateway selectors ---
         initS2("select[name=\"gateway_id\"]", { placeholder: "Select gateway..." });
@@ -1534,8 +1505,8 @@ function sms_suite_admin_campaign_edit($vars, $lang)
     // Get gateways
     $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
 
-    // Get sender IDs
-    $senderIds = Capsule::table('mod_sms_sender_ids')->where('status', 'active')->orderBy('sender_id')->get();
+    // Get sender IDs (from both tables)
+    $senderIds = sms_suite_get_all_sender_ids();
 
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_campaign'])) {
@@ -2960,21 +2931,7 @@ function sms_suite_admin_clients($vars, $lang)
     $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
 
     // Get sender IDs for dropdown (from both old table and pool)
-    $senderIds = Capsule::table('mod_sms_sender_ids')->where('status', 'active')->orderBy('sender_id')->get();
-    try {
-        $poolSenderIds = Capsule::table('mod_sms_sender_id_pool')->where('status', 'active')->orderBy('sender_id')->get();
-        // Merge pool IDs, avoiding duplicates
-        $existingIds = $senderIds->pluck('sender_id')->toArray();
-        foreach ($poolSenderIds as $pid) {
-            if (!in_array($pid->sender_id, $existingIds)) {
-                $pid->client_id = null; // Pool IDs are global
-                $senderIds->push($pid);
-                $existingIds[] = $pid->sender_id;
-            }
-        }
-    } catch (\Exception $e) {
-        // Pool table might not exist
-    }
+    $senderIds = sms_suite_get_all_sender_ids();
 
     echo '<div class="panel panel-default">';
     echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-users"></i> Client SMS Settings</h3></div>';
@@ -3472,12 +3429,8 @@ function sms_suite_admin_send($vars, $lang)
         ->orderBy('name')
         ->get();
 
-    // Get global sender IDs (admin-level)
-    $senderIds = Capsule::table('mod_sms_sender_ids')
-        ->whereNull('client_id')
-        ->where('status', 'active')
-        ->orderBy('sender_id')
-        ->get();
+    // Get global sender IDs (admin-level, from both tables)
+    $senderIds = sms_suite_get_all_sender_ids();
 
     echo '<div class="panel panel-default">';
     echo '<div class="panel-heading"><h3 class="panel-title">' . $lang['menu_send_sms'] . '</h3></div>';
@@ -3839,37 +3792,9 @@ function sms_suite_admin_client_settings($vars, $lang)
         }
     }
 
-    // Get gateways and sender IDs
+    // Get gateways and sender IDs (from both tables)
     $gateways = Capsule::table('mod_sms_gateways')->where('status', 1)->orderBy('name')->get();
-    $senderIds = Capsule::table('mod_sms_sender_ids')
-        ->where(function($q) use ($clientId) {
-            $q->whereNull('client_id')->orWhere('client_id', 0)->orWhere('client_id', $clientId);
-        })
-        ->where('status', 'active')
-        ->orderBy('sender_id')
-        ->get();
-
-    // Also include sender IDs assigned from the pool
-    $poolAssigned = Capsule::table('mod_sms_client_sender_ids')
-        ->where('client_id', $clientId)
-        ->where('status', 'active')
-        ->get();
-    foreach ($poolAssigned as $pa) {
-        // Avoid duplicates
-        $exists = false;
-        foreach ($senderIds as $existing) {
-            if ($existing->sender_id === $pa->sender_id) {
-                $exists = true;
-                break;
-            }
-        }
-        if (!$exists) {
-            $obj = new \stdClass();
-            $obj->sender_id = $pa->sender_id;
-            $obj->client_id = $clientId;
-            $senderIds[] = $obj;
-        }
-    }
+    $senderIds = sms_suite_get_all_sender_ids($clientId);
 
     // Get wallet balance
     $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
@@ -4902,12 +4827,32 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
 
     // Client options for assignment modal
     $clientOptions = '';
-    foreach ($clients as $c) {
-        $clientName = trim($c->firstname . ' ' . $c->lastname);
-        if ($c->companyname) {
-            $clientName .= ' (' . $c->companyname . ')';
+    if (empty($clients)) {
+        // Fallback: query clients directly if helper returned empty
+        try {
+            $clients = Capsule::table('tblclients')
+                ->select(['id', 'firstname', 'lastname', 'companyname', 'email'])
+                ->where('status', 'Active')
+                ->orderBy('firstname')
+                ->orderBy('lastname')
+                ->get()
+                ->toArray();
+        } catch (\Exception $e) {
+            $clients = [];
         }
-        $clientOptions .= '<option value="' . $c->id . '">' . htmlspecialchars($clientName) . ' - ' . htmlspecialchars($c->email) . '</option>';
+    }
+    foreach ($clients as $c) {
+        // Support both object and array access
+        $id = is_object($c) ? $c->id : $c['id'];
+        $firstname = is_object($c) ? $c->firstname : $c['firstname'];
+        $lastname = is_object($c) ? $c->lastname : $c['lastname'];
+        $companyname = is_object($c) ? ($c->companyname ?? '') : ($c['companyname'] ?? '');
+        $email = is_object($c) ? $c->email : $c['email'];
+        $clientName = trim($firstname . ' ' . $lastname);
+        if ($companyname) {
+            $clientName .= ' (' . $companyname . ')';
+        }
+        $clientOptions .= '<option value="' . $id . '">' . htmlspecialchars($clientName) . ' - ' . htmlspecialchars($email) . '</option>';
     }
 
     // Create Sender ID Modal
@@ -5060,7 +5005,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                         </div>
 
                         <div class="form-group">
-                            <label>Select Client <span class="text-danger">*</span></label>
+                            <label>Select Client <span class="text-danger">*</span> <small class="text-muted">(' . count($clients) . ' clients loaded)</small></label>
                             <select name="client_id" class="form-control" required id="assign_client_select">
                                 <option value="">-- Select Client --</option>
                                 ' . $clientOptions . '
@@ -5412,13 +5357,54 @@ function sms_suite_assign_sender_id_to_client(int $clientId, int $poolId, string
  */
 function sms_suite_get_clients_dropdown(): array
 {
-    return Capsule::table('tblclients')
-        ->select(['id', 'firstname', 'lastname', 'companyname', 'email'])
-        ->orderBy('firstname')
-        ->orderBy('lastname')
-        ->limit(500)
-        ->get()
-        ->toArray();
+    try {
+        $results = Capsule::table('tblclients')
+            ->select(['id', 'firstname', 'lastname', 'companyname', 'email'])
+            ->where('status', 'Active')
+            ->orderBy('firstname')
+            ->orderBy('lastname')
+            ->limit(1000)
+            ->get();
+        return $results->all();
+    } catch (\Exception $e) {
+        return [];
+    }
+}
+
+/**
+ * Get all sender IDs from both old table and pool table
+ */
+function sms_suite_get_all_sender_ids(?int $clientId = null)
+{
+    // Get from old sender IDs table
+    $query = Capsule::table('mod_sms_sender_ids')->where('status', 'active');
+    if ($clientId) {
+        $query->where(function ($q) use ($clientId) {
+            $q->whereNull('client_id')->orWhere('client_id', 0)->orWhere('client_id', $clientId);
+        });
+    }
+    $senderIds = $query->orderBy('sender_id')->get();
+
+    // Merge from pool table
+    try {
+        $poolIds = Capsule::table('mod_sms_sender_id_pool')->where('status', 'active')->orderBy('sender_id')->get();
+        $existingIds = $senderIds->pluck('sender_id')->toArray();
+        foreach ($poolIds as $pid) {
+            if (!in_array($pid->sender_id, $existingIds)) {
+                $obj = new \stdClass();
+                $obj->sender_id = $pid->sender_id;
+                $obj->client_id = null;
+                $obj->status = 'active';
+                $obj->network = $pid->network ?? 'all';
+                $senderIds->push($obj);
+                $existingIds[] = $pid->sender_id;
+            }
+        }
+    } catch (\Exception $e) {
+        // Pool table might not exist
+    }
+
+    return $senderIds;
 }
 
 /**
