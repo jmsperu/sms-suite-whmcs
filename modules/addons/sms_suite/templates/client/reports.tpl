@@ -14,25 +14,25 @@
     </ul>
 
     <!-- Date Range Filter -->
-    <div class="panel panel-default" style="margin-bottom: 16px;">
-        <div class="panel-body" style="padding: 14px 20px;">
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-body" style="padding: 14px 20px;">
             <form method="get" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
                 <input type="hidden" name="m" value="sms_suite">
                 <input type="hidden" name="action" value="reports">
 
                 <div class="form-group" style="margin: 0;">
                     <label style="margin-right: 6px; font-size: .85rem;">{$lang.report_from}:</label>
-                    <input type="date" name="start_date" class="form-control" value="{$start_date}" style="width: auto;">
+                    <input type="date" name="start_date" class="form-control" value="{$start_date}" style="width: auto; min-width: 160px;">
                 </div>
 
                 <div class="form-group" style="margin: 0;">
                     <label style="margin-right: 6px; font-size: .85rem;">{$lang.report_to}:</label>
-                    <input type="date" name="end_date" class="form-control" value="{$end_date}" style="width: auto;">
+                    <input type="date" name="end_date" class="form-control" value="{$end_date}" style="width: auto; min-width: 160px;">
                 </div>
 
                 <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-chart-bar"></i> {$lang.report_generate}</button>
 
-                <a href="{$modulelink}&action=reports&start_date={$start_date}&end_date={$end_date}&export=csv" class="btn btn-default btn-sm">
+                <a href="{$modulelink}&action=reports&start_date={$start_date}&end_date={$end_date}&export=csv" class="btn btn-outline-secondary btn-sm">
                     <i class="fas fa-download"></i> {$lang.export} CSV
                 </a>
             </form>
@@ -65,7 +65,7 @@
         <div class="col-sm-6 col-md-3" style="margin-bottom: 16px;">
             <div class="sms-stat-card">
                 <div class="stat-icon bg-orange"><i class="fas fa-dollar-sign"></i></div>
-                <h3 class="stat-value">${$summary.total_cost|number_format:2}</h3>
+                <h3 class="stat-value">{$currency_symbol}{$summary.total_cost|number_format:2}</h3>
                 <p class="stat-label">Total Cost</p>
             </div>
         </div>
@@ -74,11 +74,11 @@
     <div class="row">
         <!-- Status Breakdown -->
         <div class="col-md-6" style="margin-bottom: 24px;">
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-tasks"></i> Status Breakdown</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-tasks"></i> Status Breakdown</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     {if $summary.by_status}
                     <table class="table table-striped">
                         <thead>
@@ -93,13 +93,13 @@
                             <tr>
                                 <td>
                                     {if $status eq 'delivered'}
-                                    <span class="label label-success">{$status|ucfirst}</span>
+                                    <span class="badge badge-success">{$status|ucfirst}</span>
                                     {elseif $status eq 'sent'}
-                                    <span class="label label-info">{$status|ucfirst}</span>
+                                    <span class="badge badge-info">{$status|ucfirst}</span>
                                     {elseif $status eq 'failed' || $status eq 'undelivered'}
-                                    <span class="label label-danger">{$status|ucfirst}</span>
+                                    <span class="badge badge-danger">{$status|ucfirst}</span>
                                     {else}
-                                    <span class="label label-default">{$status|ucfirst}</span>
+                                    <span class="badge badge-secondary">{$status|ucfirst}</span>
                                     {/if}
                                 </td>
                                 <td class="text-right">{$count|number_format:0}</td>
@@ -121,11 +121,11 @@
 
         <!-- Channel Breakdown -->
         <div class="col-md-6" style="margin-bottom: 24px;">
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-broadcast-tower"></i> By Channel</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-broadcast-tower"></i> By Channel</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     {if $summary.by_channel}
                     <table class="table table-striped">
                         <thead>
@@ -140,9 +140,9 @@
                             <tr>
                                 <td>
                                     {if $channel eq 'whatsapp'}
-                                    <span class="label label-success">WhatsApp</span>
+                                    <span class="badge badge-success">WhatsApp</span>
                                     {else}
-                                    <span class="label label-info">SMS</span>
+                                    <span class="badge badge-info">SMS</span>
                                     {/if}
                                 </td>
                                 <td class="text-right">{$count|number_format:0}</td>
@@ -164,11 +164,11 @@
     </div>
 
     <!-- Daily Stats -->
-    <div class="panel panel-default">
-        <div class="panel-heading">
-            <h3 class="panel-title"><i class="fas fa-calendar-alt"></i> Daily Activity</h3>
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-calendar-alt"></i> Daily Activity</h3>
         </div>
-        <div class="panel-body">
+        <div class="card-body">
             {if $daily_stats && count($daily_stats) > 0}
             <div class="table-responsive">
                 <table class="table table-striped">
@@ -190,7 +190,7 @@
                             <td class="text-right" style="color: #00c853;">{$day->delivered|number_format:0}</td>
                             <td class="text-right" style="color: #ef4444;">{$day->failed|number_format:0}</td>
                             <td class="text-right">{$day->segments|number_format:0}</td>
-                            <td class="text-right">${$day->cost|number_format:2}</td>
+                            <td class="text-right">{$currency_symbol}{$day->cost|number_format:2}</td>
                         </tr>
                         {/foreach}
                     </tbody>

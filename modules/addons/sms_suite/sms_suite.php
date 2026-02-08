@@ -940,9 +940,17 @@ function sms_suite_create_tables_sql()
                 `contact_count` INT UNSIGNED DEFAULT 0,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client_group` (`client_id`, `name`),
                 INDEX `idx_client_id` (`client_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_contact_groups");
+    } else {
+        // Add unique constraint for client isolation
+        try {
+            $pdo->query("ALTER TABLE `mod_sms_contact_groups` ADD UNIQUE KEY `unique_client_group` (`client_id`, `name`)");
+        } catch (Exception $e) {
+            // Already exists or duplicate entries prevent it
+        }
     }
 
     // 9. Contact group custom fields
@@ -2193,6 +2201,7 @@ function sms_suite_create_tables_sql()
                 `status` TINYINT(1) DEFAULT 1,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client_segment` (`client_id`, `name`),
                 INDEX `idx_client_id` (`client_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_segments");
@@ -2202,6 +2211,12 @@ function sms_suite_create_tables_sql()
         }
         if (!$columnExists('mod_sms_segments', 'match_type')) {
             $execSql("ALTER TABLE `mod_sms_segments` ADD COLUMN `match_type` VARCHAR(10) DEFAULT 'all' AFTER `conditions`", "Add match_type to mod_sms_segments");
+        }
+        // Add unique constraint for client isolation
+        try {
+            $pdo->query("ALTER TABLE `mod_sms_segments` ADD UNIQUE KEY `unique_client_segment` (`client_id`, `name`)");
+        } catch (Exception $e) {
+            // Already exists or duplicate entries prevent it
         }
     }
 

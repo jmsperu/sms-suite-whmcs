@@ -663,7 +663,7 @@ class AdvancedCampaignService
             }
 
             // Calculate initial count
-            self::calculateSegmentCount($id);
+            self::calculateSegmentCount($id, $clientId);
 
             return ['success' => true, 'id' => $id];
         } catch (Exception $e) {
@@ -788,18 +788,26 @@ class AdvancedCampaignService
     /**
      * Calculate and update segment contact count
      */
-    public static function calculateSegmentCount(int $segmentId): int
+    public static function calculateSegmentCount(int $segmentId, int $clientId = 0): int
     {
+        // Verify segment belongs to client if client_id provided
+        if ($clientId > 0) {
+            $segment = Capsule::table('mod_sms_segments')
+                ->where('id', $segmentId)
+                ->where('client_id', $clientId)
+                ->first();
+            if (!$segment) return 0;
+        }
+
         $contacts = self::getSegmentContacts($segmentId);
         $count = count($contacts);
 
-        Capsule::table('mod_sms_segments')
-            ->where('id', $segmentId)
-            ->update([
-                'contact_count' => $count,
-                'last_calculated_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
+        $update = ['contact_count' => $count, 'last_calculated_at' => date('Y-m-d H:i:s')];
+        $query = Capsule::table('mod_sms_segments')->where('id', $segmentId);
+        if ($clientId > 0) {
+            $query->where('client_id', $clientId);
+        }
+        $query->update($update);
 
         return $count;
     }

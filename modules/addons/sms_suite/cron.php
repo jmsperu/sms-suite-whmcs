@@ -92,7 +92,6 @@ function processCampaignQueue()
             'last_run' => date('Y-m-d H:i:s'),
             'is_running' => true,
             'pid' => getmypid(),
-            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
     try {
@@ -111,7 +110,6 @@ function processCampaignQueue()
         ->update([
             'is_running' => false,
             'pid' => null,
-            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 }
 
@@ -129,7 +127,6 @@ function processMessageQueue()
             'last_run' => date('Y-m-d H:i:s'),
             'is_running' => true,
             'pid' => getmypid(),
-            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
     try {
@@ -169,7 +166,6 @@ function processMessageQueue()
         ->update([
             'is_running' => false,
             'pid' => null,
-            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 }
 
@@ -187,7 +183,6 @@ function processPendingWebhooks()
             'last_run' => date('Y-m-d H:i:s'),
             'is_running' => true,
             'pid' => getmypid(),
-            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
     try {
@@ -225,7 +220,6 @@ function processPendingWebhooks()
         ->update([
             'is_running' => false,
             'pid' => null,
-            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 }
 
@@ -295,7 +289,6 @@ function cleanRateLimitCounters()
         ->where('task', 'rate_limit_reset')
         ->update([
             'last_run' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
     try {

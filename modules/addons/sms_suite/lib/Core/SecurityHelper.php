@@ -287,33 +287,37 @@ class SecurityHelper
      */
     public static function checkRateLimit(string $key, int $limit, int $window = 60): bool
     {
-        $db = \WHMCS\Database\Capsule::table('mod_sms_rate_limits');
-        $windowStart = date('Y-m-d H:i:s', time() - $window);
+        // Convert string key to integer key_id via crc32
+        $keyId = abs(crc32($key));
+        // Use time-window bucketing (floor to nearest $window seconds)
+        $windowBucket = (string)(intdiv(time(), $window) * $window);
 
-        // Clean old entries
-        $db->where('created_at', '<', $windowStart)->delete();
+        // Clean old windows (older than 2 periods)
+        $oldWindow = (string)((intdiv(time(), $window) - 2) * $window);
+        \WHMCS\Database\Capsule::table('mod_sms_rate_limits')
+            ->where('window', '<', $oldWindow)
+            ->delete();
 
-        // Count recent attempts
-        $count = \WHMCS\Database\Capsule::table('mod_sms_rate_limits')
-            ->where('key', $key)
-            ->where('created_at', '>=', $windowStart)
-            ->count();
-
-        if ($count >= $limit) {
-            return false;
-        }
-
-        // Record this attempt
+        // Atomic upsert: insert or increment
         try {
-            \WHMCS\Database\Capsule::table('mod_sms_rate_limits')->insert([
-                'key' => $key,
-                'created_at' => date('Y-m-d H:i:s'),
-            ]);
+            \WHMCS\Database\Capsule::statement(
+                "INSERT INTO `mod_sms_rate_limits` (`key_id`, `window`, `requests`)
+                 VALUES (?, ?, 1)
+                 ON DUPLICATE KEY UPDATE `requests` = `requests` + 1",
+                [$keyId, $windowBucket]
+            );
         } catch (\Exception $e) {
-            // Ignore duplicate key errors
+            // Fallback: if the statement fails, allow through
+            return true;
         }
 
-        return true;
+        // Check current count
+        $count = \WHMCS\Database\Capsule::table('mod_sms_rate_limits')
+            ->where('key_id', $keyId)
+            ->where('window', $windowBucket)
+            ->value('requests');
+
+        return ($count ?? 0) <= $limit;
     }
 
     /**

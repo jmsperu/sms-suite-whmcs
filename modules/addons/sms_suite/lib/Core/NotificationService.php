@@ -105,10 +105,15 @@ class NotificationService
         }
 
         // Check if SMS notifications are enabled for this type
-        $template = Capsule::table('mod_sms_notification_templates')
-            ->where('notification_type', $notificationType)
-            ->where('status', 'active')
-            ->first();
+        try {
+            $template = Capsule::table('mod_sms_notification_templates')
+                ->where('notification_type', $notificationType)
+                ->where('status', 'active')
+                ->first();
+        } catch (Exception $e) {
+            // Column may not exist on older installs before migration
+            return null;
+        }
 
         if (!$template) {
             return null;
@@ -188,21 +193,26 @@ class NotificationService
         $defaults = self::getDefaultTemplates();
 
         foreach ($defaults as $type => $template) {
-            $exists = Capsule::table('mod_sms_notification_templates')
-                ->where('notification_type', $type)
-                ->exists();
+            try {
+                $exists = Capsule::table('mod_sms_notification_templates')
+                    ->where('notification_type', $type)
+                    ->exists();
 
-            if (!$exists) {
-                Capsule::table('mod_sms_notification_templates')->insert([
-                    'notification_type' => $type,
-                    'name' => $template['name'],
-                    'message' => $template['message'],
-                    'category' => self::getCategoryForType($type),
-                    'status' => 'inactive', // Inactive by default, admin enables
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
-                $created++;
+                if (!$exists) {
+                    Capsule::table('mod_sms_notification_templates')->insert([
+                        'notification_type' => $type,
+                        'name' => $template['name'],
+                        'message' => $template['message'],
+                        'category' => self::getCategoryForType($type),
+                        'status' => 'inactive', // Inactive by default, admin enables
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $created++;
+                }
+            } catch (Exception $e) {
+                // Column may not exist on older installs before migration
+                break;
             }
         }
 
@@ -401,10 +411,15 @@ class NotificationService
         }
 
         // Get template
-        $template = Capsule::table('mod_sms_notification_templates')
-            ->where('notification_type', $notificationType)
-            ->where('status', 'active')
-            ->first();
+        try {
+            $template = Capsule::table('mod_sms_notification_templates')
+                ->where('notification_type', $notificationType)
+                ->where('status', 'active')
+                ->first();
+        } catch (Exception $e) {
+            // Column may not exist on older installs before migration
+            return ['success' => false, 'error' => 'Notification templates not yet migrated'];
+        }
 
         if (!$template) {
             return ['success' => false, 'error' => 'Template not found or disabled'];

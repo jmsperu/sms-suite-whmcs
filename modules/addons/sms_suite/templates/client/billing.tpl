@@ -49,7 +49,7 @@
                 <h3 class="stat-value">{$active_sender_ids|default:0}</h3>
                 <p class="stat-label">{$lang.sender_ids|default:'Sender IDs'}</p>
                 {if $pending_requests > 0}
-                <span class="label label-warning" style="margin-top: 4px;">{$pending_requests} pending</span>
+                <span class="badge badge-warning" style="margin-top: 4px;">{$pending_requests} pending</span>
                 {/if}
             </div>
         </div>
@@ -66,11 +66,11 @@
     {if $total_purchased > 0}
     <div class="row">
         <div class="col-md-6 col-md-offset-3" style="margin-bottom: 24px;">
-            <div class="panel panel-default">
-                <div class="panel-heading text-center">
-                    <h3 class="panel-title"><i class="fas fa-chart-pie"></i> {$lang.credit_overview|default:'Credit Balance Overview'}</h3>
+            <div class="card">
+                <div class="card-header text-center">
+                    <h3 class="card-title"><i class="fas fa-chart-pie"></i> {$lang.credit_overview|default:'Credit Balance Overview'}</h3>
                 </div>
-                <div class="panel-body text-center">
+                <div class="card-body text-center">
                     {assign var="pct" value=0}
                     {if $total_purchased > 0}
                         {assign var="pct" value=($credit_balance / $total_purchased) * 100}
@@ -89,15 +89,15 @@
                         of <strong>{$total_purchased|number_format:0}</strong> total purchased
                     </p>
                     <div class="row" style="margin-top: 15px;">
-                        <div class="col-xs-4">
+                        <div class="col-4">
                             <div style="color: #00c853;"><strong>{$total_purchased|number_format:0}</strong></div>
                             <small class="text-muted">{$lang.purchased|default:'Purchased'}</small>
                         </div>
-                        <div class="col-xs-4">
+                        <div class="col-4">
                             <div style="color: #ff9800;"><strong>{$total_used|number_format:0}</strong></div>
                             <small class="text-muted">{$lang.used|default:'Used'}</small>
                         </div>
-                        <div class="col-xs-4">
+                        <div class="col-4">
                             <div style="color: #ef4444;"><strong>{$total_expired|number_format:0}</strong></div>
                             <small class="text-muted">{$lang.expired|default:'Expired'}</small>
                         </div>
@@ -110,11 +110,11 @@
 
     <!-- SMS Packages -->
     {if $sms_packages && count($sms_packages) > 0}
-    <div class="panel panel-default">
-        <div class="panel-heading">
-            <h3 class="panel-title"><i class="fas fa-shopping-cart"></i> {$lang.buy_sms_package|default:'Buy SMS Credits Package'}</h3>
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-shopping-cart"></i> {$lang.buy_sms_package|default:'Buy SMS Credits Package'}</h3>
         </div>
-        <div class="panel-body">
+        <div class="card-body">
             <p class="text-muted" style="margin-bottom: 16px;">{$lang.package_description|default:'Choose an SMS credit package below. Credits will be added to your account immediately after payment.'}</p>
             <div class="row">
                 {foreach $sms_packages as $package}
@@ -131,7 +131,7 @@
                             <div style="font-size: .8rem; color: #64748b; margin-bottom: 12px;">{$lang.sms_credits|default:'SMS Credits'}</div>
                             <div style="font-size: 1.5rem; font-weight: 700; color: #00c853;">{$currency_symbol}{$package->price|number_format:2}</div>
                             {if $package->bonus_credits > 0}
-                            <span class="label label-success" style="margin-top: 6px;">+{$package->bonus_credits} Bonus!</span>
+                            <span class="badge badge-success" style="margin-top: 6px;">+{$package->bonus_credits} Bonus!</span>
                             {/if}
                             <div style="margin-top: 8px;">
                                 <small class="text-muted">{$currency_symbol}{($package->price / $package->credits)|number_format:4} per SMS</small>
@@ -160,11 +160,11 @@
     <div class="row">
         <!-- Wallet Top-up -->
         <div class="col-md-6" style="margin-bottom: 24px;">
-            <div class="panel panel-primary">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-plus-circle"></i> {$lang.wallet_topup|default:'Top Up Wallet'}</h3>
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title"><i class="fas fa-plus-circle"></i> {$lang.wallet_topup|default:'Top Up Wallet'}</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <p class="text-muted" style="margin-bottom: 16px;">{$lang.topup_description|default:'Add funds to your wallet for pay-per-message billing.'}</p>
                     <form method="post">
                         <input type="hidden" name="csrf_token" value="{$csrf_token}">
@@ -176,7 +176,7 @@
                                        placeholder="Enter amount" min="5" max="10000" step="0.01"
                                        value="25.00">
                             </div>
-                            <span class="help-block">Min: {$currency_symbol}5.00 | Max: {$currency_symbol}10,000.00</span>
+                            <span class="form-text text-muted">Min: {$currency_symbol}5.00 | Max: {$currency_symbol}10,000.00</span>
                         </div>
                         <button type="submit" class="btn btn-primary">
                             <i class="fas fa-credit-card"></i> {$lang.topup_now|default:'Top Up Now'}
@@ -188,12 +188,12 @@
 
         <!-- Quick Links -->
         <div class="col-md-6" style="margin-bottom: 24px;">
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-bolt"></i> {$lang.quick_actions|default:'Quick Actions'}</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-bolt"></i> {$lang.quick_actions|default:'Quick Actions'}</h3>
                 </div>
-                <div class="panel-body">
-                    <a href="{$modulelink}&action=sender_ids" class="btn btn-default btn-lg btn-block" style="margin-bottom: 10px;">
+                <div class="card-body">
+                    <a href="{$modulelink}&action=sender_ids" class="btn btn-outline-secondary btn-lg btn-block" style="margin-bottom: 10px;">
                         <i class="fas fa-id-card"></i> {$lang.request_sender_id|default:'Request Sender ID'}
                     </a>
                     <a href="{$modulelink}&action=send" class="btn btn-success btn-lg btn-block" style="margin-bottom: 10px;">
@@ -209,11 +209,11 @@
 
     {if $plan_credits && count($plan_credits) > 0}
     <!-- Active Credit Packages -->
-    <div class="panel panel-default">
-        <div class="panel-heading">
-            <h3 class="panel-title"><i class="fas fa-gift"></i> {$lang.your_packages|default:'Your Credit Packages'}</h3>
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-gift"></i> {$lang.your_packages|default:'Your Credit Packages'}</h3>
         </div>
-        <div class="panel-body">
+        <div class="card-body">
             <div class="table-responsive">
                 <table class="table table-striped">
                     <thead>
@@ -233,15 +233,15 @@
                             <td>
                                 <strong style="color: var(--sms-primary);">{$pc->remaining|number_format:0}</strong>
                                 <div class="progress" style="margin: 5px 0 0 0; max-width: 150px;">
-                                    <div class="progress-bar progress-bar-success" style="width: {($pc->remaining/$pc->total)*100}%"></div>
+                                    <div class="progress-bar bg-success" style="width: {($pc->remaining/$pc->total)*100}%"></div>
                                 </div>
                             </td>
                             <td>{$pc->expires_at|date_format:"%b %d, %Y"}</td>
                             <td>
                                 {if $pc->remaining > 0}
-                                <span class="label label-success">{$lang.active|default:'Active'}</span>
+                                <span class="badge badge-success">{$lang.active|default:'Active'}</span>
                                 {else}
-                                <span class="label label-default">{$lang.exhausted|default:'Exhausted'}</span>
+                                <span class="badge badge-secondary">{$lang.exhausted|default:'Exhausted'}</span>
                                 {/if}
                             </td>
                         </tr>
@@ -256,11 +256,11 @@
     {if $sender_id_usage && count($sender_id_usage) > 0}
     <div class="row">
         <div class="col-md-6" style="margin-bottom: 24px;">
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-chart-pie"></i> {$lang.usage_by_sender|default:'Usage by Sender ID'}</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-chart-pie"></i> {$lang.usage_by_sender|default:'Usage by Sender ID'}</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <div class="table-responsive">
                         <table class="table table-striped">
                             <thead>
@@ -277,13 +277,13 @@
                                     <td><strong>{$usage->sender_id|default:'(Default)'}</strong></td>
                                     <td>
                                         {if $usage->network eq 'safaricom'}
-                                        <span class="label label-success">Safaricom</span>
+                                        <span class="badge badge-success">Safaricom</span>
                                         {elseif $usage->network eq 'airtel'}
-                                        <span class="label label-danger">Airtel</span>
+                                        <span class="badge badge-danger">Airtel</span>
                                         {elseif $usage->network eq 'telkom'}
-                                        <span class="label label-info">Telkom</span>
+                                        <span class="badge badge-info">Telkom</span>
                                         {else}
-                                        <span class="label label-default">{$usage->network|ucfirst|default:'All'}</span>
+                                        <span class="badge badge-secondary">{$usage->network|ucfirst|default:'All'}</span>
                                         {/if}
                                     </td>
                                     <td class="text-right">{$usage->message_count|number_format:0}</td>
@@ -298,11 +298,11 @@
         </div>
 
         <div class="col-md-6" style="margin-bottom: 24px;">
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-signal"></i> {$lang.usage_by_network|default:'Usage by Network'}</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-signal"></i> {$lang.usage_by_network|default:'Usage by Network'}</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     {if $network_usage && count($network_usage) > 0}
                     <div class="table-responsive">
                         <table class="table table-striped">
@@ -318,13 +318,13 @@
                                 <tr>
                                     <td>
                                         {if $nu->network eq 'safaricom'}
-                                        <span class="label label-success" style="font-size: .85em;">Safaricom</span>
+                                        <span class="badge badge-success" style="font-size: .85em;">Safaricom</span>
                                         {elseif $nu->network eq 'airtel'}
-                                        <span class="label label-danger" style="font-size: .85em;">Airtel</span>
+                                        <span class="badge badge-danger" style="font-size: .85em;">Airtel</span>
                                         {elseif $nu->network eq 'telkom'}
-                                        <span class="label label-info" style="font-size: .85em;">Telkom</span>
+                                        <span class="badge badge-info" style="font-size: .85em;">Telkom</span>
                                         {else}
-                                        <span class="label label-default" style="font-size: .85em;">{$nu->network|ucfirst|default:'Other'}</span>
+                                        <span class="badge badge-secondary" style="font-size: .85em;">{$nu->network|ucfirst|default:'Other'}</span>
                                         {/if}
                                     </td>
                                     <td class="text-right">{$nu->message_count|number_format:0}</td>
@@ -344,11 +344,11 @@
     {/if}
 
     <!-- Transaction History -->
-    <div class="panel panel-default">
-        <div class="panel-heading">
-            <h3 class="panel-title"><i class="fas fa-exchange-alt"></i> {$lang.transaction_history|default:'Transaction History'}</h3>
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-exchange-alt"></i> {$lang.transaction_history|default:'Transaction History'}</h3>
         </div>
-        <div class="panel-body">
+        <div class="card-body">
             {if $transactions && count($transactions) > 0}
             <div class="table-responsive">
                 <table class="table table-striped">
@@ -367,15 +367,15 @@
                             <td><small>{$tx->created_at|date_format:"%b %d, %Y %H:%M"}</small></td>
                             <td>
                                 {if $tx->type eq 'topup' || $tx->type eq 'credit_add'}
-                                <span class="label label-success"><i class="fas fa-plus"></i> {$tx->type|ucfirst|replace:'_':' '}</span>
+                                <span class="badge badge-success"><i class="fas fa-plus"></i> {$tx->type|ucfirst|replace:'_':' '}</span>
                                 {elseif $tx->type eq 'deduction' || $tx->type eq 'credit_deduction'}
-                                <span class="label label-warning"><i class="fas fa-minus"></i> {$tx->type|ucfirst|replace:'_':' '}</span>
+                                <span class="badge badge-warning"><i class="fas fa-minus"></i> {$tx->type|ucfirst|replace:'_':' '}</span>
                                 {elseif $tx->type eq 'refund'}
-                                <span class="label label-info"><i class="fas fa-undo"></i> {$lang.refund|default:'Refund'}</span>
+                                <span class="badge badge-info"><i class="fas fa-undo"></i> {$lang.refund|default:'Refund'}</span>
                                 {elseif $tx->type eq 'package_purchase'}
-                                <span class="label label-primary"><i class="fas fa-shopping-cart"></i> Package</span>
+                                <span class="badge badge-primary"><i class="fas fa-shopping-cart"></i> Package</span>
                                 {else}
-                                <span class="label label-default">{$tx->type|ucfirst|replace:'_':' '}</span>
+                                <span class="badge badge-secondary">{$tx->type|ucfirst|replace:'_':' '}</span>
                                 {/if}
                             </td>
                             <td>{$tx->description|escape:'html'}</td>

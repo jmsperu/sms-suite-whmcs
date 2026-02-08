@@ -147,10 +147,18 @@ class TagService
     }
 
     /**
-     * Assign a tag to a contact
+     * Assign a tag to a contact (validates both belong to the same client)
      */
-    public static function assignTag(int $contactId, int $tagId): bool
+    public static function assignTag(int $contactId, int $tagId, int $clientId): bool
     {
+        // Verify tag belongs to client
+        $tag = Capsule::table('mod_sms_tags')->where('id', $tagId)->where('client_id', $clientId)->first();
+        if (!$tag) return false;
+
+        // Verify contact belongs to client
+        $contact = Capsule::table('mod_sms_contacts')->where('id', $contactId)->where('client_id', $clientId)->first();
+        if (!$contact) return false;
+
         try {
             Capsule::table('mod_sms_contact_tags')->insertOrIgnore([
                 'contact_id' => $contactId,
@@ -165,10 +173,18 @@ class TagService
     }
 
     /**
-     * Remove a tag from a contact
+     * Remove a tag from a contact (validates both belong to the same client)
      */
-    public static function removeTag(int $contactId, int $tagId): bool
+    public static function removeTag(int $contactId, int $tagId, int $clientId): bool
     {
+        // Verify tag belongs to client
+        $tag = Capsule::table('mod_sms_tags')->where('id', $tagId)->where('client_id', $clientId)->first();
+        if (!$tag) return false;
+
+        // Verify contact belongs to client
+        $contact = Capsule::table('mod_sms_contacts')->where('id', $contactId)->where('client_id', $clientId)->first();
+        if (!$contact) return false;
+
         Capsule::table('mod_sms_contact_tags')
             ->where('contact_id', $contactId)
             ->where('tag_id', $tagId)
@@ -178,12 +194,23 @@ class TagService
     }
 
     /**
-     * Bulk assign a tag to multiple contacts
+     * Bulk assign a tag to multiple contacts (validates tag belongs to client)
      */
-    public static function bulkAssignTag(array $contactIds, int $tagId): int
+    public static function bulkAssignTag(array $contactIds, int $tagId, int $clientId): int
     {
+        // Verify tag belongs to client
+        $tag = Capsule::table('mod_sms_tags')->where('id', $tagId)->where('client_id', $clientId)->first();
+        if (!$tag) return 0;
+
+        // Filter to only contacts belonging to this client
+        $validContactIds = Capsule::table('mod_sms_contacts')
+            ->where('client_id', $clientId)
+            ->whereIn('id', $contactIds)
+            ->pluck('id')
+            ->toArray();
+
         $count = 0;
-        foreach ($contactIds as $contactId) {
+        foreach ($validContactIds as $contactId) {
             try {
                 Capsule::table('mod_sms_contact_tags')->insertOrIgnore([
                     'contact_id' => (int)$contactId,
@@ -200,13 +227,14 @@ class TagService
     }
 
     /**
-     * Get all tags assigned to a contact
+     * Get all tags assigned to a contact (scoped to client)
      */
-    public static function getContactTags(int $contactId): array
+    public static function getContactTags(int $contactId, int $clientId): array
     {
         return Capsule::table('mod_sms_contact_tags')
             ->join('mod_sms_tags', 'mod_sms_tags.id', '=', 'mod_sms_contact_tags.tag_id')
             ->where('mod_sms_contact_tags.contact_id', $contactId)
+            ->where('mod_sms_tags.client_id', $clientId)
             ->select('mod_sms_tags.*')
             ->orderBy('mod_sms_tags.name')
             ->get()

@@ -1,10 +1,10 @@
 {$sms_css nofilter}
 <div class="sms-suite-conversation">
     <!-- Header -->
-    <div class="panel panel-default" style="margin-bottom: 16px;">
-        <div class="panel-body" style="padding: 14px 20px;">
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-body" style="padding: 14px 20px;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                <a href="{$modulelink}&action=inbox" class="btn btn-default btn-sm">
+                <a href="{$modulelink}&action=inbox" class="btn btn-outline-secondary btn-sm">
                     <i class="fas fa-arrow-left"></i> Back to Inbox
                 </a>
                 <h4 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #1e293b;">
@@ -14,7 +14,7 @@
                         <small class="text-muted">({$phone})</small>
                     {else}
                         {$phone}
-                        <a href="{$modulelink}&action=contacts&add_phone={$phone|escape:'url'}" class="btn btn-xs btn-default" style="margin-left: 8px;">Add to Contacts</a>
+                        <a href="{$modulelink}&action=contacts&add_phone={$phone|escape:'url'}" class="btn btn-sm btn-outline-secondary" style="margin-left: 8px;">Add to Contacts</a>
                     {/if}
                 </h4>
             </div>
@@ -36,8 +36,8 @@
     {/if}
 
     <!-- Chat Messages -->
-    <div class="panel panel-default">
-        <div class="panel-body" id="chatMessages" style="height: 420px; overflow-y: auto; background: #f8fafc; padding: 20px;">
+    <div class="card">
+        <div class="card-body" id="chatMessages" style="height: 420px; overflow-y: auto; background: #f8fafc; padding: 20px;">
             {if $messages && count($messages) > 0}
                 {foreach $messages as $msg}
                 <div style="margin-bottom: 16px; display: flex; {if $msg->direction == 'outbound'}justify-content: flex-end;{else}justify-content: flex-start;{/if}">
@@ -72,8 +72,8 @@
     </div>
 
     <!-- Reply Form -->
-    <div class="panel panel-default">
-        <div class="panel-body" style="padding: 16px 20px;">
+    <div class="card">
+        <div class="card-body" style="padding: 16px 20px;">
             <form method="post" id="replyForm">
                 <input type="hidden" name="csrf_token" value="{$csrf_token}">
                 <input type="hidden" name="send_reply" value="1">

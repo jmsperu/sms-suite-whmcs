@@ -3914,12 +3914,15 @@ function sms_suite_admin_client_settings($vars, $lang)
     echo '</div>';
 
     // Right column - Stats and quick actions
+    $clientCurrency = Capsule::table('tblcurrencies')->where('id', $client->currency)->first();
+    $cSymbol = $clientCurrency ? ($clientCurrency->prefix ?? '$') : '$';
+
     echo '<div class="col-md-4">';
     echo '<div class="panel panel-info">';
     echo '<div class="panel-heading"><h4 class="panel-title">Account Summary</h4></div>';
     echo '<div class="panel-body">';
     echo '<table class="table table-condensed">';
-    echo '<tr><td>Wallet Balance</td><td><strong>$' . number_format($balance, 2) . '</strong></td></tr>';
+    echo '<tr><td>Wallet Balance</td><td><strong>' . htmlspecialchars($cSymbol) . number_format($balance, 2) . '</strong></td></tr>';
     echo '<tr><td>SMS Credits</td><td><strong>' . number_format($creditBalance) . '</strong></td></tr>';
     echo '<tr><td>Total Messages</td><td>' . ($stats->total ?? 0) . '</td></tr>';
     echo '<tr><td>Delivered</td><td>' . ($stats->delivered ?? 0) . '</td></tr>';
@@ -4312,7 +4315,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
                 'currency_id' => (int)($_POST['currency_id'] ?? 0) ?: null,
                 'bonus_credits' => (int)($_POST['bonus_credits'] ?? 0),
                 'validity_days' => (int)($_POST['validity_days'] ?? 0),
-                'is_featured' => isset($_POST['is_featured']),
+                'popular' => isset($_POST['is_featured']),
                 'sort_order' => (int)($_POST['sort_order'] ?? 0),
                 'status' => isset($_POST['status']),
             ]);
@@ -4331,7 +4334,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
                 'currency_id' => (int)($_POST['currency_id'] ?? 0) ?: null,
                 'bonus_credits' => (int)($_POST['bonus_credits'] ?? 0),
                 'validity_days' => (int)($_POST['validity_days'] ?? 0),
-                'is_featured' => isset($_POST['is_featured']),
+                'popular' => isset($_POST['is_featured']),
                 'sort_order' => (int)($_POST['sort_order'] ?? 0),
                 'status' => isset($_POST['status']),
             ]);
@@ -4398,7 +4401,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
         echo '<tr><td colspan="8" class="text-center text-muted">No packages created yet.</td></tr>';
     } else {
         foreach ($packages as $pkg) {
-            $featured = $pkg->is_featured ? ' <span class="label label-warning">Featured</span>' : '';
+            $featured = $pkg->popular ? ' <span class="label label-warning">Featured</span>' : '';
             $status = $pkg->status ? '<span class="label label-success">Active</span>' : '<span class="label label-default">Inactive</span>';
             $validity = $pkg->validity_days > 0 ? $pkg->validity_days . ' days' : 'Never expires';
 
@@ -4601,7 +4604,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
         document.getElementById("edit_pkg_currency").value = pkg.currency_id || "";
         document.getElementById("edit_pkg_validity").value = pkg.validity_days || 0;
         document.getElementById("edit_pkg_sort").value = pkg.sort_order || 0;
-        document.getElementById("edit_pkg_featured").checked = pkg.is_featured == 1;
+        document.getElementById("edit_pkg_featured").checked = pkg.popular == 1;
         document.getElementById("edit_pkg_status").checked = pkg.status == 1;
         jQuery("#editPackageModal").modal("show");
     }

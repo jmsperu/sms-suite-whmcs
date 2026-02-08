@@ -32,11 +32,11 @@
         <div class="row">
             <!-- Phone Number & Verification -->
             <div class="col-md-6" style="margin-bottom: 24px;">
-                <div class="panel panel-default">
-                    <div class="panel-heading">
-                        <h3 class="panel-title"><i class="fas fa-phone"></i> {$lang.phone_settings|default:'Phone Number & Verification'}</h3>
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-phone"></i> {$lang.phone_settings|default:'Phone Number & Verification'}</h3>
                     </div>
-                    <div class="panel-body">
+                    <div class="card-body">
                         <div class="form-group">
                             <label>{$lang.phone_number|default:'Phone Number'}</label>
                             <div class="input-group">
@@ -49,7 +49,7 @@
                                     {/if}
                                 </span>
                             </div>
-                            <span class="help-block">{$lang.phone_help|default:'Enter your phone number to receive SMS notifications'}</span>
+                            <span class="form-text text-muted">{$lang.phone_help|default:'Enter your phone number to receive SMS notifications'}</span>
                         </div>
 
                         {if !$phone_verified && $client->phonenumber}
@@ -74,17 +74,17 @@
                 </div>
 
                 <!-- Two-Factor Authentication -->
-                <div class="panel panel-default">
-                    <div class="panel-heading">
-                        <h3 class="panel-title"><i class="fas fa-shield-alt"></i> {$lang.two_factor_auth|default:'Two-Factor Authentication'}</h3>
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-shield-alt"></i> {$lang.two_factor_auth|default:'Two-Factor Authentication'}</h3>
                     </div>
-                    <div class="panel-body">
+                    <div class="card-body">
                         <div class="checkbox">
                             <label>
                                 <input type="checkbox" name="two_factor_enabled" value="1" {if $settings->two_factor_enabled}checked{/if} {if !$phone_verified}disabled{/if}>
                                 <strong>{$lang.enable_2fa|default:'Enable SMS Two-Factor Authentication'}</strong>
                             </label>
-                            <span class="help-block">{$lang.2fa_help|default:'Require SMS verification code when logging in for extra security'}</span>
+                            <span class="form-text text-muted">{$lang.2fa_help|default:'Require SMS verification code when logging in for extra security'}</span>
                         </div>
                         {if !$phone_verified}
                         <div class="alert alert-warning" style="margin-top: 10px; margin-bottom: 0;">
@@ -97,11 +97,11 @@
 
             <!-- Notification Preferences -->
             <div class="col-md-6" style="margin-bottom: 24px;">
-                <div class="panel panel-default">
-                    <div class="panel-heading">
-                        <h3 class="panel-title"><i class="fas fa-bell"></i> {$lang.sms_notifications|default:'SMS Notifications'}</h3>
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-bell"></i> {$lang.sms_notifications|default:'SMS Notifications'}</h3>
                     </div>
-                    <div class="panel-body">
+                    <div class="card-body">
                         <!-- Global Opt-In/Out -->
                         <div style="background: #f8fafc; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
                             <div class="checkbox" style="margin: 0;">

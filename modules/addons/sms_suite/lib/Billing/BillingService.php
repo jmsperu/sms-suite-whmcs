@@ -508,7 +508,7 @@ class BillingService
         try {
             $id = Capsule::table('mod_sms_plan_credits')->insertGetId([
                 'client_id' => $clientId,
-                'plan_id' => $planId,
+                'service_id' => $planId,
                 'total' => $credits,
                 'remaining' => $credits,
                 'expires_at' => $expiresAt,
@@ -1178,7 +1178,7 @@ class BillingService
                 'currency_id' => $data['currency_id'] ?? null,
                 'bonus_credits' => $data['bonus_credits'] ?? 0,
                 'validity_days' => $data['validity_days'] ?? 0,
-                'is_featured' => $data['is_featured'] ?? false,
+                'popular' => $data['popular'] ?? false,
                 'sort_order' => $data['sort_order'] ?? 0,
                 'status' => $data['status'] ?? true,
                 'created_at' => date('Y-m-d H:i:s'),

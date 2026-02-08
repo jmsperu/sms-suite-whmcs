@@ -239,6 +239,10 @@ add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
         $wallet = Capsule::table('mod_sms_wallet')->where('client_id', $clientId)->first();
         $balance = $wallet ? $wallet->balance : 0;
 
+        // Get client currency
+        $clientCurrency = Capsule::table('tblcurrencies')->where('id', $client->currency)->first();
+        $currencySymbol = $clientCurrency ? ($clientCurrency->prefix ?? '$') : '$';
+
         // Get assigned sender ID and gateway
         $assignedSenderId = $settings ? ($settings->assigned_sender_id ?? 'Not assigned') : 'Not assigned';
         $assignedGatewayId = $settings ? ($settings->assigned_gateway_id ?? null) : null;
@@ -270,7 +274,7 @@ add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
                 <div class="row">
                     <div class="col-sm-6">
                         <strong>Phone:</strong> ' . htmlspecialchars($phone ?: 'Not set') . ' ' . $verificationBadge . '<br>
-                        <strong>Balance:</strong> $' . number_format($balance, 2) . '<br>
+                        <strong>Balance:</strong> ' . htmlspecialchars($currencySymbol) . number_format($balance, 2) . '<br>
                         <strong>Messages Sent:</strong> ' . ($messageStats->total ?? 0) . ' (' . ($messageStats->delivered ?? 0) . ' delivered)
                     </div>
                     <div class="col-sm-6">
@@ -379,7 +383,6 @@ add_hook('DailyCronJob', 1, function ($vars) {
             ->where('task', 'log_cleanup')
             ->update([
                 'last_run' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
             ]);
 
     } catch (Exception $e) {

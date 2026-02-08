@@ -30,11 +30,11 @@
     <div class="row">
         <div class="col-md-8" style="margin-bottom: 24px;">
             <!-- Your Sender IDs -->
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-list"></i> Your Sender IDs</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-list"></i> Your Sender IDs</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     {if $sender_ids && count($sender_ids) > 0}
                     <div class="table-responsive">
                         <table class="table table-striped">
@@ -50,23 +50,32 @@
                             <tbody>
                                 {foreach $sender_ids as $sid}
                                 <tr>
-                                    <td><strong>{$sid->sender_id|escape:'html'}</strong></td>
+                                    <td>
+                                        {if $sid->status eq 'active'}
+                                        <a href="{$modulelink}&action=send&sender_id={$sid->sender_id|urlencode}" style="text-decoration: none;">
+                                            <strong>{$sid->sender_id|escape:'html'}</strong>
+                                            <i class="fas fa-paper-plane" style="font-size: .7rem; margin-left: 4px; color: var(--sms-primary);"></i>
+                                        </a>
+                                        {else}
+                                        <strong>{$sid->sender_id|escape:'html'}</strong>
+                                        {/if}
+                                    </td>
                                     <td>
                                         {if $sid->type eq 'alphanumeric'}
-                                        <span class="label label-info">{$lang.sender_id_type_alpha}</span>
+                                        <span class="badge badge-info">{$lang.sender_id_type_alpha}</span>
                                         {else}
-                                        <span class="label label-default">{$lang.sender_id_type_numeric}</span>
+                                        <span class="badge badge-secondary">{$lang.sender_id_type_numeric}</span>
                                         {/if}
                                     </td>
                                     <td>
                                         {if $sid->status eq 'active'}
-                                        <span class="label label-success">{$lang.sender_id_active}</span>
+                                        <span class="badge badge-success">{$lang.sender_id_active}</span>
                                         {elseif $sid->status eq 'pending'}
-                                        <span class="label label-warning">{$lang.sender_id_pending}</span>
+                                        <span class="badge badge-warning">{$lang.sender_id_pending}</span>
                                         {elseif $sid->status eq 'rejected'}
-                                        <span class="label label-danger">{$lang.sender_id_rejected}</span>
+                                        <span class="badge badge-danger">{$lang.sender_id_rejected}</span>
                                         {else}
-                                        <span class="label label-default">{$lang.sender_id_expired}</span>
+                                        <span class="badge badge-secondary">{$lang.sender_id_expired}</span>
                                         {/if}
                                     </td>
                                     <td>{if $sid->validity_date}{$sid->validity_date}{else}-{/if}</td>
@@ -92,12 +101,63 @@
                 </div>
             </div>
 
-            <!-- Request New Sender ID -->
-            <div class="panel panel-primary">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-plus-circle"></i> {$lang.sender_id_request}</h3>
+            {if $admin_sender_ids && count($admin_sender_ids) > 0}
+            <!-- Admin-Assigned Sender IDs -->
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h3 class="card-title"><i class="fas fa-user-shield"></i> Assigned Sender IDs</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
+                    <p class="text-muted" style="margin-bottom: 12px;">These sender IDs have been assigned to your account by the administrator. You can use them when sending messages.</p>
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>{$lang.sender_id}</th>
+                                    <th>{$lang.type}</th>
+                                    <th>{$lang.status}</th>
+                                    <th>Network</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {foreach $admin_sender_ids as $asid}
+                                <tr>
+                                    <td>
+                                        <a href="{$modulelink}&action=send&sender_id={$asid->sender_id|urlencode}" style="text-decoration: none;">
+                                            <strong>{$asid->sender_id|escape:'html'}</strong>
+                                            <i class="fas fa-paper-plane" style="font-size: .7rem; margin-left: 4px; color: var(--sms-primary);"></i>
+                                        </a>
+                                    </td>
+                                    <td>
+                                        {if $asid->type|default:'alphanumeric' eq 'alphanumeric'}
+                                        <span class="badge badge-info">{$lang.sender_id_type_alpha|default:'Alphanumeric'}</span>
+                                        {else}
+                                        <span class="badge badge-secondary">{$lang.sender_id_type_numeric|default:'Numeric'}</span>
+                                        {/if}
+                                    </td>
+                                    <td>
+                                        {if $asid->status eq 'active'}
+                                        <span class="badge badge-success">{$lang.sender_id_active|default:'Active'}</span>
+                                        {else}
+                                        <span class="badge badge-secondary">{$asid->status|ucfirst}</span>
+                                        {/if}
+                                    </td>
+                                    <td>{$asid->network|default:'All'|ucfirst}</td>
+                                </tr>
+                                {/foreach}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {/if}
+
+            <!-- Request New Sender ID -->
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title"><i class="fas fa-plus-circle"></i> {$lang.sender_id_request}</h3>
+                </div>
+                <div class="card-body">
                     <form method="post" id="senderIdForm" enctype="multipart/form-data">
                         <input type="hidden" name="request_sender" value="1">
                         <input type="hidden" name="csrf_token" value="{$csrf_token}">
@@ -108,12 +168,12 @@
                                 <label style="flex: 1; text-align: center; padding: 12px; background: #f1f5f9; border-radius: 8px; cursor: pointer; border: 2px solid #667eea;" id="alphaLabel">
                                     <input type="radio" name="sender_type" value="alphanumeric" checked style="display: none;">
                                     <strong>{$lang.sender_id_type_alpha}</strong>
-                                    {if $alpha_price > 0}<br><small>${$alpha_price|number_format:2}</small>{else}<br><small>Free</small>{/if}
+                                    {if $alpha_price > 0}<br><small>{$currency_symbol}{$alpha_price|number_format:2}</small>{else}<br><small>Free</small>{/if}
                                 </label>
                                 <label style="flex: 1; text-align: center; padding: 12px; background: #f1f5f9; border-radius: 8px; cursor: pointer; border: 2px solid transparent;" id="numericLabel">
                                     <input type="radio" name="sender_type" value="numeric" style="display: none;">
                                     <strong>{$lang.sender_id_type_numeric}</strong>
-                                    {if $numeric_price > 0}<br><small>${$numeric_price|number_format:2}</small>{else}<br><small>Free</small>{/if}
+                                    {if $numeric_price > 0}<br><small>{$currency_symbol}{$numeric_price|number_format:2}</small>{else}<br><small>Free</small>{/if}
                                 </label>
                             </div>
                         </div>
@@ -122,7 +182,7 @@
                             <label for="sender_id">{$lang.sender_id} <span class="text-danger">*</span></label>
                             <input type="text" name="sender_id" id="sender_id" class="form-control"
                                    placeholder="e.g., MyBrand" required maxlength="11">
-                            <span class="help-block" id="senderIdHelp">
+                            <span class="form-text text-muted" id="senderIdHelp">
                                 Alphanumeric: 3-11 characters, letters and numbers only, must start with a letter
                             </span>
                         </div>
@@ -207,11 +267,11 @@
 
         <!-- Sidebar -->
         <div class="col-md-4">
-            <div class="panel panel-info">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-info-circle"></i> About Sender IDs</h3>
+            <div class="card border-info">
+                <div class="card-header bg-info text-white">
+                    <h3 class="card-title"><i class="fas fa-info-circle"></i> About Sender IDs</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <p style="margin-bottom: 4px;"><strong>Alphanumeric:</strong></p>
                     <p class="small" style="margin-bottom: 12px;">A custom text name (e.g., "MyBrand") that appears as the sender. Great for branding.</p>
                     <p style="margin-bottom: 4px;"><strong>Numeric:</strong></p>
@@ -219,11 +279,11 @@
                 </div>
             </div>
 
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-list-ol"></i> Registration Process</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-list-ol"></i> Registration Process</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <ol class="small" style="padding-left: 18px;">
                         <li style="margin-bottom: 8px;"><strong>Submit Request</strong><br>Fill form with company details & documents</li>
                         <li style="margin-bottom: 8px;"><strong>Document Review</strong><br>Our team reviews (1-2 business days)</li>
@@ -234,11 +294,11 @@
                 </div>
             </div>
 
-            <div class="panel panel-danger">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-exclamation-triangle"></i> Important Notes</h3>
+            <div class="card border-danger">
+                <div class="card-header bg-danger text-white">
+                    <h3 class="card-title"><i class="fas fa-exclamation-triangle"></i> Important Notes</h3>
                 </div>
-                <div class="panel-body small">
+                <div class="card-body small">
                     <ul style="padding-left: 18px;">
                         <li>Each network requires separate registration</li>
                         <li>Must match company/brand name</li>

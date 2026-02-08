@@ -645,6 +645,25 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
                 $recipients = array_values($recipients);
             }
 
+            // Validate segment_id belongs to this client
+            $segmentId = !empty($_POST['segment_id']) ? (int)$_POST['segment_id'] : null;
+            if ($segmentId) {
+                $seg = Capsule::table('mod_sms_segments')->where('id', $segmentId)->where('client_id', $clientId)->first();
+                if (!$seg) $segmentId = null;
+            }
+            // Validate recipient_tag_id belongs to this client
+            $recipientTagId = !empty($_POST['recipient_tag_id']) ? (int)$_POST['recipient_tag_id'] : null;
+            if ($recipientTagId) {
+                $tg = Capsule::table('mod_sms_tags')->where('id', $recipientTagId)->where('client_id', $clientId)->first();
+                if (!$tg) $recipientTagId = null;
+            }
+            // Validate group_id belongs to this client
+            $groupId = !empty($_POST['group_id']) ? (int)$_POST['group_id'] : null;
+            if ($groupId) {
+                $grp = Capsule::table('mod_sms_contact_groups')->where('id', $groupId)->where('client_id', $clientId)->first();
+                if (!$grp) $groupId = null;
+            }
+
             $result = \SMSSuite\Campaigns\CampaignService::create($clientId, [
                 'name' => $_POST['name'] ?? '',
                 'message' => $_POST['message'] ?? '',
@@ -652,9 +671,9 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
                 'sender_id' => $_POST['sender_id'] ?? null,
                 'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
                 'recipient_type' => $_POST['recipient_type'] ?? 'manual',
-                'recipient_group_id' => !empty($_POST['group_id']) ? (int)$_POST['group_id'] : null,
-                'segment_id' => !empty($_POST['segment_id']) ? (int)$_POST['segment_id'] : null,
-                'recipient_tag_id' => !empty($_POST['recipient_tag_id']) ? (int)$_POST['recipient_tag_id'] : null,
+                'recipient_group_id' => $groupId,
+                'segment_id' => $segmentId,
+                'recipient_tag_id' => $recipientTagId,
                 'recipients' => $recipients,
                 'scheduled_at' => !empty($_POST['scheduled_at']) ? $_POST['scheduled_at'] : null,
             ]);
@@ -687,6 +706,25 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
                 $recipients = array_values($recipients);
             }
 
+            // Validate segment_id belongs to this client
+            $segmentId = !empty($_POST['segment_id']) ? (int)$_POST['segment_id'] : null;
+            if ($segmentId) {
+                $seg = Capsule::table('mod_sms_segments')->where('id', $segmentId)->where('client_id', $clientId)->first();
+                if (!$seg) $segmentId = null;
+            }
+            // Validate recipient_tag_id belongs to this client
+            $recipientTagId = !empty($_POST['recipient_tag_id']) ? (int)$_POST['recipient_tag_id'] : null;
+            if ($recipientTagId) {
+                $tg = Capsule::table('mod_sms_tags')->where('id', $recipientTagId)->where('client_id', $clientId)->first();
+                if (!$tg) $recipientTagId = null;
+            }
+            // Validate group_id belongs to this client
+            $groupId = !empty($_POST['group_id']) ? (int)$_POST['group_id'] : null;
+            if ($groupId) {
+                $grp = Capsule::table('mod_sms_contact_groups')->where('id', $groupId)->where('client_id', $clientId)->first();
+                if (!$grp) $groupId = null;
+            }
+
             $updateData = [
                 'name' => $_POST['name'] ?? '',
                 'message' => $_POST['message'] ?? '',
@@ -694,9 +732,9 @@ function sms_suite_client_campaigns($vars, $clientId, $lang)
                 'sender_id' => $_POST['sender_id'] ?? null,
                 'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
                 'recipient_type' => $_POST['recipient_type'] ?? 'manual',
-                'recipient_group_id' => !empty($_POST['group_id']) ? (int)$_POST['group_id'] : null,
-                'segment_id' => !empty($_POST['segment_id']) ? (int)$_POST['segment_id'] : null,
-                'recipient_tag_id' => !empty($_POST['recipient_tag_id']) ? (int)$_POST['recipient_tag_id'] : null,
+                'recipient_group_id' => $groupId,
+                'segment_id' => $segmentId,
+                'recipient_tag_id' => $recipientTagId,
                 'recipients' => $recipients,
             ];
 
@@ -984,7 +1022,7 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
             require_once __DIR__ . '/../lib/Contacts/TagService.php';
             $contactId = (int)$_POST['contact_id'];
             $tagId = (int)$_POST['tag_id'];
-            if (\SMSSuite\Contacts\TagService::assignTag($contactId, $tagId)) {
+            if (\SMSSuite\Contacts\TagService::assignTag($contactId, $tagId, $clientId)) {
                 $success = $lang['tag_assigned'] ?? 'Tag assigned successfully.';
             } else {
                 $error = 'Failed to assign tag.';
@@ -996,7 +1034,7 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
             require_once __DIR__ . '/../lib/Contacts/TagService.php';
             $contactId = (int)$_POST['contact_id'];
             $tagId = (int)$_POST['tag_id'];
-            if (\SMSSuite\Contacts\TagService::removeTag($contactId, $tagId)) {
+            if (\SMSSuite\Contacts\TagService::removeTag($contactId, $tagId, $clientId)) {
                 $success = $lang['tag_removed'] ?? 'Tag removed successfully.';
             } else {
                 $error = 'Failed to remove tag.';
@@ -1036,7 +1074,7 @@ function sms_suite_client_contacts($vars, $clientId, $lang)
     $contactTags = [];
     if (!empty($contactData['contacts'])) {
         foreach ($contactData['contacts'] as $contact) {
-            $contactTags[$contact->id] = \SMSSuite\Contacts\TagService::getContactTags($contact->id);
+            $contactTags[$contact->id] = \SMSSuite\Contacts\TagService::getContactTags($contact->id, $clientId);
         }
     }
 
@@ -1338,10 +1376,20 @@ function sms_suite_client_segments($vars, $clientId, $lang)
             if (!empty($_POST['conditions']) && is_array($_POST['conditions'])) {
                 foreach ($_POST['conditions'] as $cond) {
                     if (!empty($cond['field']) && !empty($cond['operator'])) {
+                        // Validate tag/group ownership in conditions
+                        $value = $cond['value'] ?? '';
+                        if ($cond['field'] === 'tag' && !empty($value)) {
+                            $tag = Capsule::table('mod_sms_tags')->where('id', (int)$value)->where('client_id', $clientId)->first();
+                            if (!$tag) continue;
+                        }
+                        if ($cond['field'] === 'group_id' && !empty($value)) {
+                            $grp = Capsule::table('mod_sms_contact_groups')->where('id', (int)$value)->where('client_id', $clientId)->first();
+                            if (!$grp) continue;
+                        }
                         $conditions[] = [
                             'field' => $cond['field'],
                             'operator' => $cond['operator'],
-                            'value' => $cond['value'] ?? '',
+                            'value' => $value,
                             'logic' => 'AND',
                         ];
                     }
@@ -1383,7 +1431,7 @@ function sms_suite_client_segments($vars, $clientId, $lang)
                 ->where('client_id', $clientId)
                 ->first();
             if ($segment) {
-                \SMSSuite\Campaigns\AdvancedCampaignService::calculateSegmentCount($segmentId);
+                \SMSSuite\Campaigns\AdvancedCampaignService::calculateSegmentCount($segmentId, $clientId);
                 $success = $lang['segment_recalculated'] ?? 'Segment count recalculated.';
             }
         }

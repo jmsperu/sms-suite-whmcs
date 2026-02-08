@@ -45,7 +45,7 @@ class ContactService
                 'first_name' => $data['first_name'] ?? null,
                 'last_name' => $data['last_name'] ?? null,
                 'email' => $data['email'] ?? null,
-                'custom_fields' => json_encode($data['custom_fields'] ?? []),
+                'custom_data' => json_encode($data['custom_data'] ?? []),
                 'status' => 'active',
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
@@ -90,7 +90,7 @@ class ContactService
         if (isset($data['last_name'])) $updateData['last_name'] = $data['last_name'];
         if (isset($data['email'])) $updateData['email'] = $data['email'];
         if (isset($data['group_id'])) $updateData['group_id'] = $data['group_id'];
-        if (isset($data['custom_fields'])) $updateData['custom_fields'] = json_encode($data['custom_fields']);
+        if (isset($data['custom_data'])) $updateData['custom_data'] = json_encode($data['custom_data']);
         if (isset($data['status'])) $updateData['status'] = $data['status'];
 
         Capsule::table('mod_sms_contacts')
@@ -180,7 +180,6 @@ class ContactService
                 'client_id' => $clientId,
                 'name' => $name,
                 'description' => $description,
-                'custom_fields' => json_encode([]),
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
@@ -310,7 +309,7 @@ class ContactService
                         ? trim($columns[$mapping['last_name']]) : null,
                     'email' => isset($mapping['email']) && isset($columns[$mapping['email']])
                         ? trim($columns[$mapping['email']]) : null,
-                    'custom_fields' => '[]',
+                    'custom_data' => '[]',
                     'status' => 'active',
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s'),

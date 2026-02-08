@@ -32,7 +32,7 @@
         <h4 style="margin-top: 0;"><i class="fas fa-exclamation-triangle"></i> {$lang.api_key_warning}</h4>
         <p><strong>API Key ID:</strong> <code style="background: rgba(0,0,0,.06); padding: 3px 8px; border-radius: 4px; font-size: .9rem;">{$new_key.key_id}</code></p>
         <p><strong>API Secret:</strong> <code style="background: rgba(0,0,0,.06); padding: 3px 8px; border-radius: 4px; font-size: .9rem;">{$new_key.secret}</code></p>
-        <button type="button" class="btn btn-sm btn-default" onclick="copyToClipboard('{$new_key.key_id}:{$new_key.secret}')">
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="copyToClipboard('{$new_key.key_id}:{$new_key.secret}')">
             <i class="fas fa-copy"></i> Copy Credentials
         </button>
     </div>
@@ -41,11 +41,11 @@
     <div class="row">
         <div class="col-md-8" style="margin-bottom: 24px;">
             <!-- Existing API Keys -->
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-list"></i> Your API Keys</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-list"></i> Your API Keys</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     {if $api_keys && count($api_keys) > 0}
                     <div class="table-responsive">
                         <table class="table table-striped">
@@ -67,16 +67,16 @@
                                     <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: .8rem;">{$key.key_id}</code></td>
                                     <td>
                                         {foreach $key.scopes as $scope}
-                                        <span class="label label-info">{$scope}</span>
+                                        <span class="badge badge-info">{$scope}</span>
                                         {/foreach}
                                     </td>
                                     <td>{$key.rate_limit}/min</td>
                                     <td><small>{if $key.last_used_at}{$key.last_used_at}{else}{$lang.never}{/if}</small></td>
                                     <td>
                                         {if $key.status eq 'active'}
-                                        <span class="label label-success">{$lang.active}</span>
+                                        <span class="badge badge-success">{$lang.active}</span>
                                         {else}
-                                        <span class="label label-default">{$key.status|ucfirst}</span>
+                                        <span class="badge badge-secondary">{$key.status|ucfirst}</span>
                                         {/if}
                                     </td>
                                     <td>
@@ -85,7 +85,7 @@
                                             <input type="hidden" name="csrf_token" value="{$csrf_token}">
                                             <input type="hidden" name="revoke_key" value="1">
                                             <input type="hidden" name="key_id" value="{$key.id}">
-                                            <button type="submit" class="btn btn-xs btn-danger">{$lang.api_key_revoke}</button>
+                                            <button type="submit" class="btn btn-sm btn-danger">{$lang.api_key_revoke}</button>
                                         </form>
                                         {/if}
                                     </td>
@@ -104,11 +104,11 @@
             </div>
 
             <!-- Create New Key -->
-            <div class="panel panel-primary">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-plus-circle"></i> {$lang.api_key_create}</h3>
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title"><i class="fas fa-plus-circle"></i> {$lang.api_key_create}</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <form method="post">
                         <input type="hidden" name="csrf_token" value="{$csrf_token}">
                         <input type="hidden" name="create_key" value="1">
@@ -154,11 +154,11 @@
 
         <!-- Sidebar -->
         <div class="col-md-4">
-            <div class="panel panel-info">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-info-circle"></i> API Information</h3>
+            <div class="card border-info">
+                <div class="card-header bg-info text-white">
+                    <h3 class="card-title"><i class="fas fa-info-circle"></i> API Information</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <p style="margin-bottom: 8px;"><strong>Base URL:</strong></p>
                     <code style="word-break: break-all; background: #f1f5f9; padding: 6px 10px; border-radius: 6px; display: block; font-size: .8rem; margin-bottom: 16px;">{$api_base_url}</code>
 
@@ -172,11 +172,11 @@ X-API-Secret: your_secret</pre>
                 </div>
             </div>
 
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h3 class="panel-title"><i class="fas fa-code"></i> Quick Examples</h3>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-code"></i> Quick Examples</h3>
                 </div>
-                <div class="panel-body">
+                <div class="card-body">
                     <p style="margin-bottom: 6px;"><strong>Send SMS (cURL):</strong></p>
                     <pre style="font-size: .7rem; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">curl -X POST "{$api_base_url}?endpoint=send" \
   -H "X-API-Key: YOUR_KEY" \
