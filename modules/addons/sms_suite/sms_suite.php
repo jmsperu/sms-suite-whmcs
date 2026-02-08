@@ -460,7 +460,12 @@ function sms_suite_create_tables_sql()
     // Helper function to execute SQL and catch errors
     $execSql = function ($sql, $description) use ($pdo, &$errors) {
         try {
-            $pdo->exec($sql);
+            $result = $pdo->exec($sql);
+            if ($result === false) {
+                $errorInfo = $pdo->errorInfo();
+                $errors[] = "{$description}: " . ($errorInfo[2] ?? 'Unknown PDO error');
+                return false;
+            }
             return true;
         } catch (Exception $e) {
             $errors[] = "{$description}: " . $e->getMessage();
