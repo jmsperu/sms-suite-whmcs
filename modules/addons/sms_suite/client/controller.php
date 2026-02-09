@@ -1774,7 +1774,7 @@ function sms_suite_client_api_keys($vars, $clientId, $lang)
 
     // Build API base URL
     $systemUrl = rtrim(\WHMCS\Config\Setting::getValue('SystemURL'), '/');
-    $apiBaseUrl = $systemUrl . '/modules/addons/sms_suite/api.php';
+    $apiBaseUrl = $systemUrl . '/modules/addons/sms_suite/webhook.php';
 
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['api_keys'],

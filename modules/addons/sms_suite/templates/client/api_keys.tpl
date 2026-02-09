@@ -163,12 +163,15 @@
                     <code style="word-break: break-all; background: #f1f5f9; padding: 6px 10px; border-radius: 6px; display: block; font-size: .8rem; margin-bottom: 16px;">{$api_base_url}</code>
 
                     <p style="margin-bottom: 8px;"><strong>Authentication:</strong></p>
-                    <p class="small" style="margin-bottom: 6px;">Use HTTP headers:</p>
+                    <p class="small" style="margin-bottom: 6px;">Send credentials via HTTP headers:</p>
                     <pre style="font-size: .75rem; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">X-API-Key: your_key_id
 X-API-Secret: your_secret</pre>
 
                     <p class="small" style="margin-bottom: 6px;">Or Basic Auth:</p>
                     <pre style="font-size: .75rem; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">Authorization: Basic base64(key_id:secret)</pre>
+
+                    <p style="margin-bottom: 8px; margin-top: 16px;"><strong>Request Format:</strong></p>
+                    <p class="small">Send parameters as form-encoded body or query string.</p>
                 </div>
             </div>
 
@@ -177,17 +180,51 @@ X-API-Secret: your_secret</pre>
                     <h3 class="card-title"><i class="fas fa-code"></i> Quick Examples</h3>
                 </div>
                 <div class="card-body">
-                    <p style="margin-bottom: 6px;"><strong>Send SMS (cURL):</strong></p>
-                    <pre style="font-size: .7rem; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">curl -X POST "{$api_base_url}?endpoint=send" \
+                    <p style="margin-bottom: 6px;"><strong>Send SMS:</strong></p>
+                    <pre style="font-size: .7rem; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">curl -X POST "{$api_base_url}?route=send" \
   -H "X-API-Key: YOUR_KEY" \
   -H "X-API-Secret: YOUR_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{literal}{"to":"+1234567890","message":"Hello!"}{/literal}'</pre>
+  -d "to=+1234567890&message=Hello!"</pre>
 
                     <p style="margin-bottom: 6px;"><strong>Check Balance:</strong></p>
-                    <pre style="font-size: .7rem; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">curl "{$api_base_url}?endpoint=balance" \
+                    <pre style="font-size: .7rem; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">curl "{$api_base_url}?route=balance" \
   -H "X-API-Key: YOUR_KEY" \
   -H "X-API-Secret: YOUR_SECRET"</pre>
+
+                    <p style="margin-bottom: 6px;"><strong>Get Messages:</strong></p>
+                    <pre style="font-size: .7rem; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">curl "{$api_base_url}?route=messages" \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "X-API-Secret: YOUR_SECRET"</pre>
+
+                    <p style="margin-bottom: 6px;"><strong>Create Contact:</strong></p>
+                    <pre style="font-size: .7rem; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; border: none;">curl -X POST "{$api_base_url}?route=contacts" \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "X-API-Secret: YOUR_SECRET" \
+  -d "phone=+1234567890&first_name=John"</pre>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-list"></i> Available Endpoints</h3>
+                </div>
+                <div class="card-body" style="font-size: .8rem;">
+                    <table class="table table-sm" style="margin-bottom: 0;">
+                        <tr><td><code>GET</code></td><td><strong>balance</strong></td><td>Wallet balance</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>messages</strong></td><td>Message history</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>status</strong></td><td>Message status</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>contacts</strong></td><td>List contacts</td></tr>
+                        <tr><td><code>POST</code></td><td><strong>contacts</strong></td><td>Create contact</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>segments</strong></td><td>Count segments</td></tr>
+                        <tr><td><code>POST</code></td><td><strong>send</strong></td><td>Send SMS</td></tr>
+                        <tr><td><code>POST</code></td><td><strong>send/bulk</strong></td><td>Bulk send</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>senderids</strong></td><td>List sender IDs</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>campaigns</strong></td><td>List campaigns</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>templates</strong></td><td>List templates</td></tr>
+                        <tr><td><code>POST</code></td><td><strong>templates</strong></td><td>Create template</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>transactions</strong></td><td>Transactions</td></tr>
+                        <tr><td><code>GET</code></td><td><strong>usage</strong></td><td>Usage stats</td></tr>
+                    </table>
                 </div>
             </div>
         </div>

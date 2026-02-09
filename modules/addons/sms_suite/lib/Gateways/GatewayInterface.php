@@ -119,7 +119,7 @@ class MessageDTO
     public int $clientId;
     public string $channel = 'sms';
     public string $to;
-    public string $from;
+    public ?string $from = null;
     public string $message;
     public ?string $mediaUrl = null;
     public string $encoding = 'gsm7';

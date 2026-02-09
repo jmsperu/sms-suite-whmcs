@@ -133,7 +133,7 @@ class GatewayRegistry
         // Decrypt credentials
         $credentials = [];
         if (!empty($record->credentials)) {
-            $decrypted = sms_suite_decrypt($record->credentials);
+            $decrypted = \sms_suite_decrypt($record->credentials);
             $credentials = json_decode($decrypted, true) ?: [];
         }
 

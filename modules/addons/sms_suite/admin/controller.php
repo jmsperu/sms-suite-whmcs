@@ -3133,6 +3133,20 @@ function sms_suite_admin_diagnostics($vars, $lang)
     if (count($diagnosis['missing']) > 0 || count($colDiagnosis['missing']) > 0) {
         // Automatically attempt repair
         $result = sms_suite_repair_tables();
+        // Fallback: create any still-missing tables directly
+        foreach ($result['still_missing'] ?? [] as $mt) {
+            try {
+                if ($mt === 'mod_sms_verification_templates') {
+                    Capsule::statement("CREATE TABLE IF NOT EXISTS `mod_sms_verification_templates` (
+                        `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, `type` VARCHAR(50) NOT NULL,
+                        `message` TEXT, `status` VARCHAR(20) DEFAULT 'active',
+                        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        UNIQUE KEY `unique_type` (`type`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+            } catch (\Exception $e) { /* logged in repair errors */ }
+        }
         $autoRepaired = true;
         $parts = [];
         if ($result['repaired'] > 0) $parts[] = $result['repaired'] . ' tables created';
@@ -3181,6 +3195,31 @@ function sms_suite_admin_diagnostics($vars, $lang)
                         $directFixed++;
                     } catch (\Exception $e) {
                         $result['errors'][] = "Direct fix {$missingCol}: " . $e->getMessage();
+                    }
+                }
+            }
+        }
+
+        // Fallback: directly create any still-missing tables via Capsule::statement
+        $tableCheck = sms_suite_diagnose_tables();
+        if (!empty($tableCheck['missing'])) {
+            $tableDefs = [
+                'mod_sms_verification_templates' => "CREATE TABLE IF NOT EXISTS `mod_sms_verification_templates` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `type` VARCHAR(50) NOT NULL,
+                    `message` TEXT,
+                    `status` VARCHAR(20) DEFAULT 'active',
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `unique_type` (`type`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+            ];
+            foreach ($tableCheck['missing'] as $missingTable) {
+                if (isset($tableDefs[$missingTable])) {
+                    try {
+                        Capsule::statement($tableDefs[$missingTable]);
+                    } catch (\Exception $e) {
+                        $result['errors'][] = "Direct table create {$missingTable}: " . $e->getMessage();
                     }
                 }
             }

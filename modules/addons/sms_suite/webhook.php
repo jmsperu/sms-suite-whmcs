@@ -7,15 +7,92 @@
  * URL: /modules/addons/sms_suite/webhook.php?gateway=twilio
  */
 
+// Capture raw input BEFORE WHMCS init (php://input can only be read once)
+$_SMS_RAW_INPUT = file_get_contents('php://input');
+
 // Bootstrap WHMCS
 $whmcsPath = dirname(__DIR__, 3);
 require_once $whmcsPath . '/init.php';
 
 use WHMCS\Database\Capsule;
 
+// ---- API Routing: if 'route' param is present, handle as API request ----
+if (isset($_GET['route'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+
+    // CORS
+    $corsAllowed = false;
+    if (isset($_SERVER['HTTP_ORIGIN'])) {
+        $allowedOrigins = Capsule::table('mod_sms_settings')
+            ->where('setting', 'api_cors_origins')
+            ->value('value');
+        if (!empty($allowedOrigins)) {
+            $originList = array_map('trim', explode(',', $allowedOrigins));
+            if (in_array($_SERVER['HTTP_ORIGIN'], $originList, true)) {
+                header('Access-Control-Allow-Origin: ' . $_SERVER['HTTP_ORIGIN']);
+                header('Access-Control-Allow-Credentials: true');
+                $corsAllowed = true;
+            }
+        }
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        if ($corsAllowed) {
+            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+            header('Access-Control-Allow-Headers: X-API-Key, X-API-Secret, Authorization, Content-Type');
+            header('Access-Control-Max-Age: 86400');
+        }
+        exit(0);
+    }
+
+    // Load module helpers (encrypt/decrypt) and API classes
+    require_once __DIR__ . '/sms_suite.php';
+    require_once __DIR__ . '/lib/Api/ApiKeyService.php';
+    require_once __DIR__ . '/lib/Api/ApiController.php';
+
+    $method = $_SERVER['REQUEST_METHOD'];
+    $endpoint = preg_replace('/[^a-zA-Z0-9\/_-]/', '', $_GET['route']);
+
+    $params = [];
+    if (in_array($method, ['POST', 'PUT'])) {
+        // Read raw body (try pre-captured, then php://input as fallback)
+        $body = !empty($_SMS_RAW_INPUT) ? $_SMS_RAW_INPUT : file_get_contents('php://input');
+        if (strlen($body) > 1048576) {
+            http_response_code(413);
+            echo json_encode(['success' => false, 'error' => ['code' => 413, 'message' => 'Request body too large (max 1MB)']]);
+            exit;
+        }
+        // Check Content-Type (some servers use HTTP_CONTENT_TYPE instead of CONTENT_TYPE)
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        if (strpos($contentType, 'application/json') !== false) {
+            $json = json_decode($body, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($json)) $params = $json;
+        } elseif (!empty($_POST)) {
+            $params = $_POST;
+        } elseif (!empty($body)) {
+            // Fallback: try parsing as JSON regardless of Content-Type
+            $json = json_decode($body, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($json)) $params = $json;
+        }
+    }
+
+    $safeGetParams = $_GET;
+    unset($safeGetParams['route'], $safeGetParams['api_key'], $safeGetParams['api_secret'], $safeGetParams['key'], $safeGetParams['secret'], $safeGetParams['token']);
+    $params = array_merge($safeGetParams, $params);
+
+    $controller = new \SMSSuite\Api\ApiController();
+    $response = $controller->handle($method, $endpoint, $params);
+    http_response_code($controller->getHttpCode());
+    echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+// ---- End API Routing ----
+
 // Log incoming webhook
 $gatewayType = $_GET['gateway'] ?? 'unknown';
-$rawPayload = file_get_contents('php://input');
+$rawPayload = $_SMS_RAW_INPUT;
 $payload = [];
 
 // Parse payload

@@ -2185,6 +2185,21 @@ function sms_suite_create_tables_sql()
         ", "Create mod_sms_verification_logs");
     }
 
+    // 48b. Verification message templates
+    if (!$tableExists('mod_sms_verification_templates')) {
+        $execSql("
+            CREATE TABLE `mod_sms_verification_templates` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `type` VARCHAR(50) NOT NULL,
+                `message` TEXT,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_type` (`type`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_verification_templates");
+    }
+
     // 49. Segments for targeting
     if (!$tableExists('mod_sms_segments')) {
         $execSql("
