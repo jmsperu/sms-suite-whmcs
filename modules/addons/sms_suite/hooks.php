@@ -287,11 +287,17 @@ add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
                 <form method="post" action="addonmodules.php?module=sms_suite&action=send_to_client" class="form-inline">
                     <input type="hidden" name="client_id" value="' . $clientId . '">
                     <input type="hidden" name="phone" value="' . htmlspecialchars($phone) . '">
-                    <div class="form-group" style="width: 60%;">
-                        <input type="text" name="message" class="form-control" style="width: 100%;" placeholder="Type your SMS message..." required>
+                    <div class="form-group" style="width: 55%;">
+                        <input type="text" name="message" class="form-control" style="width: 100%;" placeholder="Type your message..." required>
+                    </div>
+                    <div class="form-group" style="margin-left: 5px;">
+                        <select name="channel" class="form-control">
+                            <option value="sms">SMS</option>
+                            <option value="whatsapp">WhatsApp</option>
+                        </select>
                     </div>
                     <button type="submit" class="btn btn-primary" ' . (empty($phone) ? 'disabled title="No phone number"' : '') . '>
-                        <i class="fas fa-paper-plane"></i> Send SMS
+                        <i class="fas fa-paper-plane"></i> Send
                     </button>
                     <a href="addonmodules.php?module=sms_suite&action=client_messages&client_id=' . $clientId . '" class="btn btn-default">
                         <i class="fas fa-history"></i> History

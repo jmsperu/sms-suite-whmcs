@@ -4295,6 +4295,7 @@ function sms_suite_admin_send_to_client($vars, $lang)
     $clientId = isset($_POST['client_id']) ? (int)$_POST['client_id'] : 0;
     $phone = isset($_POST['phone']) ? trim($_POST['phone']) : '';
     $message = isset($_POST['message']) ? trim($_POST['message']) : '';
+    $channel = isset($_POST['channel']) ? trim($_POST['channel']) : 'sms';
 
     if (!$clientId || empty($message)) {
         echo '<div class="alert alert-danger">Client ID and message are required.</div>';
@@ -4324,21 +4325,31 @@ function sms_suite_admin_send_to_client($vars, $lang)
     $senderId = $settings->assigned_sender_id ?? null;
     $gatewayId = $settings->assigned_gateway_id ?? null;
 
-    // Send the message
+    $channelLabel = ($channel === 'whatsapp') ? 'WhatsApp' : 'SMS';
+
     require_once __DIR__ . '/../lib/Core/MessageService.php';
 
-    $result = \SMSSuite\Core\MessageService::sendDirect($phone, $message, [
-        'sender_id' => $senderId,
-        'gateway_id' => $gatewayId,
-    ]);
+    if ($channel === 'whatsapp') {
+        // Send via WhatsApp through the message service (routes to WA gateway)
+        $result = \SMSSuite\Core\MessageService::send(0, $phone, $message, [
+            'channel' => 'whatsapp',
+            'send_now' => true,
+        ]);
+    } else {
+        // Send via SMS
+        $result = \SMSSuite\Core\MessageService::sendDirect($phone, $message, [
+            'sender_id' => $senderId,
+            'gateway_id' => $gatewayId,
+        ]);
+    }
 
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">Send SMS to Client</h3></div>';
+    echo '<div class="panel-heading"><h3 class="panel-title">Send ' . $channelLabel . ' to Client</h3></div>';
     echo '<div class="panel-body">';
 
     if ($result['success']) {
         echo '<div class="alert alert-success">';
-        echo '<strong>Success!</strong> Message sent to ' . htmlspecialchars($phone) . '.';
+        echo '<strong>Success!</strong> ' . $channelLabel . ' message sent to ' . htmlspecialchars($phone) . '.';
         echo '</div>';
     } else {
         echo '<div class="alert alert-danger">';
@@ -4349,6 +4360,7 @@ function sms_suite_admin_send_to_client($vars, $lang)
     $clientName = $client->companyname ?: ($client->firstname . ' ' . $client->lastname);
     echo '<p><strong>Client:</strong> ' . htmlspecialchars($clientName) . '</p>';
     echo '<p><strong>Phone:</strong> ' . htmlspecialchars($phone) . '</p>';
+    echo '<p><strong>Channel:</strong> ' . $channelLabel . '</p>';
     echo '<p><strong>Message:</strong> ' . htmlspecialchars($message) . '</p>';
 
     echo '<hr>';
