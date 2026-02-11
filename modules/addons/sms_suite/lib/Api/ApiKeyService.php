@@ -169,6 +169,19 @@ class ApiKeyService
     {
         $windowStart = date('Y-m-d H:i:00'); // Current minute
 
+        // Periodically clean up stale rate limit records (older than 5 minutes)
+        static $cleaned = false;
+        if (!$cleaned) {
+            $cleaned = true;
+            try {
+                Capsule::table('mod_sms_rate_limits')
+                    ->where('window', '<', date('Y-m-d H:i:00', strtotime('-5 minutes')))
+                    ->delete();
+            } catch (\Exception $e) {
+                // Non-critical — ignore cleanup failures
+            }
+        }
+
         // Atomic upsert: insert new row or increment existing (prevents race condition)
         Capsule::statement(
             "INSERT INTO `mod_sms_rate_limits` (`key_id`, `window`, `requests`)

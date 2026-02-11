@@ -11,6 +11,7 @@
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
         <li><a href="{$modulelink}&action=campaigns">{$lang.campaigns}</a></li>
         <li class="active"><a href="{$modulelink}&action=reports">{$lang.reports}</a></li>
+        <li><a href="{$modulelink}&action=preferences">{$lang.preferences|default:'Preferences'}</a></li>
     </ul>
 
     <!-- Date Range Filter -->

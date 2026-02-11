@@ -50,8 +50,20 @@ class ApiController
             // Load security helper for audit logging
             require_once dirname(__DIR__) . '/Core/SecurityHelper.php';
 
+            // Brute-force protection: rate limit auth attempts by IP
+            $clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            if (!\SMSSuite\Core\SecurityHelper::checkRateLimit('api_auth_' . $clientIp, 10, 60)) {
+                \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_auth_rate_limited', [
+                    'ip' => $clientIp,
+                ]);
+                return $this->error('Too many authentication attempts', 429);
+            }
+
             // Authenticate
             if (!$this->authenticate()) {
+                \SMSSuite\Core\SecurityHelper::logSecurityEvent('api_auth_failed', [
+                    'ip' => $clientIp,
+                ]);
                 return $this->error('Invalid API credentials', 401);
             }
 
@@ -107,7 +119,7 @@ class ApiController
                 default => $this->error('Unknown endpoint', 404),
             };
 
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             logActivity('SMS Suite API Error: ' . $e->getMessage());
             return $this->error('Internal server error', 500);
         }
@@ -175,6 +187,12 @@ class ApiController
 
         if (empty($to)) {
             return $this->error('Missing required parameter: to', 400);
+        }
+
+        // Validate phone number
+        $to = \SMSSuite\Core\SecurityHelper::sanitizePhone($to);
+        if (!\SMSSuite\Core\SecurityHelper::isValidPhone($to)) {
+            return $this->error('Invalid phone number format', 400);
         }
 
         if (empty($message)) {
@@ -258,6 +276,19 @@ class ApiController
         $failed = 0;
 
         foreach ($recipients as $to) {
+            // Validate each phone number
+            $to = \SMSSuite\Core\SecurityHelper::sanitizePhone($to);
+            if (!\SMSSuite\Core\SecurityHelper::isValidPhone($to)) {
+                $results[] = [
+                    'to' => $to,
+                    'success' => false,
+                    'message_id' => null,
+                    'error' => 'Invalid phone number format',
+                ];
+                $failed++;
+                continue;
+            }
+
             $result = MessageService::send($this->apiKey['client_id'], $to, $message, [
                 'channel' => $channel,
                 'sender_id' => $params['sender_id'] ?? null,
@@ -520,13 +551,29 @@ class ApiController
             return $this->error('Missing required parameter: phone', 400);
         }
 
+        // Validate and sanitize phone
+        $phone = \SMSSuite\Core\SecurityHelper::sanitizePhone($phone);
+        if (!\SMSSuite\Core\SecurityHelper::isValidPhone($phone)) {
+            return $this->error('Invalid phone number format', 400);
+        }
+
+        // Validate email if provided
+        $email = $params['email'] ?? null;
+        if (!empty($email) && !\SMSSuite\Core\SecurityHelper::isValidEmail($email)) {
+            return $this->error('Invalid email format', 400);
+        }
+
+        // Sanitize text fields
+        $firstName = isset($params['first_name']) ? \SMSSuite\Core\SecurityHelper::sanitize($params['first_name']) : null;
+        $lastName = isset($params['last_name']) ? \SMSSuite\Core\SecurityHelper::sanitize($params['last_name']) : null;
+
         $id = Capsule::table('mod_sms_contacts')->insertGetId([
             'client_id' => $this->apiKey['client_id'],
             'group_id' => $params['group_id'] ?? null,
             'phone' => $phone,
-            'first_name' => $params['first_name'] ?? null,
-            'last_name' => $params['last_name'] ?? null,
-            'email' => $params['email'] ?? null,
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'email' => $email,
             'custom_data' => json_encode($params['custom_fields'] ?? []),
             'status' => 'subscribed',
             'created_at' => date('Y-m-d H:i:s'),
@@ -575,10 +622,14 @@ class ApiController
             return $this->error('Missing required parameter: name', 400);
         }
 
+        // Sanitize text fields
+        $name = \SMSSuite\Core\SecurityHelper::sanitize($name);
+        $description = isset($params['description']) ? \SMSSuite\Core\SecurityHelper::sanitize($params['description']) : null;
+
         $id = Capsule::table('mod_sms_contact_groups')->insertGetId([
             'client_id' => $this->apiKey['client_id'],
             'name' => $name,
-            'description' => $params['description'] ?? null,
+            'description' => $description,
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -607,6 +658,12 @@ class ApiController
 
         if (empty($to) || empty($message) || empty($scheduledAt)) {
             return $this->error('Missing required parameters: to, message, scheduled_at', 400);
+        }
+
+        // Validate phone number
+        $to = \SMSSuite\Core\SecurityHelper::sanitizePhone($to);
+        if (!\SMSSuite\Core\SecurityHelper::isValidPhone($to)) {
+            return $this->error('Invalid phone number format', 400);
         }
 
         // Enforce message size limits
@@ -654,6 +711,12 @@ class ApiController
             return $this->error('Missing required parameters: to, message', 400);
         }
 
+        // Validate phone number
+        $to = \SMSSuite\Core\SecurityHelper::sanitizePhone($to);
+        if (!\SMSSuite\Core\SecurityHelper::isValidPhone($to)) {
+            return $this->error('Invalid phone number format', 400);
+        }
+
         // Enforce WhatsApp message size limit
         if (mb_strlen($message) > 4096) {
             return $this->error('Message too long: max 4096 characters for whatsapp', 400);
@@ -696,6 +759,12 @@ class ApiController
             return $this->error('Missing required parameters: to, template_name', 400);
         }
 
+        // Validate phone number
+        $to = \SMSSuite\Core\SecurityHelper::sanitizePhone($to);
+        if (!\SMSSuite\Core\SecurityHelper::isValidPhone($to)) {
+            return $this->error('Invalid phone number format', 400);
+        }
+
         require_once dirname(__DIR__) . '/WhatsApp/WhatsAppService.php';
 
         $result = \SMSSuite\WhatsApp\WhatsAppService::sendTemplate(
@@ -734,6 +803,12 @@ class ApiController
 
         if (empty($to) || empty($mediaUrl)) {
             return $this->error('Missing required parameters: to, media_url', 400);
+        }
+
+        // Validate phone number
+        $to = \SMSSuite\Core\SecurityHelper::sanitizePhone($to);
+        if (!\SMSSuite\Core\SecurityHelper::isValidPhone($to)) {
+            return $this->error('Invalid phone number format', 400);
         }
 
         require_once dirname(__DIR__) . '/WhatsApp/WhatsAppService.php';
@@ -1175,6 +1250,10 @@ class ApiController
             return $this->error('Missing required parameters: name, content', 400);
         }
 
+        // Sanitize text fields
+        $name = \SMSSuite\Core\SecurityHelper::sanitize($name);
+        $content = \SMSSuite\Core\SecurityHelper::sanitize($content);
+
         require_once dirname(__DIR__) . '/Core/TemplateService.php';
 
         $result = \SMSSuite\Core\TemplateService::create($this->apiKey['client_id'], [
@@ -1203,6 +1282,20 @@ class ApiController
         $gatewayId = $params['gateway_id'] ?? null;
         if (empty($gatewayId)) {
             return $this->error('Missing required parameter: gateway_id', 400);
+        }
+
+        // Verify gateway ownership: must be accessible by this client
+        $gateway = Capsule::table('mod_sms_gateways')
+            ->where('id', $gatewayId)
+            ->where('status', 1)
+            ->where(function ($q) {
+                $q->whereNull('client_id')
+                  ->orWhere('client_id', $this->apiKey['client_id']);
+            })
+            ->first();
+
+        if (!$gateway) {
+            return $this->error('Gateway not found or not accessible', 403);
         }
 
         require_once dirname(__DIR__) . '/WhatsApp/WhatsAppService.php';
@@ -1257,9 +1350,10 @@ class ApiController
 
                 $result = \SMSSuite\WhatsApp\WhatsAppService::deleteMetaTemplate($gatewayId, $name);
                 if ($result['success']) {
-                    // Also remove locally
+                    // Also remove locally, scoped to this gateway
                     Capsule::table('mod_sms_whatsapp_templates')
                         ->where('template_name', $name)
+                        ->where('gateway_id', $gatewayId)
                         ->delete();
                     return $this->success(['deleted' => true]);
                 }

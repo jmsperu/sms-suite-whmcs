@@ -12,6 +12,7 @@
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
         <li><a href="{$modulelink}&action=billing">{$lang.billing}</a></li>
         <li class="active"><a href="{$modulelink}&action=api_keys">{$lang.api_keys}</a></li>
+        <li><a href="{$modulelink}&action=preferences">{$lang.preferences|default:'Preferences'}</a></li>
     </ul>
 
     {if $success}

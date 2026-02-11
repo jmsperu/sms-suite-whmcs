@@ -20,6 +20,7 @@
         <li><a href="{$modulelink}&action=tags">{$lang.tags|default:'Tags'}</a></li>
         <li><a href="{$modulelink}&action=segments">{$lang.segments|default:'Segments'}</a></li>
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
+        <li><a href="{$modulelink}&action=preferences">{$lang.preferences|default:'Preferences'}</a></li>
     </ul>
 
     {if $success}

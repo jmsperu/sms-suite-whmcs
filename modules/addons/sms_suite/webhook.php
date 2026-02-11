@@ -105,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['hub_verify_token'], $_G
 
     if ($verifyGw && !empty($verifyGw->webhook_token) && $_GET['hub_verify_token'] === $verifyGw->webhook_token) {
         http_response_code(200);
+        header('Content-Type: text/plain');
         echo $_GET['hub_challenge'];
         exit;
     }
@@ -138,6 +139,10 @@ if ($gatewayIdParam) {
         ->where('type', $gatewayType)
         ->where('status', 1)
         ->first();
+}
+
+if ($gatewayRecord && empty($gatewayRecord->webhook_token)) {
+    logActivity('SMS Suite: WARNING — Gateway "' . $gatewayRecord->type . '" (ID: ' . $gatewayRecord->id . ') has no webhook_token configured. Webhook signature verification is skipped.');
 }
 
 if ($gatewayRecord && !empty($gatewayRecord->webhook_token)) {
@@ -253,7 +258,7 @@ try {
         ->update(['error' => $e->getMessage()]);
 
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode(['error' => 'Internal error']);
 }
 
 /**

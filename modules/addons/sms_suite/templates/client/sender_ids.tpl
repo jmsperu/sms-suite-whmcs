@@ -13,6 +13,7 @@
         <li><a href="{$modulelink}&action=contacts">{$lang.contacts}</a></li>
         <li class="active"><a href="{$modulelink}&action=sender_ids">{$lang.sender_ids}</a></li>
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
+        <li><a href="{$modulelink}&action=preferences">{$lang.preferences|default:'Preferences'}</a></li>
     </ul>
 
     {if $success}

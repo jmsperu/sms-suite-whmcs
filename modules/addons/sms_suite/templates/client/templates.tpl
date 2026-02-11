@@ -19,6 +19,7 @@
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
         <li><a href="{$modulelink}&action=api_keys">{$lang.menu_api_keys}</a></li>
         <li><a href="{$modulelink}&action=billing">{$lang.menu_billing}</a></li>
+        <li><a href="{$modulelink}&action=preferences">{$lang.preferences|default:'Preferences'}</a></li>
     </ul>
 
     <div class="card">

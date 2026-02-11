@@ -307,8 +307,8 @@ class SecurityHelper
                 [$keyId, $windowBucket]
             );
         } catch (\Exception $e) {
-            // Fallback: if the statement fails, allow through
-            return true;
+            // Fail closed: if the statement fails, deny the request
+            return false;
         }
 
         // Check current count
