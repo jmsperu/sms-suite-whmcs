@@ -474,6 +474,7 @@ class VerificationService
      */
     private static function normalizePhone(string $phone): string
     {
+        require_once __DIR__ . '/MessageService.php';
         return MessageService::normalizePhone($phone);
     }
 

@@ -381,6 +381,7 @@ class ContactService
      */
     private static function normalizePhone(string $phone): string
     {
+        require_once dirname(__DIR__) . '/Core/MessageService.php';
         return \SMSSuite\Core\MessageService::normalizePhone($phone);
     }
 
