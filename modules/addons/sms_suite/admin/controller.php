@@ -150,6 +150,10 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_client_rates($vars, $lang);
             break;
 
+        case 'whatsapp_templates':
+            sms_suite_admin_whatsapp_templates($vars, $lang);
+            break;
+
         case 'download_doc':
             sms_suite_admin_download_document();
             break;
@@ -193,6 +197,7 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
         'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
         'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
         'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
+        'whatsapp_templates' => ['icon' => 'fa-whatsapp', 'label' => 'WA Templates'],
         'notifications' => ['icon' => 'fa-bell', 'label' => 'Notifications'],
         'automation' => ['icon' => 'fa-magic', 'label' => $lang['menu_automation']],
         'reports' => ['icon' => 'fa-bar-chart', 'label' => $lang['menu_reports']],
@@ -8120,4 +8125,316 @@ function sms_suite_admin_client_rates($vars, $lang)
         }
     }
     </script>';
+}
+
+/**
+ * WhatsApp Templates Management (Meta Business Management API)
+ */
+function sms_suite_admin_whatsapp_templates($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    // Load WhatsApp service
+    require_once __DIR__ . '/../lib/WhatsApp/WhatsAppService.php';
+
+    // Get Meta WhatsApp gateways
+    $gateways = Capsule::table('mod_sms_gateways')
+        ->where('type', 'meta_whatsapp')
+        ->where('status', 1)
+        ->get();
+
+    $selectedGateway = (int)($_GET['gateway_id'] ?? ($gateways->first()->id ?? 0));
+    $message = '';
+    $messageType = 'info';
+
+    // Handle POST actions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $postGatewayId = (int)($_POST['gateway_id'] ?? $selectedGateway);
+
+        // Create template
+        if (!empty($_POST['create_template'])) {
+            $name = preg_replace('/[^a-z0-9_]/', '', strtolower(trim($_POST['template_name'] ?? '')));
+            $content = trim($_POST['template_content'] ?? '');
+            $language = $_POST['template_language'] ?? 'en';
+            $category = $_POST['template_category'] ?? 'UTILITY';
+
+            if (empty($name) || empty($content)) {
+                $message = 'Template name and body content are required.';
+                $messageType = 'danger';
+            } else {
+                $components = [
+                    ['type' => 'BODY', 'text' => $content],
+                ];
+
+                $result = \SMSSuite\WhatsApp\WhatsAppService::createMetaTemplate($postGatewayId, [
+                    'name' => $name,
+                    'language' => $language,
+                    'category' => $category,
+                    'components' => $components,
+                    'content' => $content,
+                ]);
+
+                if ($result['success']) {
+                    // Save locally too
+                    Capsule::table('mod_sms_whatsapp_templates')->insert([
+                        'client_id' => 0,
+                        'gateway_id' => $postGatewayId,
+                        'template_name' => $name,
+                        'template_id' => $result['id'] ?? null,
+                        'language' => $language,
+                        'category' => $category,
+                        'content' => $content,
+                        'status' => strtolower($result['status'] ?? 'pending'),
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $message = 'Template "<strong>' . htmlspecialchars($name) . '</strong>" created successfully. Status: ' . ($result['status'] ?? 'PENDING');
+                    $messageType = 'success';
+                    logActivity('SMS Suite: WhatsApp template created on Meta - ' . $name);
+                } else {
+                    $message = 'Failed to create template: ' . htmlspecialchars($result['error'] ?? 'Unknown error');
+                    $messageType = 'danger';
+                }
+            }
+        }
+
+        // Delete template
+        if (!empty($_POST['delete_template'])) {
+            $templateName = trim($_POST['template_name'] ?? '');
+            if (!empty($templateName)) {
+                $result = \SMSSuite\WhatsApp\WhatsAppService::deleteMetaTemplate($postGatewayId, $templateName);
+                if ($result['success']) {
+                    Capsule::table('mod_sms_whatsapp_templates')
+                        ->where('template_name', $templateName)
+                        ->delete();
+                    $message = 'Template "<strong>' . htmlspecialchars($templateName) . '</strong>" deleted.';
+                    $messageType = 'success';
+                    logActivity('SMS Suite: WhatsApp template deleted from Meta - ' . $templateName);
+                } else {
+                    $message = 'Failed to delete template: ' . htmlspecialchars($result['error'] ?? 'Unknown error');
+                    $messageType = 'danger';
+                }
+            }
+        }
+
+        // Sync templates from Meta
+        if (!empty($_POST['sync_templates'])) {
+            $result = \SMSSuite\WhatsApp\WhatsAppService::getMetaTemplates($postGatewayId);
+            if ($result['success']) {
+                $synced = 0;
+                foreach ($result['templates'] as $tpl) {
+                    $tplName = $tpl['name'] ?? '';
+                    if (empty($tplName)) continue;
+
+                    // Extract body text from components
+                    $bodyText = '';
+                    foreach (($tpl['components'] ?? []) as $comp) {
+                        if (($comp['type'] ?? '') === 'BODY') {
+                            $bodyText = $comp['text'] ?? '';
+                            break;
+                        }
+                    }
+
+                    $existing = Capsule::table('mod_sms_whatsapp_templates')
+                        ->where('template_name', $tplName)
+                        ->where('language', $tpl['language'] ?? 'en')
+                        ->first();
+
+                    if ($existing) {
+                        Capsule::table('mod_sms_whatsapp_templates')
+                            ->where('id', $existing->id)
+                            ->update([
+                                'template_id' => $tpl['id'] ?? null,
+                                'status' => strtolower($tpl['status'] ?? 'pending'),
+                                'category' => $tpl['category'] ?? null,
+                                'content' => $bodyText ?: $existing->content,
+                                'updated_at' => date('Y-m-d H:i:s'),
+                            ]);
+                    } else {
+                        Capsule::table('mod_sms_whatsapp_templates')->insert([
+                            'client_id' => 0,
+                            'gateway_id' => $postGatewayId,
+                            'template_name' => $tplName,
+                            'template_id' => $tpl['id'] ?? null,
+                            'language' => $tpl['language'] ?? 'en',
+                            'category' => $tpl['category'] ?? null,
+                            'content' => $bodyText,
+                            'status' => strtolower($tpl['status'] ?? 'pending'),
+                            'created_at' => date('Y-m-d H:i:s'),
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    }
+                    $synced++;
+                }
+                $message = "Synced {$synced} template(s) from Meta.";
+                $messageType = 'success';
+                logActivity('SMS Suite: Synced ' . $synced . ' WhatsApp templates from Meta');
+            } else {
+                $message = 'Failed to sync: ' . htmlspecialchars($result['error'] ?? 'Unknown error');
+                $messageType = 'danger';
+            }
+        }
+    }
+
+    // Page header
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-whatsapp"></i> WhatsApp Message Templates (Meta Business API)</h3></div>';
+    echo '<div class="panel-body">';
+
+    // Show messages
+    if ($message) {
+        echo '<div class="alert alert-' . $messageType . ' alert-dismissible">';
+        echo '<button type="button" class="close" data-dismiss="alert">&times;</button>';
+        echo $message;
+        echo '</div>';
+    }
+
+    // No gateways warning
+    if ($gateways->isEmpty()) {
+        echo '<div class="alert alert-warning">';
+        echo '<i class="fa fa-exclamation-triangle"></i> No active Meta WhatsApp gateway found. ';
+        echo 'Please <a href="' . $modulelink . '&action=gateways">configure a Meta WhatsApp gateway</a> with your Phone Number ID, Access Token, and WABA ID first.';
+        echo '</div>';
+        echo '</div></div></div>';
+        return;
+    }
+
+    // Gateway selector (if multiple)
+    if ($gateways->count() > 1) {
+        echo '<div class="form-group">';
+        echo '<label>Select Gateway:</label>';
+        echo '<select class="form-control" onchange="window.location=\'' . $modulelink . '&action=whatsapp_templates&gateway_id=\'+this.value">';
+        foreach ($gateways as $gw) {
+            $sel = ($gw->id == $selectedGateway) ? 'selected' : '';
+            echo '<option value="' . $gw->id . '" ' . $sel . '>' . htmlspecialchars($gw->name) . ' (ID: ' . $gw->id . ')</option>';
+        }
+        echo '</select>';
+        echo '</div>';
+    }
+
+    // Sync button
+    echo '<form method="POST" style="display:inline-block; margin-bottom: 15px;">';
+    echo '<input type="hidden" name="gateway_id" value="' . $selectedGateway . '">';
+    echo '<input type="hidden" name="sync_templates" value="1">';
+    echo '<button type="submit" class="btn btn-info"><i class="fa fa-refresh"></i> Sync from Meta</button>';
+    echo '</form>';
+
+    // Create template button
+    echo ' <button class="btn btn-success" data-toggle="modal" data-target="#createTemplateModal"><i class="fa fa-plus"></i> Create Template</button>';
+
+    echo '<hr>';
+
+    // Templates table
+    $templates = Capsule::table('mod_sms_whatsapp_templates')
+        ->where(function ($q) use ($selectedGateway) {
+            $q->where('gateway_id', $selectedGateway)
+              ->orWhereNull('gateway_id');
+        })
+        ->orderBy('template_name')
+        ->get();
+
+    if ($templates->isEmpty()) {
+        echo '<div class="alert alert-info">No templates found. Click "Sync from Meta" to import existing templates, or create a new one.</div>';
+    } else {
+        echo '<div class="table-responsive">';
+        echo '<table class="table table-striped table-bordered">';
+        echo '<thead><tr>';
+        echo '<th>Name</th><th>Language</th><th>Category</th><th>Status</th><th>Content</th><th>Actions</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($templates as $tpl) {
+            $statusClass = 'default';
+            $status = strtoupper($tpl->status ?? 'UNKNOWN');
+            if ($status === 'APPROVED') $statusClass = 'success';
+            elseif ($status === 'PENDING') $statusClass = 'warning';
+            elseif ($status === 'REJECTED') $statusClass = 'danger';
+
+            echo '<tr>';
+            echo '<td><strong>' . htmlspecialchars($tpl->template_name) . '</strong></td>';
+            echo '<td>' . htmlspecialchars($tpl->language ?? 'en') . '</td>';
+            echo '<td>' . htmlspecialchars($tpl->category ?? '-') . '</td>';
+            echo '<td><span class="label label-' . $statusClass . '">' . $status . '</span></td>';
+            echo '<td><small>' . htmlspecialchars(mb_substr($tpl->content ?? '', 0, 80)) . (mb_strlen($tpl->content ?? '') > 80 ? '...' : '') . '</small></td>';
+            echo '<td>';
+            echo '<form method="POST" style="display:inline" onsubmit="return confirm(\'Delete template ' . htmlspecialchars($tpl->template_name) . ' from Meta and local database?\')">';
+            echo '<input type="hidden" name="gateway_id" value="' . $selectedGateway . '">';
+            echo '<input type="hidden" name="delete_template" value="1">';
+            echo '<input type="hidden" name="template_name" value="' . htmlspecialchars($tpl->template_name) . '">';
+            echo '<button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i> Delete</button>';
+            echo '</form>';
+            echo '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+        echo '</div>';
+    }
+
+    echo '</div>'; // panel-body
+    echo '</div>'; // panel
+
+    // Create Template Modal
+    echo '<div class="modal fade" id="createTemplateModal" tabindex="-1">';
+    echo '<div class="modal-dialog modal-lg">';
+    echo '<div class="modal-content">';
+    echo '<form method="POST">';
+    echo '<input type="hidden" name="gateway_id" value="' . $selectedGateway . '">';
+    echo '<input type="hidden" name="create_template" value="1">';
+
+    echo '<div class="modal-header">';
+    echo '<button type="button" class="close" data-dismiss="modal">&times;</button>';
+    echo '<h4 class="modal-title"><i class="fa fa-whatsapp"></i> Create WhatsApp Template</h4>';
+    echo '</div>';
+
+    echo '<div class="modal-body">';
+
+    echo '<div class="form-group">';
+    echo '<label>Template Name <small class="text-muted">(lowercase, letters/numbers/underscores only)</small></label>';
+    echo '<input type="text" name="template_name" class="form-control" required pattern="[a-z0-9_]+" placeholder="e.g. order_confirmation">';
+    echo '</div>';
+
+    echo '<div class="row">';
+    echo '<div class="col-md-6">';
+    echo '<div class="form-group">';
+    echo '<label>Language</label>';
+    echo '<select name="template_language" class="form-control">';
+    $languages = ['en' => 'English', 'en_US' => 'English (US)', 'es' => 'Spanish', 'pt_BR' => 'Portuguese (BR)', 'fr' => 'French', 'de' => 'German', 'it' => 'Italian', 'ar' => 'Arabic', 'hi' => 'Hindi', 'zh_CN' => 'Chinese (CN)'];
+    foreach ($languages as $code => $name) {
+        $sel = ($code === 'en') ? 'selected' : '';
+        echo '<option value="' . $code . '" ' . $sel . '>' . $name . '</option>';
+    }
+    echo '</select>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="col-md-6">';
+    echo '<div class="form-group">';
+    echo '<label>Category</label>';
+    echo '<select name="template_category" class="form-control">';
+    echo '<option value="UTILITY" selected>Utility</option>';
+    echo '<option value="MARKETING">Marketing</option>';
+    echo '<option value="AUTHENTICATION">Authentication</option>';
+    echo '</select>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label>Body Text <small class="text-muted">(use {{1}}, {{2}}, etc. for variables)</small></label>';
+    echo '<textarea name="template_content" class="form-control" rows="5" required placeholder="Hello {{1}}, your order {{2}} is ready for pickup."></textarea>';
+    echo '</div>';
+
+    echo '<div class="alert alert-info"><small><i class="fa fa-info-circle"></i> Templates must be approved by Meta before they can be used. This usually takes a few minutes to 24 hours.</small></div>';
+
+    echo '</div>'; // modal-body
+
+    echo '<div class="modal-footer">';
+    echo '<button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>';
+    echo '<button type="submit" class="btn btn-success"><i class="fa fa-check"></i> Create Template</button>';
+    echo '</div>';
+
+    echo '</form>';
+    echo '</div></div></div>';
+
+    echo '</div>'; // tab-content wrapper
 }

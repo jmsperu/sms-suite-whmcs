@@ -166,7 +166,7 @@ class GatewayTypes
             'zenvia' => ['api_token', 'from'],
             'generic_http' => ['api_url', 'api_method', 'api_key'],
             'twilio_whatsapp' => ['account_sid', 'auth_token', 'whatsapp_number'],
-            'meta_whatsapp' => ['phone_number_id', 'access_token'],
+            'meta_whatsapp' => ['phone_number_id', 'access_token', 'waba_id'],
             'gupshup_whatsapp' => ['api_key', 'app_id', 'source_number'],
             'interakt_whatsapp' => ['api_key'],
             'ultramsg_whatsapp' => ['instance_id', 'token'],

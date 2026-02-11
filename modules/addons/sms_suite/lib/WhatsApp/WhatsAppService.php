@@ -668,6 +668,242 @@ class WhatsAppService
         return $query->orderBy('name')->get()->toArray();
     }
 
+    // ==================== Meta Business Management API ====================
+
+    /**
+     * Get Meta API credentials for a gateway
+     *
+     * @param int $gatewayId
+     * @return array ['phone_number_id', 'access_token', 'waba_id']
+     */
+    public static function getMetaCredentials(int $gatewayId): array
+    {
+        $gateway = Capsule::table('mod_sms_gateways')->where('id', $gatewayId)->first();
+        if (!$gateway) {
+            throw new Exception('Gateway not found');
+        }
+
+        if ($gateway->type !== 'meta_whatsapp') {
+            throw new Exception('Gateway is not Meta WhatsApp type');
+        }
+
+        // Decrypt credentials
+        require_once dirname(__DIR__, 2) . '/sms_suite.php';
+        $decrypted = sms_suite_decrypt($gateway->credentials);
+        $credentials = json_decode($decrypted, true);
+
+        if (!is_array($credentials) || empty($credentials['access_token']) || empty($credentials['waba_id'])) {
+            throw new Exception('Missing Meta WhatsApp credentials (access_token and waba_id required)');
+        }
+
+        return $credentials;
+    }
+
+    /**
+     * Create a message template on Meta's API
+     *
+     * @param int $gatewayId
+     * @param array $data ['name', 'language', 'category', 'components']
+     * @return array
+     */
+    public static function createMetaTemplate(int $gatewayId, array $data): array
+    {
+        try {
+            $credentials = self::getMetaCredentials($gatewayId);
+            $wabaId = $credentials['waba_id'];
+            $accessToken = $credentials['access_token'];
+
+            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates";
+
+            $payload = [
+                'name' => $data['name'],
+                'language' => $data['language'] ?? 'en',
+                'category' => strtoupper($data['category'] ?? 'UTILITY'),
+                'components' => $data['components'] ?? [
+                    ['type' => 'BODY', 'text' => $data['content'] ?? ''],
+                ],
+            ];
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode($payload),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $accessToken,
+                    'Content-Type: application/json',
+                ],
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $result = json_decode($response, true);
+
+            if ($httpCode >= 200 && $httpCode < 300) {
+                return [
+                    'success' => true,
+                    'id' => $result['id'] ?? null,
+                    'status' => $result['status'] ?? 'PENDING',
+                    'category' => $result['category'] ?? $payload['category'],
+                ];
+            }
+
+            return [
+                'success' => false,
+                'error' => $result['error']['message'] ?? 'Meta API error',
+                'error_code' => $result['error']['code'] ?? null,
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get all message templates from Meta's API
+     *
+     * @param int $gatewayId
+     * @return array
+     */
+    public static function getMetaTemplates(int $gatewayId): array
+    {
+        try {
+            $credentials = self::getMetaCredentials($gatewayId);
+            $wabaId = $credentials['waba_id'];
+            $accessToken = $credentials['access_token'];
+
+            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?limit=250";
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $accessToken,
+                ],
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $result = json_decode($response, true);
+
+            if ($httpCode >= 200 && $httpCode < 300) {
+                return [
+                    'success' => true,
+                    'templates' => $result['data'] ?? [],
+                ];
+            }
+
+            return [
+                'success' => false,
+                'error' => $result['error']['message'] ?? 'Meta API error',
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get a single message template from Meta's API
+     *
+     * @param int $gatewayId
+     * @param string $templateName
+     * @return array
+     */
+    public static function getMetaTemplate(int $gatewayId, string $templateName): array
+    {
+        try {
+            $credentials = self::getMetaCredentials($gatewayId);
+            $wabaId = $credentials['waba_id'];
+            $accessToken = $credentials['access_token'];
+
+            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+                 . http_build_query(['name' => $templateName]);
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $accessToken,
+                ],
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $result = json_decode($response, true);
+
+            if ($httpCode >= 200 && $httpCode < 300) {
+                $templates = $result['data'] ?? [];
+                return [
+                    'success' => true,
+                    'template' => !empty($templates) ? $templates[0] : null,
+                ];
+            }
+
+            return [
+                'success' => false,
+                'error' => $result['error']['message'] ?? 'Meta API error',
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Delete a message template from Meta's API
+     *
+     * @param int $gatewayId
+     * @param string $templateName
+     * @return array
+     */
+    public static function deleteMetaTemplate(int $gatewayId, string $templateName): array
+    {
+        try {
+            $credentials = self::getMetaCredentials($gatewayId);
+            $wabaId = $credentials['waba_id'];
+            $accessToken = $credentials['access_token'];
+
+            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+                 . http_build_query(['name' => $templateName]);
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'DELETE',
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $accessToken,
+                ],
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $result = json_decode($response, true);
+
+            if ($httpCode >= 200 && $httpCode < 300) {
+                return [
+                    'success' => $result['success'] ?? true,
+                ];
+            }
+
+            return [
+                'success' => false,
+                'error' => $result['error']['message'] ?? 'Meta API error',
+            ];
+
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
     // ==================== Private Helper Methods ====================
 
     private static function normalizePhone(string $phone): string
@@ -835,7 +1071,7 @@ class WhatsAppService
         $phoneNumberId = $credentials['phone_number_id'];
         $accessToken = $credentials['access_token'];
 
-        $url = "https://graph.facebook.com/v18.0/{$phoneNumberId}/messages";
+        $url = "https://graph.facebook.com/v21.0/{$phoneNumberId}/messages";
 
         $body = [
             'messaging_product' => 'whatsapp',

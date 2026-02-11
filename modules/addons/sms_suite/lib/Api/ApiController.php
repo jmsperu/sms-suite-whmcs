@@ -56,6 +56,7 @@ class ApiController
                 'whatsapp/send' => $this->sendWhatsApp($params),
                 'whatsapp/template' => $this->sendWhatsAppTemplate($params),
                 'whatsapp/media' => $this->sendWhatsAppMedia($params),
+                'whatsapp/templates' => $this->handleWhatsAppTemplates($method, $params),
 
                 // Contacts
                 'contacts' => $method === 'GET' ? $this->getContacts($params) : $this->createContact($params),
@@ -1126,6 +1127,85 @@ class ApiController
         }
 
         return $this->error($result['error'] ?? 'Failed to create template', 400);
+    }
+
+    /**
+     * Handle WhatsApp template management (Meta Business Management API)
+     */
+    private function handleWhatsAppTemplates(string $method, array $params): array
+    {
+        if (!ApiKeyService::hasScope($this->apiKey, 'send_whatsapp')) {
+            return $this->error('Insufficient permissions', 403);
+        }
+
+        $gatewayId = $params['gateway_id'] ?? null;
+        if (empty($gatewayId)) {
+            return $this->error('Missing required parameter: gateway_id', 400);
+        }
+
+        require_once dirname(__DIR__) . '/WhatsApp/WhatsAppService.php';
+
+        switch ($method) {
+            case 'POST':
+                $name = $params['name'] ?? null;
+                $content = $params['content'] ?? null;
+                if (empty($name) || empty($content)) {
+                    return $this->error('Missing required parameters: name, content', 400);
+                }
+
+                $components = [
+                    ['type' => 'BODY', 'text' => $content],
+                ];
+
+                $result = \SMSSuite\WhatsApp\WhatsAppService::createMetaTemplate($gatewayId, [
+                    'name' => $name,
+                    'language' => $params['language'] ?? 'en',
+                    'category' => $params['category'] ?? 'UTILITY',
+                    'components' => $components,
+                    'content' => $content,
+                ]);
+
+                if ($result['success']) {
+                    // Also save locally
+                    \SMSSuite\WhatsApp\WhatsAppService::createWhatsAppTemplate([
+                        'name' => $name,
+                        'language' => $params['language'] ?? 'en',
+                        'category' => $params['category'] ?? 'UTILITY',
+                        'content' => $content,
+                    ]);
+                    return $this->success([
+                        'template_id' => $result['id'],
+                        'status' => $result['status'],
+                    ], 201);
+                }
+                return $this->error($result['error'] ?? 'Failed to create template', 400);
+
+            case 'GET':
+                $result = \SMSSuite\WhatsApp\WhatsAppService::getMetaTemplates($gatewayId);
+                if ($result['success']) {
+                    return $this->success(['templates' => $result['templates']]);
+                }
+                return $this->error($result['error'] ?? 'Failed to fetch templates', 400);
+
+            case 'DELETE':
+                $name = $params['name'] ?? null;
+                if (empty($name)) {
+                    return $this->error('Missing required parameter: name', 400);
+                }
+
+                $result = \SMSSuite\WhatsApp\WhatsAppService::deleteMetaTemplate($gatewayId, $name);
+                if ($result['success']) {
+                    // Also remove locally
+                    Capsule::table('mod_sms_whatsapp_templates')
+                        ->where('template_name', $name)
+                        ->delete();
+                    return $this->success(['deleted' => true]);
+                }
+                return $this->error($result['error'] ?? 'Failed to delete template', 400);
+
+            default:
+                return $this->error('Method not allowed', 405);
+        }
     }
 
     /**
