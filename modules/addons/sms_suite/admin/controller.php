@@ -4325,36 +4325,43 @@ function sms_suite_admin_send_to_client($vars, $lang)
     $senderId = $settings->assigned_sender_id ?? null;
     $gatewayId = $settings->assigned_gateway_id ?? null;
 
-    $channelLabel = ($channel === 'whatsapp') ? 'WhatsApp' : 'SMS';
+    $channelLabels = ['sms' => 'SMS', 'whatsapp' => 'WhatsApp', 'both' => 'SMS + WhatsApp'];
+    $channelLabel = $channelLabels[$channel] ?? 'SMS';
 
     require_once __DIR__ . '/../lib/Core/MessageService.php';
 
-    if ($channel === 'whatsapp') {
-        // Send via WhatsApp through the message service (routes to WA gateway)
-        $result = \SMSSuite\Core\MessageService::send(0, $phone, $message, [
-            'channel' => 'whatsapp',
-            'send_now' => true,
-        ]);
-    } else {
-        // Send via SMS
-        $result = \SMSSuite\Core\MessageService::sendDirect($phone, $message, [
+    $results = [];
+
+    if ($channel === 'sms' || $channel === 'both') {
+        $smsResult = \SMSSuite\Core\MessageService::sendDirect($phone, $message, [
             'sender_id' => $senderId,
             'gateway_id' => $gatewayId,
         ]);
+        $results['SMS'] = $smsResult;
+    }
+
+    if ($channel === 'whatsapp' || $channel === 'both') {
+        $waResult = \SMSSuite\Core\MessageService::send(0, $phone, $message, [
+            'channel' => 'whatsapp',
+            'send_now' => true,
+        ]);
+        $results['WhatsApp'] = $waResult;
     }
 
     echo '<div class="panel panel-default">';
     echo '<div class="panel-heading"><h3 class="panel-title">Send ' . $channelLabel . ' to Client</h3></div>';
     echo '<div class="panel-body">';
 
-    if ($result['success']) {
-        echo '<div class="alert alert-success">';
-        echo '<strong>Success!</strong> ' . $channelLabel . ' message sent to ' . htmlspecialchars($phone) . '.';
-        echo '</div>';
-    } else {
-        echo '<div class="alert alert-danger">';
-        echo '<strong>Failed!</strong> ' . htmlspecialchars($result['error'] ?? 'Unknown error');
-        echo '</div>';
+    foreach ($results as $chName => $result) {
+        if ($result['success']) {
+            echo '<div class="alert alert-success">';
+            echo '<strong>' . $chName . ' — Sent!</strong> Message delivered to ' . htmlspecialchars($phone) . '.';
+            echo '</div>';
+        } else {
+            echo '<div class="alert alert-danger">';
+            echo '<strong>' . $chName . ' — Failed!</strong> ' . htmlspecialchars($result['error'] ?? 'Unknown error');
+            echo '</div>';
+        }
     }
 
     $clientName = $client->companyname ?: ($client->firstname . ' ' . $client->lastname);
