@@ -419,27 +419,35 @@ function sms_suite_admin_gateways($vars, $lang)
 
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-        sms_suite_admin_handle_gateway_action($_POST);
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
+            sms_suite_admin_handle_gateway_action($_POST);
+        }
     }
 
     // Handle client gateway approval/rejection
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['client_gateway_action'])) {
-        $cgwId = (int)($_POST['client_gateway_id'] ?? 0);
-        $cgwAction = $_POST['client_gateway_action'];
-        if ($cgwId > 0) {
-            try {
-                if ($cgwAction === 'approve') {
-                    Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->update(['status' => 1, 'updated_at' => date('Y-m-d H:i:s')]);
-                    echo '<div class="alert alert-success">Client gateway #' . $cgwId . ' has been approved.</div>';
-                } elseif ($cgwAction === 'reject') {
-                    Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->update(['status' => 0, 'updated_at' => date('Y-m-d H:i:s')]);
-                    echo '<div class="alert alert-warning">Client gateway #' . $cgwId . ' has been rejected.</div>';
-                } elseif ($cgwAction === 'delete') {
-                    Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->delete();
-                    echo '<div class="alert alert-info">Client gateway #' . $cgwId . ' has been deleted.</div>';
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
+            $cgwId = (int)($_POST['client_gateway_id'] ?? 0);
+            $cgwAction = $_POST['client_gateway_action'];
+            if ($cgwId > 0) {
+                try {
+                    if ($cgwAction === 'approve') {
+                        Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->update(['status' => 1, 'updated_at' => date('Y-m-d H:i:s')]);
+                        echo '<div class="alert alert-success">Client gateway #' . $cgwId . ' has been approved.</div>';
+                    } elseif ($cgwAction === 'reject') {
+                        Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->update(['status' => 0, 'updated_at' => date('Y-m-d H:i:s')]);
+                        echo '<div class="alert alert-warning">Client gateway #' . $cgwId . ' has been rejected.</div>';
+                    } elseif ($cgwAction === 'delete') {
+                        Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->delete();
+                        echo '<div class="alert alert-info">Client gateway #' . $cgwId . ' has been deleted.</div>';
+                    }
+                } catch (\Exception $e) {
+                    echo '<div class="alert alert-danger">Error: Please run Diagnostics to update database schema first.</div>';
                 }
-            } catch (\Exception $e) {
-                echo '<div class="alert alert-danger">Error: Please run Diagnostics to update database schema first.</div>';
             }
         }
     }
@@ -579,17 +587,20 @@ function sms_suite_admin_gateways($vars, $lang)
 
             if (!$cgw->status) {
                 echo '<form method="POST" style="display:inline;">';
+                echo SecurityHelper::csrfField();
                 echo '<input type="hidden" name="client_gateway_id" value="' . $cgw->id . '">';
                 echo '<button type="submit" name="client_gateway_action" value="approve" class="btn btn-xs btn-success" title="Approve"><i class="fa fa-check"></i></button> ';
                 echo '</form>';
             } else {
                 echo '<form method="POST" style="display:inline;">';
+                echo SecurityHelper::csrfField();
                 echo '<input type="hidden" name="client_gateway_id" value="' . $cgw->id . '">';
                 echo '<button type="submit" name="client_gateway_action" value="reject" class="btn btn-xs btn-warning" title="Disable"><i class="fa fa-ban"></i></button> ';
                 echo '</form>';
             }
 
             echo '<form method="POST" style="display:inline;" onsubmit="return confirm(\'Delete this client gateway?\');">';
+            echo SecurityHelper::csrfField();
             echo '<input type="hidden" name="client_gateway_id" value="' . $cgw->id . '">';
             echo '<button type="submit" name="client_gateway_action" value="delete" class="btn btn-xs btn-danger" title="Delete"><i class="fa fa-trash"></i></button>';
             echo '</form>';
@@ -636,19 +647,24 @@ function sms_suite_admin_gateway_edit($vars, $lang)
 
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_gateway'])) {
-        $result = sms_suite_admin_save_gateway($_POST, $isNew ? null : (int)$id);
-        if ($result['success']) {
-            $message = $lang['gateway_saved'];
-            $messageType = 'success';
-            if ($isNew) {
-                header('Location: ' . $modulelink . '&action=gateway_edit&id=' . $result['id'] . '&saved=1');
-                exit;
-            }
-            $id = $result['id'];
-            $isNew = false;
-        } else {
-            $message = $result['error'];
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
             $messageType = 'danger';
+        } else {
+            $result = sms_suite_admin_save_gateway($_POST, $isNew ? null : (int)$id);
+            if ($result['success']) {
+                $message = $lang['gateway_saved'];
+                $messageType = 'success';
+                if ($isNew) {
+                    header('Location: ' . $modulelink . '&action=gateway_edit&id=' . $result['id'] . '&saved=1');
+                    exit;
+                }
+                $id = $result['id'];
+                $isNew = false;
+            } else {
+                $message = $result['error'];
+                $messageType = 'danger';
+            }
         }
     }
 
@@ -688,49 +704,16 @@ function sms_suite_admin_gateway_edit($vars, $lang)
 
     // Decrypt credentials
     $credentials = [];
-    $debugInfo = [];
     if ($gateway && !empty($gateway->credentials)) {
         $decrypted = sms_suite_decrypt($gateway->credentials);
         $decoded = json_decode($decrypted, true);
-        $jsonError = json_last_error();
         $credentials = is_array($decoded) ? $decoded : [];
-
-        // Debug info (remove in production)
-        $debugInfo['encrypted_length'] = strlen($gateway->credentials);
-        $debugInfo['decrypted_length'] = strlen($decrypted);
-        $debugInfo['decrypted_raw'] = $decrypted;
-        $debugInfo['json_valid'] = ($jsonError === JSON_ERROR_NONE);
-        $debugInfo['json_error'] = $jsonError !== JSON_ERROR_NONE ? json_last_error_msg() : '';
-        $debugInfo['credentials_count'] = count($credentials);
     }
 
     // Parse settings
     $settings = [];
     if ($gateway && !empty($gateway->settings)) {
         $settings = json_decode($gateway->settings, true) ?: [];
-    }
-
-    // Show debug info for troubleshooting (can be removed later)
-    if (!$isNew && isset($_GET['debug'])) {
-        $decryptedPreview = isset($debugInfo['decrypted_raw']) ? $debugInfo['decrypted_raw'] : '';
-        $jsonError = isset($debugInfo['json_error']) ? $debugInfo['json_error'] : '';
-
-        echo '<div class="alert alert-info"><strong>Debug Info:</strong><br>';
-        echo 'Gateway ID: ' . $gateway->id . '<br>';
-        echo 'Encrypted Length: ' . ($debugInfo['encrypted_length'] ?? 'N/A') . '<br>';
-        echo 'Decrypted Length: ' . ($debugInfo['decrypted_length'] ?? 'N/A') . '<br>';
-        echo 'JSON Valid: ' . (($debugInfo['json_valid'] ?? false) ? 'Yes' : 'No') . '<br>';
-        if ($jsonError) {
-            echo 'JSON Error: ' . htmlspecialchars($jsonError) . '<br>';
-        }
-        echo 'Credentials Count: ' . ($debugInfo['credentials_count'] ?? 0) . '<br>';
-        echo 'Credential Keys: ' . (count($credentials) > 0 ? implode(', ', array_keys($credentials)) : 'None') . '<br>';
-        echo '<hr>';
-        echo '<strong>Raw Encrypted (first 100 chars):</strong><br>';
-        echo '<code>' . htmlspecialchars(substr($gateway->credentials, 0, 100)) . '...</code><br>';
-        echo '<strong>Raw Decrypted (first 200 chars):</strong><br>';
-        echo '<code>' . htmlspecialchars(substr($decryptedPreview, 0, 200)) . '...</code><br>';
-        echo '</div>';
     }
 
     echo '<div class="panel panel-default">';
@@ -744,6 +727,7 @@ function sms_suite_admin_gateway_edit($vars, $lang)
     }
 
     echo '<form method="post" class="form-horizontal">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="save_gateway" value="1">';
 
     // Basic settings
@@ -1145,18 +1129,6 @@ function sms_suite_admin_save_gateway($data, $existingId = null)
         $credentialsJson = json_encode($credentials);
         $encryptedCredentials = sms_suite_encrypt($credentialsJson);
 
-        // Log credential info for debugging
-        $credKeys = is_array($credentials) ? array_keys($credentials) : [];
-        logActivity("SMS Suite: Saving gateway - Credentials received: " . count($credKeys) . " fields (" . implode(', ', $credKeys) . ")");
-
-        // Log credential encryption status for debugging
-        if (empty($encryptedCredentials) && !empty($credentialsJson) && $credentialsJson !== '[]') {
-            logActivity('SMS Suite: Warning - credential encryption returned empty');
-        }
-
-        // Log encrypted data length
-        logActivity("SMS Suite: Encrypted data length: " . strlen($encryptedCredentials) . " chars");
-
         // Settings (non-sensitive)
         $settings = [
             'quota_value' => $quotaValue,
@@ -1221,7 +1193,10 @@ function sms_suite_admin_gateway_countries($vars, $lang)
 
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (isset($_POST['add_country'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } elseif (isset($_POST['add_country'])) {
             $countryCode = trim($_POST['country_code'] ?? '');
             $countryName = trim($_POST['country_name'] ?? '');
             $smsRate = (float)($_POST['sms_rate'] ?? 0);
@@ -1290,6 +1265,7 @@ function sms_suite_admin_gateway_countries($vars, $lang)
 
     // Add country form
     echo '<form method="post" class="form-inline" style="margin-bottom: 20px;">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="add_country" value="1">';
     echo '<select name="country_code" class="form-control" style="width: 200px;">';
     echo '<option value="">Select Country...</option>';
@@ -1305,6 +1281,7 @@ function sms_suite_admin_gateway_countries($vars, $lang)
 
     if (count($countries) > 0) {
         echo '<form method="post">';
+        echo SecurityHelper::csrfField();
         echo '<input type="hidden" name="update_rates" value="1">';
         echo '<table class="table table-striped">';
         echo '<thead><tr><th>Country</th><th>Code</th><th>SMS Rate</th><th>WhatsApp Rate</th><th>Actions</th></tr></thead>';
@@ -1413,27 +1390,36 @@ function sms_suite_admin_campaigns($vars, $lang)
 
     // Handle actions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (isset($_POST['delete_campaign'])) {
-            $campaignId = (int)$_POST['campaign_id'];
-            Capsule::table('mod_sms_campaign_recipients')->where('campaign_id', $campaignId)->delete();
-            Capsule::table('mod_sms_campaign_lists')->where('campaign_id', $campaignId)->delete();
-            Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->delete();
-            $message = 'Campaign deleted successfully.';
-            $messageType = 'success';
-        }
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
+            if (isset($_POST['delete_campaign'])) {
+                $campaignId = (int)$_POST['campaign_id'];
+                Capsule::table('mod_sms_campaign_recipients')->where('campaign_id', $campaignId)->delete();
+                Capsule::table('mod_sms_campaign_lists')->where('campaign_id', $campaignId)->delete();
+                Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->delete();
+                $message = 'Campaign deleted successfully.';
+                $messageType = 'success';
+            }
 
-        if (isset($_POST['cancel_campaign'])) {
-            Capsule::table('mod_sms_campaigns')->where('id', (int)$_POST['campaign_id'])->update([
-                'status' => 'cancelled',
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
-            $message = 'Campaign cancelled.';
-            $messageType = 'success';
+            if (isset($_POST['cancel_campaign'])) {
+                Capsule::table('mod_sms_campaigns')->where('id', (int)$_POST['campaign_id'])->update([
+                    'status' => 'cancelled',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+                $message = 'Campaign cancelled.';
+                $messageType = 'success';
+            }
         }
     }
 
     // Filters
+    $allowedStatuses = ['', 'draft', 'scheduled', 'queued', 'sending', 'sent', 'completed', 'paused', 'cancelled', 'failed'];
     $filterStatus = $_GET['status'] ?? '';
+    if (!in_array($filterStatus, $allowedStatuses, true)) {
+        $filterStatus = '';
+    }
     $filterClient = $_GET['client_id'] ?? '';
     $page = max(1, (int)($_GET['page'] ?? 1));
     $perPage = 20;
@@ -1564,11 +1550,13 @@ function sms_suite_admin_campaigns($vars, $lang)
 
         if (in_array($campaign->status, ['scheduled', 'queued', 'sending'])) {
             echo '<form method="post" style="display:inline;"><input type="hidden" name="campaign_id" value="' . $campaign->id . '">';
+            echo SecurityHelper::csrfField();
             echo '<button type="submit" name="cancel_campaign" class="btn btn-xs btn-warning" title="Cancel" onclick="return confirm(\'Cancel this campaign?\')"><i class="fa fa-stop"></i></button></form> ';
         }
 
         if (in_array($campaign->status, ['draft', 'completed', 'failed', 'cancelled'])) {
             echo '<form method="post" style="display:inline;"><input type="hidden" name="campaign_id" value="' . $campaign->id . '">';
+            echo SecurityHelper::csrfField();
             echo '<button type="submit" name="delete_campaign" class="btn btn-xs btn-danger" title="Delete" onclick="return confirm(\'Delete this campaign? This cannot be undone.\')"><i class="fa fa-trash"></i></button></form>';
         }
 
@@ -1625,13 +1613,17 @@ function sms_suite_admin_campaign_edit($vars, $lang)
 
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_campaign'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
         $data = [
             'client_id' => 0, // Admin campaign
-            'name' => trim($_POST['name']),
+            'name' => SecurityHelper::sanitize($_POST['name']),
             'channel' => $_POST['channel'] ?? 'sms',
             'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
             'sender_id' => $_POST['sender_id'] ?: null,
-            'message' => $_POST['message'],
+            'message' => SecurityHelper::sanitize($_POST['message']),
             'status' => $_POST['action_type'] === 'schedule' ? 'scheduled' : 'draft',
             'schedule_time' => !empty($_POST['schedule_time']) ? $_POST['schedule_time'] : null,
             'schedule_type' => $_POST['schedule_type'] ?? 'onetime',
@@ -1672,6 +1664,7 @@ function sms_suite_admin_campaign_edit($vars, $lang)
 
         $messageType = 'success';
         $campaign = Capsule::table('mod_sms_campaigns')->where('id', $campaignId)->first();
+        }
     }
 
     // Get selected groups
@@ -1692,6 +1685,7 @@ function sms_suite_admin_campaign_edit($vars, $lang)
     }
 
     echo '<form method="post" class="form-horizontal">';
+    echo SecurityHelper::csrfField();
 
     echo '<div class="form-group">';
     echo '<label class="col-sm-2 control-label">Campaign Name *</label>';
@@ -1877,7 +1871,7 @@ function sms_suite_admin_campaign_view($vars, $lang)
         foreach ($messages as $msg) {
             $msgStatus = $msg->status === 'delivered' ? '<span class="label label-success">Delivered</span>'
                 : ($msg->status === 'failed' ? '<span class="label label-danger">Failed</span>'
-                : '<span class="label label-default">' . ucfirst($msg->status) . '</span>');
+                : '<span class="label label-default">' . htmlspecialchars(ucfirst($msg->status), ENT_QUOTES, 'UTF-8') . '</span>');
             echo '<tr>';
             echo '<td>' . htmlspecialchars($msg->to_number) . '</td>';
             echo '<td>' . $msgStatus . '</td>';
@@ -2074,7 +2068,7 @@ function sms_suite_admin_messages($vars, $lang)
             echo '<td>' . htmlspecialchars($msg->sender_id ?: '-') . '</td>';
             echo '<td title="' . htmlspecialchars($msg->message) . '">' . htmlspecialchars($msgPreview) . '</td>';
             echo '<td>';
-            echo '<span class="label label-' . $statusClass . '">' . ucfirst($msg->status) . '</span>';
+            echo '<span class="label label-' . $statusClass . '">' . htmlspecialchars(ucfirst($msg->status), ENT_QUOTES, 'UTF-8') . '</span>';
             if ($hasError) {
                 echo ' <i class="fa fa-exclamation-triangle text-danger" title="Has error"></i>';
             }
@@ -2186,35 +2180,40 @@ function sms_suite_admin_templates($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (isset($_POST['save_template'])) {
-            $data = [
-                'name' => trim($_POST['name']),
-                'category' => $_POST['category'] ?? 'general',
-                'type' => $_POST['type'] ?? 'sms',
-                'trigger_hook' => $_POST['trigger_hook'] ?? null,
-                'content' => $_POST['content'],
-                'variables' => $_POST['variables'] ?? null,
-                'status' => isset($_POST['status']) ? 1 : 0,
-                'send_to_client' => isset($_POST['send_to_client']) ? 1 : 0,
-                'send_to_admin' => isset($_POST['send_to_admin']) ? 1 : 0,
-                'updated_at' => date('Y-m-d H:i:s'),
-            ];
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
+            if (isset($_POST['save_template'])) {
+                $data = [
+                    'name' => SecurityHelper::sanitize($_POST['name']),
+                    'category' => $_POST['category'] ?? 'general',
+                    'type' => $_POST['type'] ?? 'sms',
+                    'trigger_hook' => $_POST['trigger_hook'] ?? null,
+                    'content' => SecurityHelper::sanitize($_POST['content']),
+                    'variables' => $_POST['variables'] ?? null,
+                    'status' => isset($_POST['status']) ? 1 : 0,
+                    'send_to_client' => isset($_POST['send_to_client']) ? 1 : 0,
+                    'send_to_admin' => isset($_POST['send_to_admin']) ? 1 : 0,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ];
 
-            if (!empty($_POST['template_id'])) {
-                Capsule::table('mod_sms_notification_templates')->where('id', (int)$_POST['template_id'])->update($data);
-                $message = 'Template updated successfully.';
-            } else {
-                $data['created_at'] = date('Y-m-d H:i:s');
-                Capsule::table('mod_sms_notification_templates')->insert($data);
-                $message = 'Template created successfully.';
+                if (!empty($_POST['template_id'])) {
+                    Capsule::table('mod_sms_notification_templates')->where('id', (int)$_POST['template_id'])->update($data);
+                    $message = 'Template updated successfully.';
+                } else {
+                    $data['created_at'] = date('Y-m-d H:i:s');
+                    Capsule::table('mod_sms_notification_templates')->insert($data);
+                    $message = 'Template created successfully.';
+                }
+                $messageType = 'success';
             }
-            $messageType = 'success';
-        }
 
-        if (isset($_POST['delete_template'])) {
-            Capsule::table('mod_sms_notification_templates')->where('id', (int)$_POST['template_id'])->delete();
-            $message = 'Template deleted.';
-            $messageType = 'success';
+            if (isset($_POST['delete_template'])) {
+                Capsule::table('mod_sms_notification_templates')->where('id', (int)$_POST['template_id'])->delete();
+                $message = 'Template deleted.';
+                $messageType = 'success';
+            }
         }
     }
 
@@ -2316,6 +2315,7 @@ function sms_suite_admin_templates($vars, $lang)
     echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
     echo '<h4 class="modal-title" id="templateModalTitle">New Template</h4></div>';
     echo '<form method="post">';
+    echo SecurityHelper::csrfField();
     echo '<div class="modal-body">';
     echo '<input type="hidden" name="template_id" id="tpl_id">';
 
@@ -2358,7 +2358,7 @@ function sms_suite_admin_templates($vars, $lang)
     echo '</div></form></div></div></div>';
 
     // Delete form
-    echo '<form method="post" id="deleteForm"><input type="hidden" name="template_id" id="delete_id"><input type="hidden" name="delete_template" value="1"></form>';
+    echo '<form method="post" id="deleteForm">' . SecurityHelper::csrfField() . '<input type="hidden" name="template_id" id="delete_id"><input type="hidden" name="delete_template" value="1"></form>';
 
     // JavaScript
     echo '<script>
@@ -2423,42 +2423,47 @@ function sms_suite_admin_automation($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (isset($_POST['save_automation'])) {
-            $data = [
-                'name' => trim($_POST['name']),
-                'trigger_type' => $_POST['trigger_type'],
-                'trigger_config' => json_encode($_POST['trigger_config'] ?? []),
-                'message_template' => $_POST['message_template'],
-                'sender_id' => $_POST['sender_id'] ?: null,
-                'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
-                'status' => $_POST['status'] ?? 'active',
-                'updated_at' => date('Y-m-d H:i:s'),
-            ];
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
+            if (isset($_POST['save_automation'])) {
+                $data = [
+                    'name' => SecurityHelper::sanitize($_POST['name']),
+                    'trigger_type' => $_POST['trigger_type'],
+                    'trigger_config' => json_encode($_POST['trigger_config'] ?? []),
+                    'message_template' => SecurityHelper::sanitize($_POST['message_template']),
+                    'sender_id' => $_POST['sender_id'] ?: null,
+                    'gateway_id' => !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null,
+                    'status' => $_POST['status'] ?? 'active',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ];
 
-            if (!empty($_POST['automation_id'])) {
-                Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->update($data);
-                $message = 'Automation updated successfully.';
-            } else {
-                $data['created_at'] = date('Y-m-d H:i:s');
-                $data['run_count'] = 0;
-                Capsule::table('mod_sms_automations')->insert($data);
-                $message = 'Automation created successfully.';
+                if (!empty($_POST['automation_id'])) {
+                    Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->update($data);
+                    $message = 'Automation updated successfully.';
+                } else {
+                    $data['created_at'] = date('Y-m-d H:i:s');
+                    $data['run_count'] = 0;
+                    Capsule::table('mod_sms_automations')->insert($data);
+                    $message = 'Automation created successfully.';
+                }
+                $messageType = 'success';
             }
-            $messageType = 'success';
-        }
 
-        if (isset($_POST['delete_automation'])) {
-            Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->delete();
-            $message = 'Automation deleted.';
-            $messageType = 'success';
-        }
+            if (isset($_POST['delete_automation'])) {
+                Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->delete();
+                $message = 'Automation deleted.';
+                $messageType = 'success';
+            }
 
-        if (isset($_POST['toggle_status'])) {
-            $auto = Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->first();
-            $newStatus = $auto->status === 'active' ? 'inactive' : 'active';
-            Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->update(['status' => $newStatus]);
-            $message = 'Automation ' . ($newStatus === 'active' ? 'activated' : 'deactivated') . '.';
-            $messageType = 'success';
+            if (isset($_POST['toggle_status'])) {
+                $auto = Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->first();
+                $newStatus = $auto->status === 'active' ? 'inactive' : 'active';
+                Capsule::table('mod_sms_automations')->where('id', (int)$_POST['automation_id'])->update(['status' => $newStatus]);
+                $message = 'Automation ' . ($newStatus === 'active' ? 'activated' : 'deactivated') . '.';
+                $messageType = 'success';
+            }
         }
     }
 
@@ -2534,6 +2539,7 @@ function sms_suite_admin_automation($vars, $lang)
         echo '<td>';
         echo '<button class="btn btn-xs btn-primary" onclick=\'editAutomation(' . json_encode($auto) . ')\'><i class="fa fa-edit"></i></button> ';
         echo '<form method="post" style="display:inline;"><input type="hidden" name="automation_id" value="' . $auto->id . '">';
+        echo SecurityHelper::csrfField();
         echo '<button type="submit" name="toggle_status" class="btn btn-xs btn-warning"><i class="fa fa-power-off"></i></button></form> ';
         echo '<button class="btn btn-xs btn-danger" onclick="deleteAutomation(' . $auto->id . ')"><i class="fa fa-trash"></i></button>';
         echo '</td>';
@@ -2580,6 +2586,7 @@ function sms_suite_admin_automation($vars, $lang)
     echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
     echo '<h4 class="modal-title" id="automationModalTitle">New Automation</h4></div>';
     echo '<form method="post">';
+    echo SecurityHelper::csrfField();
     echo '<div class="modal-body">';
     echo '<input type="hidden" name="automation_id" id="auto_id">';
 
@@ -2634,7 +2641,7 @@ function sms_suite_admin_automation($vars, $lang)
     echo '</div></form></div></div></div>';
 
     // Delete form
-    echo '<form method="post" id="deleteAutoForm"><input type="hidden" name="automation_id" id="delete_auto_id"><input type="hidden" name="delete_automation" value="1"></form>';
+    echo '<form method="post" id="deleteAutoForm">' . SecurityHelper::csrfField() . '<input type="hidden" name="automation_id" id="delete_auto_id"><input type="hidden" name="delete_automation" value="1"></form>';
 
     // JavaScript
     echo '<script>
@@ -2935,6 +2942,10 @@ function sms_suite_admin_clients($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
         if (isset($_POST['save_client_settings'])) {
             $clientId = (int)$_POST['client_id'];
             $settings = [
@@ -3002,6 +3013,7 @@ function sms_suite_admin_clients($vars, $lang)
 
             $message = 'Credits adjusted successfully. New balance: ' . $newBalance;
             $messageType = 'success';
+        }
         }
     }
 
@@ -3129,6 +3141,7 @@ function sms_suite_admin_clients($vars, $lang)
     echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
     echo '<h4 class="modal-title">Edit Client SMS Settings</h4></div>';
     echo '<form method="post">';
+    echo SecurityHelper::csrfField();
     echo '<div class="modal-body">';
     echo '<input type="hidden" name="client_id" id="edit_client_id">';
     echo '<div class="form-group"><label>Billing Mode</label>';
@@ -3166,6 +3179,7 @@ function sms_suite_admin_clients($vars, $lang)
     echo '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>';
     echo '<h4 class="modal-title">Adjust Client Credits</h4></div>';
     echo '<form method="post">';
+    echo SecurityHelper::csrfField();
     echo '<div class="modal-body">';
     echo '<input type="hidden" name="client_id" id="credit_client_id">';
     echo '<div class="form-group"><label>Credits to Add/Remove</label>';
@@ -3284,6 +3298,10 @@ function sms_suite_admin_diagnostics($vars, $lang)
 
     // Handle manual repair action
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['repair_database'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $repairMessage = 'Invalid security token. Please refresh and try again.';
+            $repairType = 'danger';
+        } else {
         $result = sms_suite_repair_tables();
 
         // Fallback: directly add any still-missing columns via Capsule::statement
@@ -3359,6 +3377,7 @@ function sms_suite_admin_diagnostics($vars, $lang)
             $repairMessage = 'Database repair completed with issues. ' . implode('. ', $issues);
             $repairType = 'warning';
         }
+        }
     }
 
     echo '<div class="panel panel-default">';
@@ -3430,6 +3449,7 @@ function sms_suite_admin_diagnostics($vars, $lang)
 
     // Always show repair button - it also updates column schemas
     echo '<form method="post" style="margin-top:10px;">';
+    echo SecurityHelper::csrfField();
     echo '<button type="submit" name="repair_database" class="btn btn-warning">';
     echo '<i class="fa fa-wrench"></i> Repair / Update Database Schema';
     echo '</button>';
@@ -3526,6 +3546,9 @@ function sms_suite_admin_send($vars, $lang)
 
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_broadcast'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
         $recipients = trim($_POST['recipients'] ?? '');
         $message = trim($_POST['message'] ?? '');
         $channel = $_POST['channel'] ?? 'sms';
@@ -3576,6 +3599,7 @@ function sms_suite_admin_send($vars, $lang)
 
             $results = ['sent' => $sent, 'failed' => $failed, 'errors' => $errors];
         }
+        }
     }
 
     // Get gateways
@@ -3611,6 +3635,7 @@ function sms_suite_admin_send($vars, $lang)
     }
 
     echo '<form method="post" id="broadcastForm">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="send_broadcast" value="1">';
 
     echo '<div class="row">';
@@ -3896,53 +3921,65 @@ function sms_suite_admin_client_settings($vars, $lang)
     $error = null;
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_client_settings'])) {
-        try {
-            Capsule::table('mod_sms_settings')
-                ->where('client_id', $clientId)
-                ->update([
-                    'assigned_sender_id' => $_POST['assigned_sender_id'] ?: null,
-                    'assigned_gateway_id' => !empty($_POST['assigned_gateway_id']) ? (int)$_POST['assigned_gateway_id'] : null,
-                    'billing_mode' => $_POST['billing_mode'] ?? 'per_segment',
-                    'monthly_limit' => !empty($_POST['monthly_limit']) ? (int)$_POST['monthly_limit'] : null,
-                    'api_enabled' => isset($_POST['api_enabled']) ? 1 : 0,
-                    'accept_sms' => isset($_POST['accept_sms']) ? 1 : 0,
-                    'accept_marketing_sms' => isset($_POST['accept_marketing_sms']) ? 1 : 0,
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            try {
+                Capsule::table('mod_sms_settings')
+                    ->where('client_id', $clientId)
+                    ->update([
+                        'assigned_sender_id' => $_POST['assigned_sender_id'] ?: null,
+                        'assigned_gateway_id' => !empty($_POST['assigned_gateway_id']) ? (int)$_POST['assigned_gateway_id'] : null,
+                        'billing_mode' => $_POST['billing_mode'] ?? 'per_segment',
+                        'monthly_limit' => !empty($_POST['monthly_limit']) ? (int)$_POST['monthly_limit'] : null,
+                        'api_enabled' => isset($_POST['api_enabled']) ? 1 : 0,
+                        'accept_sms' => isset($_POST['accept_sms']) ? 1 : 0,
+                        'accept_marketing_sms' => isset($_POST['accept_marketing_sms']) ? 1 : 0,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
 
-            $success = 'Client SMS settings updated successfully.';
-            $settings = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
+                $success = 'Client SMS settings updated successfully.';
+                $settings = Capsule::table('mod_sms_settings')->where('client_id', $clientId)->first();
 
-        } catch (Exception $e) {
-            $error = 'Failed to update settings: ' . $e->getMessage();
+            } catch (Exception $e) {
+                $error = 'Failed to update settings: ' . $e->getMessage();
+            }
         }
     }
 
     // Handle add balance (wallet)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_balance'])) {
-        $amount = (float)$_POST['amount'];
-        if ($amount > 0) {
-            require_once __DIR__ . '/../lib/Billing/BillingService.php';
-            $result = \SMSSuite\Billing\BillingService::topUp($clientId, $amount, 'Admin credit');
-            if ($result['success']) {
-                $success = 'Wallet balance added: $' . number_format($amount, 2);
-            } else {
-                $error = $result['error'] ?? 'Failed to add balance';
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            $amount = (float)$_POST['amount'];
+            if ($amount > 0) {
+                require_once __DIR__ . '/../lib/Billing/BillingService.php';
+                $result = \SMSSuite\Billing\BillingService::topUp($clientId, $amount, 'Admin credit');
+                if ($result['success']) {
+                    $success = 'Wallet balance added: $' . number_format($amount, 2);
+                } else {
+                    $error = $result['error'] ?? 'Failed to add balance';
+                }
             }
         }
     }
 
     // Handle add credits (plan mode)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_credits'])) {
-        $credits = (int)$_POST['credits'];
-        if ($credits > 0) {
-            require_once __DIR__ . '/../lib/Billing/BillingService.php';
-            $adminId = $_SESSION['adminid'] ?? 1;
-            $result = \SMSSuite\Billing\BillingService::addCreditsToClient($clientId, $credits, $adminId, 'Admin credit');
-            if ($result['success']) {
-                $success = 'Credits added: ' . number_format($credits) . ' (New balance: ' . number_format($result['new_balance']) . ')';
-            } else {
-                $error = $result['error'] ?? 'Failed to add credits';
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            $credits = (int)$_POST['credits'];
+            if ($credits > 0) {
+                require_once __DIR__ . '/../lib/Billing/BillingService.php';
+                $adminId = $_SESSION['adminid'] ?? 1;
+                $result = \SMSSuite\Billing\BillingService::addCreditsToClient($clientId, $credits, $adminId, 'Admin credit');
+                if ($result['success']) {
+                    $success = 'Credits added: ' . number_format($credits) . ' (New balance: ' . number_format($result['new_balance']) . ')';
+                } else {
+                    $error = $result['error'] ?? 'Failed to add credits';
+                }
             }
         }
     }
@@ -3988,6 +4025,7 @@ function sms_suite_admin_client_settings($vars, $lang)
     // Left column - Settings form
     echo '<div class="col-md-8">';
     echo '<form method="post">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="save_client_settings" value="1">';
 
     echo '<div class="row">';
@@ -4094,6 +4132,7 @@ function sms_suite_admin_client_settings($vars, $lang)
     echo '<div class="panel-heading"><h4 class="panel-title"><i class="fa fa-wallet"></i> Add Wallet Balance</h4></div>';
     echo '<div class="panel-body">';
     echo '<form method="post" class="form-inline">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="add_balance" value="1">';
     echo '<div class="form-group">';
     echo '<div class="input-group">';
@@ -4111,6 +4150,7 @@ function sms_suite_admin_client_settings($vars, $lang)
     echo '<div class="panel-heading"><h4 class="panel-title"><i class="fa fa-ticket"></i> Add SMS Credits</h4></div>';
     echo '<div class="panel-body">';
     echo '<form method="post" class="form-inline">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="add_credits" value="1">';
     echo '<div class="form-group">';
     echo '<input type="number" name="credits" class="form-control" min="1" placeholder="Credits" style="width: 80px;">';
@@ -4213,7 +4253,7 @@ function sms_suite_admin_client_messages($vars, $lang)
             echo '<td>' . htmlspecialchars($msg->to_number) . '</td>';
             echo '<td>' . htmlspecialchars(substr($msg->message, 0, 50)) . (strlen($msg->message) > 50 ? '...' : '') . '</td>';
             echo '<td>' . $msg->segments . '</td>';
-            echo '<td><span class="label label-' . $statusClass . '">' . ucfirst($msg->status) . '</span></td>';
+            echo '<td><span class="label label-' . $statusClass . '">' . htmlspecialchars(ucfirst($msg->status), ENT_QUOTES, 'UTF-8') . '</span></td>';
             echo '<td>$' . number_format($msg->cost, 4) . '</td>';
             echo '</tr>';
         }
@@ -4322,29 +4362,118 @@ function sms_suite_admin_notifications($vars, $lang)
 
     // Handle save
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_template'])) {
-        $templateId = (int)$_POST['template_id'];
-        $message = trim($_POST['message'] ?? '');
-        $status = isset($_POST['status']) ? 'active' : 'inactive';
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            $templateId = (int)$_POST['template_id'];
+            $message = trim($_POST['message'] ?? '');
+            $status = isset($_POST['status']) ? 'active' : 'inactive';
 
-        try {
-            Capsule::table('mod_sms_notification_templates')
-                ->where('id', $templateId)
-                ->update([
-                    'message' => $message,
-                    'status' => $status,
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
-            $success = 'Template updated successfully.';
-        } catch (Exception $e) {
-            $error = $e->getMessage();
+            try {
+                Capsule::table('mod_sms_notification_templates')
+                    ->where('id', $templateId)
+                    ->update([
+                        'message' => $message,
+                        'status' => $status,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                $success = 'Template updated successfully.';
+            } catch (Exception $e) {
+                $error = $e->getMessage();
+            }
+        }
+    }
+
+    // Handle WhatsApp toggle
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_wa'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            $templateId = (int)$_POST['template_id'];
+            $waEnabled = (int)$_POST['wa_enabled'];
+            try {
+                Capsule::table('mod_sms_notification_templates')
+                    ->where('id', $templateId)
+                    ->update([
+                        'wa_enabled' => $waEnabled ? 1 : 0,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                $success = 'WhatsApp ' . ($waEnabled ? 'enabled' : 'disabled') . ' for notification.';
+            } catch (Exception $e) {
+                $error = $e->getMessage();
+            }
+        }
+    }
+
+    // Handle WhatsApp mapping save
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_wa_mapping'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            $notifType = trim($_POST['notification_type'] ?? '');
+            $waTemplateName = trim($_POST['wa_template_name'] ?? '');
+            $paramMapping = $_POST['param_mapping'] ?? [];
+            $mappingGatewayId = !empty($_POST['mapping_gateway_id']) ? (int)$_POST['mapping_gateway_id'] : null;
+
+            if (!empty($notifType) && !empty($waTemplateName)) {
+                try {
+                    $exists = Capsule::table('mod_sms_wa_notification_map')
+                        ->where('notification_type', $notifType)
+                        ->exists();
+
+                    $data = [
+                        'wa_template_name' => $waTemplateName,
+                        'gateway_id' => $mappingGatewayId,
+                        'param_mapping' => json_encode($paramMapping),
+                        'status' => 'active',
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ];
+
+                    if ($exists) {
+                        Capsule::table('mod_sms_wa_notification_map')
+                            ->where('notification_type', $notifType)
+                            ->update($data);
+                    } else {
+                        $data['notification_type'] = $notifType;
+                        $data['created_at'] = date('Y-m-d H:i:s');
+                        Capsule::table('mod_sms_wa_notification_map')->insert($data);
+                    }
+
+                    $success = 'WhatsApp mapping saved for ' . $notifType . '.';
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+            } else {
+                $error = 'Notification type and WhatsApp template name are required.';
+            }
         }
     }
 
     // Create defaults if not exist
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_defaults'])) {
-        require_once __DIR__ . '/../lib/Core/NotificationService.php';
-        $created = \SMSSuite\Core\NotificationService::createDefaultTemplates();
-        $success = $created . ' default templates created.';
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            require_once __DIR__ . '/../lib/Core/NotificationService.php';
+            $created = \SMSSuite\Core\NotificationService::createDefaultTemplates();
+            $success = $created . ' default templates created.';
+        }
+    }
+
+    // Create default WhatsApp templates
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_wa_defaults'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $error = 'Invalid security token. Please refresh and try again.';
+        } else {
+            require_once __DIR__ . '/../lib/Core/NotificationService.php';
+            $gatewayId = !empty($_POST['wa_gateway_id']) ? (int)$_POST['wa_gateway_id'] : null;
+            $submitToMeta = !empty($_POST['submit_to_meta']);
+            $result = \SMSSuite\Core\NotificationService::createDefaultWhatsAppTemplates($gatewayId, $submitToMeta);
+            $success = $result['templates_created'] . ' WA templates created, '
+                . $result['mappings_created'] . ' mappings created'
+                . ($result['submitted'] > 0 ? ', ' . $result['submitted'] . ' submitted to Meta' : '')
+                . '.';
+        }
     }
 
     // Get templates grouped by category
@@ -4358,13 +4487,50 @@ function sms_suite_admin_notifications($vars, $lang)
         $categories[$t->category][] = $t;
     }
 
+    // Load WhatsApp mappings for display
+    $waMappings = [];
+    try {
+        $mappingRows = Capsule::table('mod_sms_wa_notification_map')->get();
+        foreach ($mappingRows as $m) {
+            $waMappings[$m->notification_type] = $m;
+        }
+    } catch (Exception $e) {
+        // Table may not exist yet
+    }
+
+    // Load approved WA templates for the mapping modal dropdown
+    $approvedWaTemplates = [];
+    try {
+        $approvedWaTemplates = Capsule::table('mod_sms_whatsapp_templates')
+            ->where('client_id', 0)
+            ->orderBy('template_name')
+            ->get();
+    } catch (Exception $e) {
+        // Table may not exist yet
+    }
+
+    // Load WhatsApp gateways for default template creation
+    $waGateways = [];
+    try {
+        $waGateways = Capsule::table('mod_sms_gateways')
+            ->where('type', 'meta_whatsapp')
+            ->where('status', 1)
+            ->get();
+    } catch (Exception $e) {
+        // Ignore
+    }
+
     echo '<div class="panel panel-default">';
     echo '<div class="panel-heading">';
-    echo '<h3 class="panel-title">SMS Notification Templates';
-    echo '<form method="post" style="display: inline; float: right;">';
+    echo '<h3 class="panel-title">SMS & WhatsApp Notification Templates';
+    echo '<div style="float: right;">';
+    echo '<form method="post" style="display: inline; margin-right: 5px;">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="create_defaults" value="1">';
-    echo '<button type="submit" class="btn btn-xs btn-default">Create Default Templates</button>';
+    echo '<button type="submit" class="btn btn-xs btn-default">Create Default SMS Templates</button>';
     echo '</form>';
+    echo '<button type="button" class="btn btn-xs btn-success" data-toggle="modal" data-target="#createWaDefaultsModal"><i class="fa fa-whatsapp"></i> Create Default WA Templates</button>';
+    echo '</div>';
     echo '</h3>';
     echo '</div>';
     echo '<div class="panel-body">';
@@ -4377,22 +4543,43 @@ function sms_suite_admin_notifications($vars, $lang)
     }
 
     if (empty($templates)) {
-        echo '<div class="alert alert-info">No templates found. Click "Create Default Templates" to get started.</div>';
+        echo '<div class="alert alert-info">No templates found. Click "Create Default SMS Templates" to get started.</div>';
     } else {
-        echo '<p class="text-muted">These templates send SMS notifications alongside WHMCS emails. Enable or disable each notification type as needed.</p>';
+        echo '<p class="text-muted">These templates send SMS and WhatsApp notifications alongside WHMCS emails. Enable or disable each channel per notification type.</p>';
 
         foreach ($categories as $category => $catTemplates) {
             echo '<h4 style="margin-top: 20px; text-transform: capitalize;">' . htmlspecialchars($category) . ' Notifications</h4>';
             echo '<table class="table table-striped table-condensed">';
-            echo '<thead><tr><th>Type</th><th>Template Message</th><th>Status</th><th>Actions</th></tr></thead>';
+            echo '<thead><tr><th>Type</th><th>SMS Template</th><th>Status</th><th>WhatsApp</th><th>Actions</th></tr></thead>';
             echo '<tbody>';
             foreach ($catTemplates as $t) {
                 $statusClass = $t->status === 'active' ? 'success' : 'default';
+                $waEnabled = !empty($t->wa_enabled);
+                $waClass = $waEnabled ? 'success' : 'default';
+                $hasMapping = isset($waMappings[$t->notification_type]);
                 echo '<tr>';
                 echo '<td style="width: 180px;"><strong>' . htmlspecialchars($t->name) . '</strong><br><small class="text-muted">' . $t->notification_type . '</small></td>';
-                echo '<td>' . htmlspecialchars(substr($t->message, 0, 100)) . (strlen($t->message) > 100 ? '...' : '') . '</td>';
+                echo '<td>' . htmlspecialchars(substr($t->message, 0, 80)) . (strlen($t->message) > 80 ? '...' : '') . '</td>';
                 echo '<td><span class="label label-' . $statusClass . '">' . ucfirst($t->status) . '</span></td>';
-                echo '<td><button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->message), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->status), ENT_QUOTES, 'UTF-8') . ')">Edit</button></td>';
+                echo '<td>';
+                // WA toggle form
+                echo '<form method="post" style="display:inline;">';
+                echo SecurityHelper::csrfField();
+                echo '<input type="hidden" name="toggle_wa" value="1">';
+                echo '<input type="hidden" name="template_id" value="' . $t->id . '">';
+                echo '<input type="hidden" name="wa_enabled" value="' . ($waEnabled ? '0' : '1') . '">';
+                echo '<button type="submit" class="btn btn-xs btn-' . $waClass . '" title="' . ($waEnabled ? 'Click to disable WhatsApp' : 'Click to enable WhatsApp') . '">';
+                echo '<i class="fa fa-whatsapp"></i> ' . ($waEnabled ? 'Enabled' : 'Disabled');
+                echo '</button>';
+                echo '</form>';
+                if ($hasMapping) {
+                    echo ' <small class="text-muted" title="Mapped to: ' . htmlspecialchars($waMappings[$t->notification_type]->wa_template_name) . '"><i class="fa fa-link"></i></small>';
+                }
+                echo '</td>';
+                echo '<td>';
+                echo '<button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->message), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->status), ENT_QUOTES, 'UTF-8') . ')">Edit SMS</button> ';
+                echo '<button class="btn btn-xs btn-info" onclick="editWaMapping(' . htmlspecialchars(json_encode($t->notification_type), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ')"><i class="fa fa-whatsapp"></i> Mapping</button>';
+                echo '</td>';
                 echo '</tr>';
             }
             echo '</tbody>';
@@ -4403,12 +4590,17 @@ function sms_suite_admin_notifications($vars, $lang)
     echo '</div>';
     echo '</div>';
 
-    // Edit modal
+    // Build WA mappings JSON for JS
+    $waMappingsJson = json_encode($waMappings, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $waTemplatesJson = json_encode($approvedWaTemplates, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    // Edit SMS template modal
     echo '
     <div class="modal fade" id="editModal" tabindex="-1" role="dialog">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="save_template" value="1">
                     <input type="hidden" name="template_id" id="edit_template_id">
                     <div class="modal-header">
@@ -4433,13 +4625,181 @@ function sms_suite_admin_notifications($vars, $lang)
             </div>
         </div>
     </div>
+
+    <!-- WhatsApp Mapping Modal -->
+    <div class="modal fade" id="waMappingModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <form method="post">
+                    ' . SecurityHelper::csrfField() . '
+                    <input type="hidden" name="save_wa_mapping" value="1">
+                    <input type="hidden" name="notification_type" id="wa_map_notif_type">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-whatsapp"></i> WhatsApp Mapping: <span id="wa_map_title"></span></h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>WhatsApp Template</label>
+                            <select name="wa_template_name" id="wa_map_template" class="form-control" onchange="updateWaTemplatePreview()">
+                                <option value="">-- Select Template --</option>';
+    foreach ($approvedWaTemplates as $wt) {
+        echo '<option value="' . htmlspecialchars($wt->template_name) . '" data-content="' . htmlspecialchars($wt->content) . '" data-variables="' . htmlspecialchars($wt->variables) . '">' . htmlspecialchars($wt->template_name) . ' (' . ($wt->status) . ')</option>';
+    }
+    echo '
+                            </select>
+                        </div>
+                        <div class="form-group" id="wa_template_preview_group" style="display:none;">
+                            <label>Template Body</label>
+                            <div id="wa_template_preview" class="well" style="background: #e8f5e9; font-family: monospace; white-space: pre-wrap;"></div>
+                        </div>
+                        <div id="wa_param_fields"></div>
+                        <div class="form-group">
+                            <label>Gateway (optional)</label>
+                            <select name="mapping_gateway_id" class="form-control">
+                                <option value="">Auto-detect</option>';
+    foreach ($waGateways as $gw) {
+        echo '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . ' (#' . $gw->id . ')</option>';
+    }
+    echo '
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success"><i class="fa fa-save"></i> Save Mapping</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Default WA Templates Modal -->
+    <div class="modal fade" id="createWaDefaultsModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <form method="post">
+                    ' . SecurityHelper::csrfField() . '
+                    <input type="hidden" name="create_wa_defaults" value="1">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-whatsapp"></i> Create Default WhatsApp Templates</h4>
+                    </div>
+                    <div class="modal-body">
+                        <p>This will create new <code>sms_suite_*</code> WhatsApp templates and submit them to Meta for approval:</p>
+                        <ul class="list-group" style="font-size: .85em;">
+                            <li class="list-group-item"><strong>sms_suite_otp</strong> — Password reset / OTP (AUTH)</li>
+                            <li class="list-group-item"><strong>sms_suite_payment_failed</strong> — Payment failure alerts</li>
+                            <li class="list-group-item"><strong>sms_suite_payment_confirmed</strong> — Invoice paid / payment receipt</li>
+                            <li class="list-group-item"><strong>sms_suite_invoice_reminder</strong> — Invoice created, overdue, reminders (6 types)</li>
+                            <li class="list-group-item"><strong>sms_suite_order_confirmed</strong> — Order confirmation</li>
+                            <li class="list-group-item"><strong>sms_suite_ticket_reply</strong> — Ticket reply notification</li>
+                            <li class="list-group-item"><strong>sms_suite_service_renewal</strong> — Service welcome / renewal</li>
+                            <li class="list-group-item"><strong>sms_suite_service_suspended</strong> — Service suspension</li>
+                            <li class="list-group-item"><strong>sms_suite_domain_expiry</strong> — Domain expiry warning</li>
+                        </ul>
+                        <div class="form-group">
+                            <label>WhatsApp Gateway</label>
+                            <select name="wa_gateway_id" class="form-control">
+                                <option value="">None (create locally only)</option>';
+    foreach ($waGateways as $gw) {
+        echo '<option value="' . $gw->id . '">' . htmlspecialchars($gw->name) . ' (#' . $gw->id . ')</option>';
+    }
+    echo '
+                            </select>
+                        </div>
+                        <div class="checkbox">
+                            <label><input type="checkbox" name="submit_to_meta" value="1"> Submit templates to Meta for approval (requires gateway)</label>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success"><i class="fa fa-whatsapp"></i> Create Templates</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
+    var waMappings = ' . $waMappingsJson . ';
+    var mergeFields = ["first_name","last_name","company","email","invoice_number","invoice_num","total","due_date","order_number","ticket_id","ticket_subject","product_name","domain","expiry_date","company_name","whmcs_url","reset_code","currency","amount","transaction_id"];
+
     function editTemplate(id, name, message, status) {
         document.getElementById("edit_template_id").value = id;
         document.getElementById("edit_modal_title").textContent = "Edit: " + name;
         document.getElementById("edit_message").value = message;
         document.getElementById("edit_status").checked = (status === "active");
         jQuery("#editModal").modal("show");
+    }
+
+    function editWaMapping(notifType, name) {
+        document.getElementById("wa_map_notif_type").value = notifType;
+        document.getElementById("wa_map_title").textContent = name + " (" + notifType + ")";
+
+        // Pre-select template if mapping exists
+        var mapping = null;
+        for (var key in waMappings) {
+            if (waMappings[key].notification_type === notifType) {
+                mapping = waMappings[key];
+                break;
+            }
+        }
+
+        var sel = document.getElementById("wa_map_template");
+        if (mapping) {
+            sel.value = mapping.wa_template_name;
+        } else {
+            sel.value = "";
+        }
+        updateWaTemplatePreview(mapping);
+        jQuery("#waMappingModal").modal("show");
+    }
+
+    function updateWaTemplatePreview(existingMapping) {
+        var sel = document.getElementById("wa_map_template");
+        var opt = sel.options[sel.selectedIndex];
+        var preview = document.getElementById("wa_template_preview");
+        var previewGroup = document.getElementById("wa_template_preview_group");
+        var paramFields = document.getElementById("wa_param_fields");
+
+        if (!opt || !opt.value) {
+            previewGroup.style.display = "none";
+            paramFields.innerHTML = "";
+            return;
+        }
+
+        var content = opt.getAttribute("data-content") || "";
+        preview.textContent = content;
+        previewGroup.style.display = "block";
+
+        // Extract positional params from content
+        var matches = content.match(/\{\{(\d+)\}\}/g) || [];
+        var paramNums = matches.map(function(m) { return m.replace(/[{}]/g, ""); });
+
+        // Parse existing mapping param_mapping
+        var existingParams = {};
+        if (existingMapping && existingMapping.param_mapping) {
+            try {
+                existingParams = typeof existingMapping.param_mapping === "string" ? JSON.parse(existingMapping.param_mapping) : existingMapping.param_mapping;
+            } catch(e) {}
+        }
+
+        var html = "<label>Parameter Mapping</label>";
+        html += \'<p class="help-block">Map each positional parameter to a WHMCS merge field.</p>\';
+        for (var i = 0; i < paramNums.length; i++) {
+            var paramKey = "body_" + paramNums[i];
+            var selected = existingParams[paramKey] || "";
+            html += \'<div class="form-group"><label>{{<span>\' + paramNums[i] + \'</span>}} &rarr;</label>\';
+            html += \'<select name="param_mapping[\' + paramKey + \']" class="form-control">\';
+            html += \'<option value="">-- Select Field --</option>\';
+            for (var j = 0; j < mergeFields.length; j++) {
+                var sel2 = (mergeFields[j] === selected) ? " selected" : "";
+                html += \'<option value="\' + mergeFields[j] + \'"\' + sel2 + \'>\' + mergeFields[j] + \'</option>\';
+            }
+            html += \'</select></div>\';
+        }
+        paramFields.innerHTML = html;
     }
     </script>';
 }
@@ -4459,6 +4819,9 @@ function sms_suite_admin_credit_packages($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
         $action = $_POST['form_action'] ?? '';
 
         if ($action === 'create') {
@@ -4507,6 +4870,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
             } else {
                 echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
             }
+        }
         }
     }
 
@@ -4582,6 +4946,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
                         <i class="fa fa-edit"></i>
                     </button>
                     <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this package?\');">
+                        ' . SecurityHelper::csrfField() . '
                         <input type="hidden" name="form_action" value="delete">
                         <input type="hidden" name="package_id" value="' . $pkg->id . '">
                         <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
@@ -4598,6 +4963,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="create">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -4678,6 +5044,7 @@ function sms_suite_admin_credit_packages($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="update">
                     <input type="hidden" name="package_id" id="edit_pkg_id">
                     <div class="modal-header">
@@ -4782,6 +5149,9 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
         $action = $_POST['form_action'] ?? '';
 
         if ($action === 'create') {
@@ -4859,6 +5229,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
             } else {
                 echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
             }
+        }
         }
     }
 
@@ -4966,6 +5337,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
                         <i class="fa fa-edit"></i>
                     </button>
                     <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this Sender ID from pool?\');">
+                        ' . SecurityHelper::csrfField() . '
                         <input type="hidden" name="form_action" value="delete">
                         <input type="hidden" name="pool_id" value="' . $item->id . '">
                         <button type="submit" class="btn btn-xs btn-danger" title="Delete"><i class="fa fa-trash"></i></button>
@@ -5018,6 +5390,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="create">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -5150,6 +5523,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="assign_to_client">
                     <input type="hidden" name="pool_id" id="assign_pool_id">
                     <div class="modal-header">
@@ -5201,6 +5575,7 @@ function sms_suite_admin_sender_id_pool($vars, $lang)
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="update">
                     <input type="hidden" name="pool_id" id="edit_pool_id">
                     <div class="modal-header">
@@ -5605,33 +5980,37 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $action = $_POST['form_action'] ?? '';
-        $requestId = (int)($_POST['request_id'] ?? 0);
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
+            $action = $_POST['form_action'] ?? '';
+            $requestId = (int)($_POST['request_id'] ?? 0);
 
-        if ($action === 'approve' && $requestId) {
-            $result = \SMSSuite\Billing\BillingService::approveSenderIdRequest($requestId, $adminId, [
-                'gateway_id' => (int)($_POST['gateway_id'] ?? 0),
-                'setup_fee' => (float)($_POST['setup_fee'] ?? 0),
-                'recurring_fee' => (float)($_POST['recurring_fee'] ?? 0),
-                'admin_notes' => SecurityHelper::sanitize($_POST['admin_notes'] ?? ''),
-            ]);
+            if ($action === 'approve' && $requestId) {
+                $result = \SMSSuite\Billing\BillingService::approveSenderIdRequest($requestId, $adminId, [
+                    'gateway_id' => (int)($_POST['gateway_id'] ?? 0),
+                    'setup_fee' => (float)($_POST['setup_fee'] ?? 0),
+                    'recurring_fee' => (float)($_POST['recurring_fee'] ?? 0),
+                    'admin_notes' => SecurityHelper::sanitize($_POST['admin_notes'] ?? ''),
+                ]);
 
-            if ($result['success']) {
-                echo '<div class="alert alert-success">' . htmlspecialchars($result['message']) . '</div>';
-            } else {
-                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
-            }
-        } elseif ($action === 'reject' && $requestId) {
-            $result = \SMSSuite\Billing\BillingService::rejectSenderIdRequest(
-                $requestId,
-                $adminId,
-                SecurityHelper::sanitize($_POST['reject_reason'] ?? '')
-            );
+                if ($result['success']) {
+                    echo '<div class="alert alert-success">' . htmlspecialchars($result['message']) . '</div>';
+                } else {
+                    echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+                }
+            } elseif ($action === 'reject' && $requestId) {
+                $result = \SMSSuite\Billing\BillingService::rejectSenderIdRequest(
+                    $requestId,
+                    $adminId,
+                    SecurityHelper::sanitize($_POST['reject_reason'] ?? '')
+                );
 
-            if ($result['success']) {
-                echo '<div class="alert alert-success">Request rejected.</div>';
-            } else {
-                echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+                if ($result['success']) {
+                    echo '<div class="alert alert-success">Request rejected.</div>';
+                } else {
+                    echo '<div class="alert alert-danger">Error: ' . htmlspecialchars($result['error']) . '</div>';
+                }
             }
         }
     }
@@ -5762,6 +6141,7 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="approve">
                     <input type="hidden" name="request_id" id="approve_request_id">
                     <div class="modal-header">
@@ -5825,6 +6205,7 @@ function sms_suite_admin_sender_id_requests($vars, $lang)
         <div class="modal-dialog modal-sm">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="reject">
                     <input type="hidden" name="request_id" id="reject_request_id">
                     <div class="modal-header">
@@ -5951,6 +6332,9 @@ function sms_suite_admin_billing_rates($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
         $action = $_POST['form_action'] ?? '';
 
         if ($action === 'save_rates') {
@@ -6025,6 +6409,7 @@ function sms_suite_admin_billing_rates($vars, $lang)
 
             echo '<div class="alert alert-success">Destination rate deleted.</div>';
         }
+        }
     }
 
     // Get current settings
@@ -6075,6 +6460,7 @@ function sms_suite_admin_billing_rates($vars, $lang)
             </div>
             <div class="panel-body">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="save_rates">
 
                     <div class="form-group">
@@ -6222,6 +6608,7 @@ function sms_suite_admin_billing_rates($vars, $lang)
                 <td>' . $status . '</td>
                 <td>
                     <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this rate?\');">
+                        ' . SecurityHelper::csrfField() . '
                         <input type="hidden" name="form_action" value="delete_country_rate">
                         <input type="hidden" name="rate_id" value="' . $rate->id . '">
                         <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
@@ -6276,6 +6663,7 @@ function sms_suite_admin_billing_rates($vars, $lang)
                 <td>' . $drStatus . '</td>
                 <td>
                     <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this destination rate?\');">
+                        ' . SecurityHelper::csrfField() . '
                         <input type="hidden" name="form_action" value="delete_destination_rate">
                         <input type="hidden" name="dest_rate_id" value="' . $dr->id . '">
                         <button type="submit" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>
@@ -6299,6 +6687,7 @@ function sms_suite_admin_billing_rates($vars, $lang)
         <div class="modal-dialog modal-sm">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="save_destination_rate">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -6360,6 +6749,7 @@ function sms_suite_admin_billing_rates($vars, $lang)
         <div class="modal-dialog modal-sm">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="save_country_rate">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -6575,7 +6965,7 @@ function sms_suite_ajax_message_detail()
     echo '<table class="table table-condensed">';
     echo '<tr><th width="120">Message ID:</th><td>' . $msg->id . '</td></tr>';
     echo '<tr><th>Provider ID:</th><td><code>' . htmlspecialchars($msg->provider_message_id ?: 'N/A') . '</code></td></tr>';
-    echo '<tr><th>Status:</th><td><span class="label label-' . $statusClass . '">' . ucfirst($msg->status) . '</span></td></tr>';
+    echo '<tr><th>Status:</th><td><span class="label label-' . $statusClass . '">' . htmlspecialchars(ucfirst($msg->status), ENT_QUOTES, 'UTF-8') . '</span></td></tr>';
     echo '<tr><th>To:</th><td><code>' . htmlspecialchars($msg->to_number) . '</code></td></tr>';
     echo '<tr><th>From:</th><td>' . htmlspecialchars($msg->sender_id ?: 'Default') . '</td></tr>';
     echo '<tr><th>Channel:</th><td>' . ucfirst($msg->channel ?? 'sms') . '</td></tr>';
@@ -6703,6 +7093,9 @@ function sms_suite_admin_network_prefixes($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
         $action = $_POST['form_action'] ?? '';
 
         if ($action === 'create') {
@@ -6834,6 +7227,7 @@ function sms_suite_admin_network_prefixes($vars, $lang)
 
             echo '<div class="alert alert-success">Imported ' . $imported . ' Kenya prefixes. Skipped ' . $skipped . ' duplicates.</div>';
         }
+        }
     }
 
     // Get filter parameters
@@ -6887,6 +7281,7 @@ function sms_suite_admin_network_prefixes($vars, $lang)
                         <i class="fa fa-upload"></i> Bulk Import
                     </button>
                     <form method="post" style="display:inline;">
+                        ' . SecurityHelper::csrfField() . '
                         <input type="hidden" name="form_action" value="import_kenya">
                         <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm(\'Import all Kenya (254) network prefixes?\');">
                             <i class="fa fa-flag"></i> Import Kenya Prefixes
@@ -6993,6 +7388,7 @@ function sms_suite_admin_network_prefixes($vars, $lang)
                         <i class="fa fa-edit"></i>
                     </button>
                     <form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this prefix?\');">
+                        ' . SecurityHelper::csrfField() . '
                         <input type="hidden" name="form_action" value="delete">
                         <input type="hidden" name="prefix_id" value="' . $p->id . '">
                         <button type="submit" class="btn btn-xs btn-danger" title="Delete"><i class="fa fa-trash"></i></button>
@@ -7011,6 +7407,7 @@ function sms_suite_admin_network_prefixes($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="create">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -7101,6 +7498,7 @@ function sms_suite_admin_network_prefixes($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="update">
                     <input type="hidden" name="prefix_id" id="edit_prefix_id">
                     <div class="modal-header">
@@ -7192,6 +7590,7 @@ function sms_suite_admin_network_prefixes($vars, $lang)
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="form_action" value="bulk_import">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -7448,6 +7847,10 @@ function sms_suite_admin_contact_groups($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
         // Create group
         if (isset($_POST['create_group'])) {
             $name = trim($_POST['group_name'] ?? '');
@@ -7513,6 +7916,7 @@ function sms_suite_admin_contact_groups($vars, $lang)
                 $message = 'Contact group deleted.';
                 $messageType = 'success';
             }
+        }
         }
     }
 
@@ -7586,6 +7990,7 @@ function sms_suite_admin_contact_groups($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
                         <h4 class="modal-title"><i class="fa fa-folder-plus"></i> Create Contact Group</h4>
@@ -7615,6 +8020,7 @@ function sms_suite_admin_contact_groups($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="group_id" id="edit_group_id">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -7645,6 +8051,7 @@ function sms_suite_admin_contact_groups($vars, $lang)
         <div class="modal-dialog modal-sm">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <input type="hidden" name="group_id" id="delete_group_id">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -7706,6 +8113,10 @@ function sms_suite_admin_contacts($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
         // Add contact
         if (isset($_POST['add_contact'])) {
             $phone = preg_replace('/[^0-9+]/', '', $_POST['phone'] ?? '');
@@ -7829,6 +8240,7 @@ function sms_suite_admin_contacts($vars, $lang)
                 $messageType = 'danger';
             }
         }
+        }
     }
 
     // Get admin groups
@@ -7899,6 +8311,7 @@ function sms_suite_admin_contacts($vars, $lang)
             echo '<td><span class="label label-' . ($contact->status === 'subscribed' ? 'success' : 'default') . '">' . ucfirst($contact->status) . '</span></td>';
             echo '<td>';
             echo '<form method="post" style="display:inline;" onsubmit="return confirm(\'Delete this contact?\');">';
+            echo SecurityHelper::csrfField();
             echo '<input type="hidden" name="contact_id" value="' . $contact->id . '">';
             echo '<button type="submit" name="delete_contact" value="1" class="btn btn-xs btn-danger"><i class="fa fa-trash"></i></button>';
             echo '</form>';
@@ -7925,6 +8338,7 @@ function sms_suite_admin_contacts($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post">
+                    ' . SecurityHelper::csrfField() . '
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
                         <h4 class="modal-title"><i class="fa fa-user-plus"></i> Add Contact</h4>
@@ -7978,6 +8392,7 @@ function sms_suite_admin_contacts($vars, $lang)
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="post" enctype="multipart/form-data">
+                    ' . SecurityHelper::csrfField() . '
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
                         <h4 class="modal-title"><i class="fa fa-upload"></i> Import Contacts from CSV</h4>
@@ -8021,7 +8436,10 @@ function sms_suite_admin_client_rates($vars, $lang)
 
     // Handle form submissions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (isset($_POST['add_rate'])) {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } elseif (isset($_POST['add_rate'])) {
             $clientId = (int)($_POST['client_id'] ?? 0);
             $countryCode = trim($_POST['country_code'] ?? '');
             $networkPrefix = trim($_POST['network_prefix'] ?? '');
@@ -8149,6 +8567,7 @@ function sms_suite_admin_client_rates($vars, $lang)
     echo '<div class="panel-heading"><strong>Add New Client Rate</strong></div>';
     echo '<div class="panel-body">';
     echo '<form method="post" class="form-inline">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="add_rate" value="1">';
 
     echo '<select name="client_id" class="form-control" required style="width: 200px;">';
@@ -8176,6 +8595,7 @@ function sms_suite_admin_client_rates($vars, $lang)
     // Rates table
     if (count($rates) > 0) {
         echo '<form method="post">';
+        echo SecurityHelper::csrfField();
         echo '<input type="hidden" name="update_rates" value="1">';
         echo '<table class="table table-striped table-bordered">';
         echo '<thead><tr>';
@@ -8260,6 +8680,10 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
 
     // Handle POST actions
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            $message = 'Invalid security token. Please refresh and try again.';
+            $messageType = 'danger';
+        } else {
         $postGatewayId = (int)($_POST['gateway_id'] ?? $selectedGateway);
 
         // Create template
@@ -8389,6 +8813,7 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
                 $messageType = 'danger';
             }
         }
+        }
     }
 
     // Page header
@@ -8429,6 +8854,7 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
 
     // Sync button
     echo '<form method="POST" style="display:inline-block; margin-bottom: 15px;">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="gateway_id" value="' . $selectedGateway . '">';
     echo '<input type="hidden" name="sync_templates" value="1">';
     echo '<button type="submit" class="btn btn-info"><i class="fa fa-refresh"></i> Sync from Meta</button>';
@@ -8472,6 +8898,7 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
             echo '<td><small>' . htmlspecialchars(mb_substr($tpl->content ?? '', 0, 80)) . (mb_strlen($tpl->content ?? '') > 80 ? '...' : '') . '</small></td>';
             echo '<td>';
             echo '<form method="POST" style="display:inline" onsubmit="return confirm(\'Delete template ' . htmlspecialchars($tpl->template_name) . ' from Meta and local database?\')">';
+            echo SecurityHelper::csrfField();
             echo '<input type="hidden" name="gateway_id" value="' . $selectedGateway . '">';
             echo '<input type="hidden" name="delete_template" value="1">';
             echo '<input type="hidden" name="template_name" value="' . htmlspecialchars($tpl->template_name) . '">';
@@ -8493,6 +8920,7 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
     echo '<div class="modal-dialog modal-lg">';
     echo '<div class="modal-content">';
     echo '<form method="POST">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="gateway_id" value="' . $selectedGateway . '">';
     echo '<input type="hidden" name="create_template" value="1">';
 

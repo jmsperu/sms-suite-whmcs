@@ -522,6 +522,16 @@ add_hook('EmailPreSend', 1, function ($vars) {
         $message = \SMSSuite\Core\TemplateService::processTemplate($smsTemplate['message'], $mergeData);
         \SMSSuite\Core\MessageService::send($clientId, $phone, $message, ['context' => 'notification']);
 
+        // Send WhatsApp template notification in parallel
+        try {
+            $notifType = \SMSSuite\Core\NotificationService::EMAIL_TEMPLATE_MAP[$templateName] ?? null;
+            if ($notifType) {
+                \SMSSuite\Core\NotificationService::sendWhatsAppNotification($clientId, $notifType, $mergeData);
+            }
+        } catch (\Throwable $e) {
+            logActivity('SMS Suite WA Hook: ' . $e->getMessage());
+        }
+
     } catch (Exception $e) {
         logActivity('SMS Suite Hook Error (EmailPreSend): ' . $e->getMessage());
     }

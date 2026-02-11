@@ -738,6 +738,8 @@ function sms_suite_create_tables_sql()
                 `api_enabled` TINYINT(1) DEFAULT 1,
                 `accept_sms` TINYINT(1) DEFAULT 1,
                 `accept_marketing_sms` TINYINT(1) DEFAULT 0,
+                `accept_whatsapp` TINYINT(1) DEFAULT 1,
+                `whatsapp_number` VARCHAR(30),
                 `two_factor_enabled` TINYINT(1) DEFAULT 0,
                 `enabled_notifications` TEXT,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1443,6 +1445,7 @@ function sms_suite_create_tables_sql()
                 `content` TEXT,
                 `variables` TEXT,
                 `status` VARCHAR(20) DEFAULT 'active',
+                `wa_enabled` TINYINT(1) DEFAULT 0,
                 `send_to_client` TINYINT(1) DEFAULT 1,
                 `send_to_admin` TINYINT(1) DEFAULT 0,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2492,6 +2495,40 @@ function sms_suite_create_tables_sql()
         }
         if (!$columnExists('mod_sms_recurring_log', 'status')) {
             $execSql("ALTER TABLE `mod_sms_recurring_log` ADD COLUMN `status` VARCHAR(20) DEFAULT 'running' AFTER `failed`", "Add status to mod_sms_recurring_log");
+        }
+    }
+
+    // 50. WhatsApp notification mapping table
+    if (!$tableExists('mod_sms_wa_notification_map')) {
+        $execSql("
+            CREATE TABLE `mod_sms_wa_notification_map` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `notification_type` VARCHAR(50) NOT NULL,
+                `wa_template_name` VARCHAR(100) NOT NULL,
+                `gateway_id` INT UNSIGNED,
+                `param_mapping` TEXT NOT NULL,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_notification_type` (`notification_type`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_wa_notification_map");
+    }
+
+    // Add WhatsApp opt-in columns to mod_sms_settings
+    if ($tableExists('mod_sms_settings')) {
+        if (!$columnExists('mod_sms_settings', 'accept_whatsapp')) {
+            $execSql("ALTER TABLE `mod_sms_settings` ADD COLUMN `accept_whatsapp` TINYINT(1) DEFAULT 1 AFTER `accept_marketing_sms`", "Add accept_whatsapp to mod_sms_settings");
+        }
+        if (!$columnExists('mod_sms_settings', 'whatsapp_number')) {
+            $execSql("ALTER TABLE `mod_sms_settings` ADD COLUMN `whatsapp_number` VARCHAR(30) AFTER `accept_whatsapp`", "Add whatsapp_number to mod_sms_settings");
+        }
+    }
+
+    // Add wa_enabled flag to mod_sms_notification_templates
+    if ($tableExists('mod_sms_notification_templates')) {
+        if (!$columnExists('mod_sms_notification_templates', 'wa_enabled')) {
+            $execSql("ALTER TABLE `mod_sms_notification_templates` ADD COLUMN `wa_enabled` TINYINT(1) DEFAULT 0 AFTER `status`", "Add wa_enabled to mod_sms_notification_templates");
         }
     }
 
@@ -4186,9 +4223,9 @@ function sms_suite_encrypt($data)
         }
     }
 
-    // Final fallback: base64 encode (not secure but ensures data is saved)
-    logActivity('SMS Suite: Using base64 fallback for encryption');
-    return 'b64:' . base64_encode($data);
+    // No insecure fallback — fail explicitly
+    logActivity('SMS Suite: Encryption failed — no working encryption method available');
+    throw new \RuntimeException('SMS Suite: Unable to encrypt data. Check WHMCS encryption configuration.');
 }
 
 /**
@@ -4200,8 +4237,9 @@ function sms_suite_decrypt($data)
         return '';
     }
 
-    // Check for base64 fallback prefix
+    // Check for legacy base64 fallback prefix (insecure — re-encrypt this data)
     if (strpos($data, 'b64:') === 0) {
+        logActivity('SMS Suite: WARNING — Decrypting data with insecure b64: encoding. Re-save this record to upgrade encryption.');
         return base64_decode(substr($data, 4));
     }
 

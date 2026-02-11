@@ -2303,6 +2303,8 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
         } else {
             $acceptSms = isset($_POST['accept_sms']) ? 1 : 0;
             $acceptMarketing = isset($_POST['accept_marketing_sms']) ? 1 : 0;
+            $acceptWhatsapp = isset($_POST['accept_whatsapp']) ? 1 : 0;
+            $whatsappNumber = trim($_POST['whatsapp_number'] ?? '');
             $twoFactorEnabled = isset($_POST['two_factor_enabled']) ? 1 : 0;
             $selectedNotifications = $_POST['notifications'] ?? [];
 
@@ -2321,6 +2323,8 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
                 ->update([
                     'accept_sms' => $acceptSms,
                     'accept_marketing_sms' => $acceptMarketing,
+                    'accept_whatsapp' => $acceptWhatsapp,
+                    'whatsapp_number' => $whatsappNumber ?: null,
                     'two_factor_enabled' => $twoFactorEnabled,
                     'enabled_notifications' => json_encode(array_values($selectedNotifications)),
                     'updated_at' => date('Y-m-d H:i:s'),

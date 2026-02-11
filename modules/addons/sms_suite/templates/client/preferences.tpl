@@ -140,6 +140,34 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- WhatsApp Notification Preferences -->
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fab fa-whatsapp"></i> {$lang.wa_notifications|default:'WhatsApp Notifications'}</h3>
+                    </div>
+                    <div class="card-body">
+                        <div style="background: #e8f5e9; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                            <div class="checkbox" style="margin: 0;">
+                                <label>
+                                    <input type="checkbox" name="accept_whatsapp" value="1" id="accept_whatsapp" {if $settings->accept_whatsapp}checked{/if}>
+                                    <strong>{$lang.accept_whatsapp|default:'Receive notifications via WhatsApp'}</strong>
+                                </label>
+                            </div>
+                            <span class="form-text text-muted" style="display: block; margin-top: 6px; font-size: .8rem;">
+                                {$lang.wa_notif_help|default:'When enabled, important notifications (invoices, orders, tickets) will also be sent to your WhatsApp number.'}
+                            </span>
+                        </div>
+
+                        <div id="whatsapp_number_field" {if !$settings->accept_whatsapp}style="opacity: 0.5; pointer-events: none;"{/if}>
+                            <div class="form-group">
+                                <label>{$lang.whatsapp_number|default:'WhatsApp Number'}</label>
+                                <input type="text" name="whatsapp_number" class="form-control" value="{$settings->whatsapp_number}" placeholder="+1234567890">
+                                <span class="form-text text-muted">{$lang.wa_number_help|default:'Leave blank to use your SMS phone number above.'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -295,6 +323,17 @@ document.getElementById('accept_sms').addEventListener('change', function() {
     } else {
         typesDiv.style.opacity = '0.5';
         typesDiv.style.pointerEvents = 'none';
+    }
+});
+
+document.getElementById('accept_whatsapp').addEventListener('change', function() {
+    var waField = document.getElementById('whatsapp_number_field');
+    if (this.checked) {
+        waField.style.opacity = '1';
+        waField.style.pointerEvents = 'auto';
+    } else {
+        waField.style.opacity = '0.5';
+        waField.style.pointerEvents = 'none';
     }
 });
 </script>
