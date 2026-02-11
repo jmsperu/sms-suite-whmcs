@@ -714,7 +714,7 @@ class NotificationService
         try {
             $template = Capsule::table('mod_sms_notification_templates')
                 ->where('notification_type', $notificationType)
-                ->where('status', 'active')
+                ->where('status', 1)
                 ->first();
         } catch (Exception $e) {
             return ['success' => false, 'error' => 'Template lookup failed'];
