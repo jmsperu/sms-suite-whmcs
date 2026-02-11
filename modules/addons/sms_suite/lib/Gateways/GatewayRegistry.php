@@ -209,6 +209,7 @@ class GatewayRegistry
         self::register('smsto', SmsToGateway::class);
         self::register('signalwire', SignalWireGateway::class);
         self::register('zenvia', ZenviaGateway::class);
+        self::register('meta_whatsapp', MetaWhatsAppGateway::class);
 
         // Allow extensions via hook
         if (function_exists('run_hook')) {

@@ -674,6 +674,7 @@ function sms_suite_create_tables_sql()
         $execSql("
             CREATE TABLE `mod_sms_gateways` (
                 `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED DEFAULT NULL,
                 `name` VARCHAR(100) NOT NULL,
                 `type` VARCHAR(50) NOT NULL,
                 `channel` VARCHAR(20) DEFAULT 'sms',
@@ -688,9 +689,16 @@ function sms_suite_create_tables_sql()
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX `idx_type` (`type`),
-                INDEX `idx_status` (`status`)
+                INDEX `idx_status` (`status`),
+                INDEX `idx_client_id` (`client_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ", "Create mod_sms_gateways");
+    } else {
+        // Add client_id column for client-owned gateways
+        if (!$columnExists('mod_sms_gateways', 'client_id')) {
+            $execSql("ALTER TABLE `mod_sms_gateways` ADD COLUMN `client_id` INT UNSIGNED DEFAULT NULL AFTER `id`", "Add client_id to mod_sms_gateways");
+            $execSql("ALTER TABLE `mod_sms_gateways` ADD INDEX `idx_client_id` (`client_id`)", "Add client_id index to mod_sms_gateways");
+        }
     }
 
     // 2. Gateway country pricing
@@ -4028,7 +4036,7 @@ function sms_suite_diagnose_columns()
         'mod_sms_settings' => ['client_id', 'billing_mode', 'default_gateway_id', 'default_sender_id', 'api_enabled', 'accept_sms', 'accept_marketing_sms'],
         'mod_sms_webhooks_inbox' => ['gateway_id', 'gateway_type', 'payload', 'raw_payload', 'ip_address', 'processed', 'processed_at'],
         'mod_sms_sender_ids' => ['sender_id', 'type', 'network', 'status', 'documents', 'gateway_bindings', 'approved_at', 'approved_by', 'rejection_reason'],
-        'mod_sms_gateways' => ['name', 'type', 'status', 'created_at'],
+        'mod_sms_gateways' => ['client_id', 'name', 'type', 'status', 'created_at'],
         'mod_sms_campaigns' => ['client_id', 'name', 'message', 'status', 'created_at'],
         'mod_sms_credit_balance' => ['client_id', 'balance', 'total_purchased', 'total_used', 'total_expired'],
         'mod_sms_credit_transactions' => ['client_id', 'type', 'credits', 'balance_before', 'balance_after', 'description', 'admin_id'],

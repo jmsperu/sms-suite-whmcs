@@ -931,14 +931,40 @@ class WhatsAppService
 
     private static function getWhatsAppGateway(int $clientId): ?int
     {
-        $gateway = Capsule::table('mod_sms_gateways')
-            ->where('status', 1)
-            ->where(function ($q) {
-                $q->where('channel', 'whatsapp')
-                  ->orWhere('channel', 'both');
-            })
-            ->orderBy('id')
-            ->first();
+        // Prefer client-owned WhatsApp gateway if available and approved
+        try {
+            if ($clientId > 0) {
+                $clientGw = Capsule::table('mod_sms_gateways')
+                    ->where('client_id', $clientId)
+                    ->where('type', 'meta_whatsapp')
+                    ->where('status', 1)
+                    ->first();
+                if ($clientGw) {
+                    return $clientGw->id;
+                }
+            }
+
+            // Fall back to global gateway
+            $gateway = Capsule::table('mod_sms_gateways')
+                ->whereNull('client_id')
+                ->where('status', 1)
+                ->where(function ($q) {
+                    $q->where('channel', 'whatsapp')
+                      ->orWhere('channel', 'both');
+                })
+                ->orderBy('id')
+                ->first();
+        } catch (\Exception $e) {
+            // Fallback if client_id column not yet added
+            $gateway = Capsule::table('mod_sms_gateways')
+                ->where('status', 1)
+                ->where(function ($q) {
+                    $q->where('channel', 'whatsapp')
+                      ->orWhere('channel', 'both');
+                })
+                ->orderBy('id')
+                ->first();
+        }
 
         return $gateway ? $gateway->id : null;
     }

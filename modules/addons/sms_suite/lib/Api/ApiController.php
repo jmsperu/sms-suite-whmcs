@@ -28,6 +28,24 @@ class ApiController
      */
     public function handle(string $method, string $endpoint, array $params = []): array
     {
+        // Ensure POST/PUT body is parsed (fallback for when webhook routing loses the body)
+        if (empty($params) && in_array($method, ['POST', 'PUT'])) {
+            // Try pre-captured body constant
+            $rawBody = defined('SMS_RAW_BODY') ? SMS_RAW_BODY : '';
+            if (empty($rawBody)) {
+                $rawBody = file_get_contents('php://input');
+            }
+            if (!empty($rawBody)) {
+                $decoded = json_decode($rawBody, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $params = $decoded;
+                }
+            }
+            if (empty($params) && !empty($_POST)) {
+                $params = $_POST;
+            }
+        }
+
         try {
             // Load security helper for audit logging
             require_once dirname(__DIR__) . '/Core/SecurityHelper.php';
@@ -41,6 +59,7 @@ class ApiController
             if (!ApiKeyService::checkRateLimit($this->apiKey['id'], $this->apiKey['rate_limit'])) {
                 return $this->error('Rate limit exceeded', 429);
             }
+
 
             // Route to endpoint
             return match ($endpoint) {
@@ -69,6 +88,9 @@ class ApiController
                 'campaigns/pause' => $this->pauseCampaign($params),
                 'campaigns/resume' => $this->resumeCampaign($params),
                 'campaigns/cancel' => $this->cancelCampaign($params),
+
+                // Gateways
+                'gateways' => $this->getGateways($params),
 
                 // Sender IDs
                 'senderids' => $this->getSenderIds($params),
@@ -403,6 +425,46 @@ class ApiController
         $result = SegmentCounter::count($message, $channel);
 
         return $this->success($result->toArray());
+    }
+
+    /**
+     * Get available gateways for this client
+     */
+    private function getGateways(array $params): array
+    {
+        $channelFilter = $params['channel'] ?? null;
+
+        try {
+            $query = Capsule::table('mod_sms_gateways')
+                ->where('status', 1)
+                ->where(function ($q) {
+                    $q->whereNull('client_id')
+                      ->orWhere('client_id', $this->apiKey['client_id']);
+                });
+        } catch (\Exception $e) {
+            $query = Capsule::table('mod_sms_gateways')
+                ->where('status', 1);
+        }
+
+        if ($channelFilter) {
+            $query->where(function ($q) use ($channelFilter) {
+                $q->where('channel', $channelFilter)
+                  ->orWhere('channel', 'both');
+            });
+        }
+
+        $gateways = $query->orderBy('name')->get()->map(function ($gw) {
+            $isOwned = !empty($gw->client_id) && (int)$gw->client_id === $this->apiKey['client_id'];
+            return [
+                'id' => $gw->id,
+                'name' => $gw->name,
+                'type' => $gw->type,
+                'channel' => $gw->channel,
+                'owned' => $isOwned,
+            ];
+        })->toArray();
+
+        return $this->success(['gateways' => $gateways]);
     }
 
     /**

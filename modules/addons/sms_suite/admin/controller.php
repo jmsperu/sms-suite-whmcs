@@ -422,6 +422,28 @@ function sms_suite_admin_gateways($vars, $lang)
         sms_suite_admin_handle_gateway_action($_POST);
     }
 
+    // Handle client gateway approval/rejection
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['client_gateway_action'])) {
+        $cgwId = (int)($_POST['client_gateway_id'] ?? 0);
+        $cgwAction = $_POST['client_gateway_action'];
+        if ($cgwId > 0) {
+            try {
+                if ($cgwAction === 'approve') {
+                    Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->update(['status' => 1, 'updated_at' => date('Y-m-d H:i:s')]);
+                    echo '<div class="alert alert-success">Client gateway #' . $cgwId . ' has been approved.</div>';
+                } elseif ($cgwAction === 'reject') {
+                    Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->update(['status' => 0, 'updated_at' => date('Y-m-d H:i:s')]);
+                    echo '<div class="alert alert-warning">Client gateway #' . $cgwId . ' has been rejected.</div>';
+                } elseif ($cgwAction === 'delete') {
+                    Capsule::table('mod_sms_gateways')->where('id', $cgwId)->whereNotNull('client_id')->delete();
+                    echo '<div class="alert alert-info">Client gateway #' . $cgwId . ' has been deleted.</div>';
+                }
+            } catch (\Exception $e) {
+                echo '<div class="alert alert-danger">Error: Please run Diagnostics to update database schema first.</div>';
+            }
+        }
+    }
+
     echo '<div class="panel panel-default">';
     echo '<div class="panel-heading">';
     echo '<h3 class="panel-title" style="display: inline-block;">' . $lang['gateways'] . '</h3>';
@@ -429,7 +451,11 @@ function sms_suite_admin_gateways($vars, $lang)
     echo '</div>';
     echo '<div class="panel-body">';
 
-    $gateways = Capsule::table('mod_sms_gateways')->orderBy('name')->get();
+    try {
+        $gateways = Capsule::table('mod_sms_gateways')->whereNull('client_id')->orderBy('name')->get();
+    } catch (\Exception $e) {
+        $gateways = Capsule::table('mod_sms_gateways')->orderBy('name')->get();
+    }
 
     if (count($gateways) > 0) {
         echo '<table class="table table-striped">';
@@ -493,6 +519,90 @@ function sms_suite_admin_gateways($vars, $lang)
         }
     }
     </script>';
+
+    // Client WhatsApp Gateways (approval panel)
+    try {
+        $clientGateways = Capsule::table('mod_sms_gateways')
+            ->whereNotNull('client_id')
+            ->orderByRaw('status ASC, created_at DESC')
+            ->get();
+    } catch (\Exception $e) {
+        $clientGateways = collect(); // Empty collection if column doesn't exist yet
+    }
+
+    if (count($clientGateways) > 0) {
+        echo '<div class="panel panel-default" style="margin-top: 20px;">';
+        echo '<div class="panel-heading">';
+        echo '<h3 class="panel-title"><i class="fa fa-whatsapp"></i> Client WhatsApp Gateways</h3>';
+        echo '</div>';
+        echo '<div class="panel-body">';
+        echo '<table class="table table-striped">';
+        echo '<thead><tr>';
+        echo '<th>Client</th>';
+        echo '<th>Gateway Name</th>';
+        echo '<th>Status</th>';
+        echo '<th>Messages Sent</th>';
+        echo '<th>Created</th>';
+        echo '<th>Actions</th>';
+        echo '</tr></thead>';
+        echo '<tbody>';
+
+        foreach ($clientGateways as $cgw) {
+            $clientName = 'Client #' . $cgw->client_id;
+            $cl = Capsule::table('tblclients')->where('id', $cgw->client_id)->first();
+            if ($cl) {
+                $clientName = htmlspecialchars($cl->firstname . ' ' . $cl->lastname);
+                if (!empty($cl->companyname)) {
+                    $clientName .= ' <small class="text-muted">(' . htmlspecialchars($cl->companyname) . ')</small>';
+                }
+            }
+
+            $msgCount = Capsule::table('mod_sms_messages')
+                ->where('gateway_id', $cgw->id)
+                ->count();
+            $msgDelivered = Capsule::table('mod_sms_messages')
+                ->where('gateway_id', $cgw->id)
+                ->where('status', 'delivered')
+                ->count();
+
+            $statusLabel = $cgw->status
+                ? '<span class="label label-success">Approved</span>'
+                : '<span class="label label-warning">Pending</span>';
+
+            echo '<tr>';
+            echo '<td>' . $clientName . '</td>';
+            echo '<td>' . htmlspecialchars($cgw->name) . '</td>';
+            echo '<td>' . $statusLabel . '</td>';
+            echo '<td><strong>' . number_format($msgCount) . '</strong> <small class="text-muted">(' . number_format($msgDelivered) . ' delivered)</small></td>';
+            echo '<td>' . htmlspecialchars($cgw->created_at) . '</td>';
+            echo '<td>';
+
+            if (!$cgw->status) {
+                echo '<form method="POST" style="display:inline;">';
+                echo '<input type="hidden" name="client_gateway_id" value="' . $cgw->id . '">';
+                echo '<button type="submit" name="client_gateway_action" value="approve" class="btn btn-xs btn-success" title="Approve"><i class="fa fa-check"></i></button> ';
+                echo '</form>';
+            } else {
+                echo '<form method="POST" style="display:inline;">';
+                echo '<input type="hidden" name="client_gateway_id" value="' . $cgw->id . '">';
+                echo '<button type="submit" name="client_gateway_action" value="reject" class="btn btn-xs btn-warning" title="Disable"><i class="fa fa-ban"></i></button> ';
+                echo '</form>';
+            }
+
+            echo '<form method="POST" style="display:inline;" onsubmit="return confirm(\'Delete this client gateway?\');">';
+            echo '<input type="hidden" name="client_gateway_id" value="' . $cgw->id . '">';
+            echo '<button type="submit" name="client_gateway_action" value="delete" class="btn btn-xs btn-danger" title="Delete"><i class="fa fa-trash"></i></button>';
+            echo '</form>';
+
+            echo '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody>';
+        echo '</table>';
+        echo '</div>';
+        echo '</div>';
+    }
 
     // Handle test action result
     if (isset($_POST['action']) && $_POST['action'] === 'test' && isset($_POST['gateway_id'])) {
@@ -3181,6 +3291,7 @@ function sms_suite_admin_diagnostics($vars, $lang)
         $directFixed = 0;
         if (!empty($colCheck['missing'])) {
             $columnDefs = [
+                'mod_sms_gateways.client_id' => "ALTER TABLE `mod_sms_gateways` ADD COLUMN `client_id` INT UNSIGNED DEFAULT NULL AFTER `id`",
                 'mod_sms_sender_id_pool.country_codes' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `country_codes` TEXT NULL",
                 'mod_sms_sender_id_pool.description' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `description` TEXT NULL",
                 'mod_sms_sender_id_pool.price_setup' => "ALTER TABLE `mod_sms_sender_id_pool` ADD COLUMN `price_setup` DECIMAL(10,2) NOT NULL DEFAULT 0",

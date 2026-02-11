@@ -568,11 +568,23 @@ function sms_suite_client_send($vars, $clientId, $lang)
         }
     }
 
-    // Get available gateways
-    $gateways = Capsule::table('mod_sms_gateways')
-        ->where('status', 1)
-        ->orderBy('name')
-        ->get();
+    // Get available gateways (global + client-owned)
+    try {
+        $gateways = Capsule::table('mod_sms_gateways')
+            ->where('status', 1)
+            ->where(function ($query) use ($clientId) {
+                $query->whereNull('client_id')
+                      ->orWhere('client_id', $clientId);
+            })
+            ->orderBy('name')
+            ->get();
+    } catch (\Exception $e) {
+        // Fallback if client_id column not yet added
+        $gateways = Capsule::table('mod_sms_gateways')
+            ->where('status', 1)
+            ->orderBy('name')
+            ->get();
+    }
 
     // Get all active sender IDs (merged from all sources)
     $senderIds = sms_suite_get_client_sender_ids_merged($clientId);
@@ -2286,7 +2298,7 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
     // Handle form submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_preferences'])) {
         // Verify CSRF token
-        if (!SecurityHelper::verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        if (!SecurityHelper::verifyCsrfPost()) {
             $error = $lang['error_csrf'] ?? 'Security token invalid. Please try again.';
         } else {
             $acceptSms = isset($_POST['accept_sms']) ? 1 : 0;
@@ -2326,7 +2338,7 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
 
     // Handle 2FA verification request
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verify_phone'])) {
-        if (!SecurityHelper::verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        if (!SecurityHelper::verifyCsrfPost()) {
             $error = $lang['error_csrf'] ?? 'Security token invalid. Please try again.';
         } else {
             require_once __DIR__ . '/../lib/Core/VerificationService.php';
@@ -2341,7 +2353,7 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
 
     // Handle 2FA code verification
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_verification'])) {
-        if (!SecurityHelper::verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        if (!SecurityHelper::verifyCsrfPost()) {
             $error = $lang['error_csrf'] ?? 'Security token invalid. Please try again.';
         } else {
             require_once __DIR__ . '/../lib/Core/VerificationService.php';
@@ -2355,10 +2367,166 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
         }
     }
 
+    // WhatsApp Business gateway (requires client_id column)
+    $waGateway = null;
+    $waConfig = [];
+    $waColumnExists = true;
+
+    try {
+        // Test if client_id column exists by running a lightweight query
+        Capsule::table('mod_sms_gateways')->whereNull('client_id')->limit(1)->first();
+    } catch (\Exception $e) {
+        $waColumnExists = false;
+    }
+
+    if ($waColumnExists) {
+        // Handle WhatsApp Business gateway save
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_whatsapp_gateway'])) {
+            if (!SecurityHelper::verifyCsrfPost()) {
+                $error = $lang['error_csrf'] ?? 'Security token invalid. Please try again.';
+            } else {
+                $phoneNumberId = trim($_POST['wa_phone_number_id'] ?? '');
+                $accessToken = trim($_POST['wa_access_token'] ?? '');
+                $wabaId = trim($_POST['wa_waba_id'] ?? '');
+
+                if (empty($phoneNumberId) || empty($accessToken) || empty($wabaId)) {
+                    $error = $lang['wa_fields_required'] ?? 'All WhatsApp Business fields are required.';
+                } else {
+                    $credentials = sms_suite_encrypt(json_encode([
+                        'phone_number_id' => $phoneNumberId,
+                        'access_token' => $accessToken,
+                        'waba_id' => $wabaId,
+                    ]));
+
+                    // Check if client already has a WhatsApp gateway
+                    $existingGw = Capsule::table('mod_sms_gateways')
+                        ->where('client_id', $clientId)
+                        ->where('type', 'meta_whatsapp')
+                        ->first();
+
+                    if ($existingGw) {
+                        Capsule::table('mod_sms_gateways')
+                            ->where('id', $existingGw->id)
+                            ->update([
+                                'credentials' => $credentials,
+                                'status' => 0, // Reset to pending approval
+                                'updated_at' => date('Y-m-d H:i:s'),
+                            ]);
+                    } else {
+                        // Build gateway name from client info
+                        $gwClient = Capsule::table('tblclients')->where('id', $clientId)->first();
+                        $gwName = $gwClient
+                            ? trim(($gwClient->companyname ?: $gwClient->firstname . ' ' . $gwClient->lastname)) . ' WhatsApp'
+                            : 'Client #' . $clientId . ' WhatsApp';
+
+                        Capsule::table('mod_sms_gateways')->insert([
+                            'client_id' => $clientId,
+                            'name' => $gwName,
+                            'type' => 'meta_whatsapp',
+                            'channel' => 'whatsapp',
+                            'status' => 0, // Pending admin approval
+                            'credentials' => $credentials,
+                            'created_at' => date('Y-m-d H:i:s'),
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    }
+
+                    $success = $lang['wa_gateway_saved'] ?? 'WhatsApp Business credentials saved. Pending admin approval.';
+                }
+            }
+        }
+
+        // Handle WhatsApp gateway test connection
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['test_whatsapp_gateway'])) {
+            if (!SecurityHelper::verifyCsrfPost()) {
+                $error = $lang['error_csrf'] ?? 'Security token invalid. Please try again.';
+            } else {
+                // Load credentials from saved gateway
+                $testGw = Capsule::table('mod_sms_gateways')
+                    ->where('client_id', $clientId)
+                    ->where('type', 'meta_whatsapp')
+                    ->first();
+
+                if (!$testGw || empty($testGw->credentials)) {
+                    $error = $lang['wa_save_first'] ?? 'Please save your WhatsApp credentials first.';
+                } else {
+                    $decrypted = sms_suite_decrypt($testGw->credentials);
+                    $creds = json_decode($decrypted, true);
+
+                    if (!$creds || empty($creds['phone_number_id']) || empty($creds['access_token'])) {
+                        $error = $lang['wa_invalid_creds'] ?? 'Saved credentials are invalid. Please re-enter them.';
+                    } else {
+                        // Call Meta Graph API to verify phone_number_id + access_token
+                        $testUrl = 'https://graph.facebook.com/v21.0/' . urlencode($creds['phone_number_id'])
+                            . '?fields=verified_name,display_phone_number,quality_rating&access_token=' . urlencode($creds['access_token']);
+
+                        $ch = curl_init($testUrl);
+                        curl_setopt_array($ch, [
+                            CURLOPT_RETURNTRANSFER => true,
+                            CURLOPT_TIMEOUT => 15,
+                            CURLOPT_SSL_VERIFYPEER => true,
+                        ]);
+                        $response = curl_exec($ch);
+                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        $curlErr = curl_error($ch);
+                        curl_close($ch);
+
+                        if ($curlErr) {
+                            $error = 'Connection failed: ' . $curlErr;
+                        } elseif ($httpCode === 200) {
+                            $data = json_decode($response, true);
+                            $verifiedName = $data['verified_name'] ?? 'Unknown';
+                            $displayPhone = $data['display_phone_number'] ?? 'Unknown';
+                            $quality = $data['quality_rating'] ?? 'N/A';
+                            $success = "Connection successful! Business: {$verifiedName} | Phone: {$displayPhone} | Quality: {$quality}";
+                        } else {
+                            $data = json_decode($response, true);
+                            $metaError = $data['error']['message'] ?? 'Unknown error';
+                            $error = "Meta API error (HTTP {$httpCode}): {$metaError}";
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle WhatsApp gateway delete
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_whatsapp_gateway'])) {
+            if (!SecurityHelper::verifyCsrfPost()) {
+                $error = $lang['error_csrf'] ?? 'Security token invalid. Please try again.';
+            } else {
+                Capsule::table('mod_sms_gateways')
+                    ->where('client_id', $clientId)
+                    ->where('type', 'meta_whatsapp')
+                    ->delete();
+                $success = $lang['wa_gateway_deleted'] ?? 'WhatsApp Business configuration removed.';
+            }
+        }
+
+        // Load client's WhatsApp gateway
+        $waGateway = Capsule::table('mod_sms_gateways')
+            ->where('client_id', $clientId)
+            ->where('type', 'meta_whatsapp')
+            ->first();
+
+        if ($waGateway && !empty($waGateway->credentials)) {
+            $decrypted = sms_suite_decrypt($waGateway->credentials);
+            $decoded = json_decode($decrypted, true);
+            if ($decoded) {
+                $waConfig = [
+                    'phone_number_id' => $decoded['phone_number_id'] ?? '',
+                    'access_token_masked' => !empty($decoded['access_token'])
+                        ? str_repeat('*', max(0, strlen($decoded['access_token']) - 6)) . substr($decoded['access_token'], -6)
+                        : '',
+                    'waba_id' => $decoded['waba_id'] ?? '',
+                ];
+            }
+        }
+    }
+
     // Check if phone is verified
     $phoneVerified = Capsule::table('mod_sms_client_verification')
         ->where('client_id', $clientId)
-        ->where('verified', 1)
+        ->where('phone_verified', 1)
         ->exists();
 
     return [
@@ -2377,6 +2545,11 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
             'notification_types' => $notificationTypes,
             'enabled_notifications' => $enabledNotifications,
             'phone_verified' => $phoneVerified,
+            'wa_gateway' => $waGateway,
+            'wa_config' => $waConfig,
+            'wa_webhook_url' => $waGateway
+                ? rtrim($GLOBALS['CONFIG']['SystemURL'] ?? '', '/') . '/modules/addons/sms_suite/webhook.php?gateway=meta_whatsapp&gw_id=' . $waGateway->id
+                : '',
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),

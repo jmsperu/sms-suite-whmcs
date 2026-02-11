@@ -1362,3 +1362,162 @@ class Fast2SmsGateway extends AbstractGateway
         return new SendResult(false, null, 'Fast2SMS API error');
     }
 }
+
+/**
+ * Meta WhatsApp Business Cloud API Gateway
+ */
+class MetaWhatsAppGateway extends AbstractGateway
+{
+    const API_VERSION = 'v21.0';
+
+    public function getType(): string { return 'meta_whatsapp'; }
+    public function getName(): string { return 'Meta WhatsApp Business'; }
+    public function getSupportedChannels(): array { return ['whatsapp']; }
+
+    public function getRequiredFields(): array
+    {
+        return [
+            ['name' => 'phone_number_id', 'type' => 'text', 'label' => 'Phone Number ID', 'required' => true, 'placeholder' => 'From Meta Business Suite > WhatsApp > API Setup'],
+            ['name' => 'access_token', 'type' => 'password', 'label' => 'Access Token', 'required' => true],
+            ['name' => 'waba_id', 'type' => 'text', 'label' => 'WABA ID', 'required' => true, 'placeholder' => 'WhatsApp Business Account ID'],
+        ];
+    }
+
+    public function send(MessageDTO $message): SendResult
+    {
+        $phoneNumberId = $this->config['phone_number_id'] ?? '';
+        $accessToken = $this->config['access_token'] ?? '';
+
+        if (empty($phoneNumberId) || empty($accessToken)) {
+            return SendResult::failure('Meta WhatsApp credentials not configured');
+        }
+
+        $to = preg_replace('/[^0-9]/', '', $message->to);
+
+        $url = 'https://graph.facebook.com/' . self::API_VERSION . '/' . $phoneNumberId . '/messages';
+
+        // Check if this is a template message (from metadata)
+        $templateName = $message->metadata['template_name'] ?? null;
+
+        if ($templateName) {
+            $payload = [
+                'messaging_product' => 'whatsapp',
+                'to' => $to,
+                'type' => 'template',
+                'template' => [
+                    'name' => $templateName,
+                    'language' => ['code' => $message->metadata['language'] ?? 'en'],
+                ],
+            ];
+            if (!empty($message->metadata['template_params'])) {
+                $components = [];
+                $params = [];
+                foreach ($message->metadata['template_params'] as $val) {
+                    $params[] = ['type' => 'text', 'text' => (string)$val];
+                }
+                if (!empty($params)) {
+                    $components[] = ['type' => 'body', 'parameters' => $params];
+                }
+                $payload['template']['components'] = $components;
+            }
+        } else {
+            $payload = [
+                'messaging_product' => 'whatsapp',
+                'recipient_type' => 'individual',
+                'to' => $to,
+                'type' => 'text',
+                'text' => [
+                    'preview_url' => false,
+                    'body' => $message->message,
+                ],
+            ];
+        }
+
+        $response = $this->httpPost($url, $payload, [
+            'Authorization' => 'Bearer ' . $accessToken,
+            'Content-Type' => 'application/json',
+        ], true);
+
+        $data = json_decode($response['body'] ?? '', true);
+
+        if ($response['http_code'] >= 200 && $response['http_code'] < 300) {
+            $waMessageId = $data['messages'][0]['id'] ?? null;
+            if ($waMessageId) {
+                return SendResult::success($waMessageId, $data);
+            }
+            return SendResult::failure('No message ID in response', null, $data ?? []);
+        }
+
+        $errorMsg = $data['error']['message'] ?? ($response['error'] ?? 'Meta WhatsApp API error');
+        $errorCode = (string)($data['error']['code'] ?? '');
+        return SendResult::failure($errorMsg, $errorCode, $data ?? []);
+    }
+
+    public function getBalance(): ?float
+    {
+        return null; // Meta WhatsApp uses conversation-based pricing via Meta billing
+    }
+
+    public function parseDeliveryReceipt(array $payload): ?DLRResult
+    {
+        // Meta webhook: entry[].changes[].value.statuses[]
+        $statuses = $payload['statuses'] ?? [];
+        if (empty($statuses)) {
+            return null;
+        }
+
+        $status = $statuses[0];
+        $messageId = $status['id'] ?? '';
+        $statusStr = $status['status'] ?? 'unknown';
+
+        $statusMap = [
+            'sent' => 'sent',
+            'delivered' => 'delivered',
+            'read' => 'delivered',
+            'failed' => 'failed',
+        ];
+
+        $dlr = new DLRResult($messageId, $statusMap[$statusStr] ?? 'unknown');
+        $dlr->rawPayload = $payload;
+
+        if ($statusStr === 'failed' && isset($status['errors'][0])) {
+            $dlr->errorCode = (string)($status['errors'][0]['code'] ?? '');
+            $dlr->errorMessage = $status['errors'][0]['title'] ?? '';
+        }
+
+        return $dlr;
+    }
+
+    public function parseInboundMessage(array $payload): ?InboundResult
+    {
+        $messages = $payload['messages'] ?? [];
+        if (empty($messages)) {
+            return null;
+        }
+
+        $msg = $messages[0];
+        $from = $msg['from'] ?? '';
+        $to = $payload['metadata']['display_phone_number'] ?? '';
+        $text = $msg['text']['body'] ?? '';
+        $msgId = $msg['id'] ?? '';
+
+        $inbound = new InboundResult($from, $to, $text);
+        $inbound->messageId = $msgId;
+        $inbound->channel = 'whatsapp';
+        $inbound->rawPayload = $payload;
+
+        return $inbound;
+    }
+
+    public function verifyWebhook(array $headers, string $body, string $secret): bool
+    {
+        $signature = $headers['X-Hub-Signature-256'] ?? $headers['x-hub-signature-256'] ?? '';
+        if (empty($signature) || empty($secret)) {
+            return true; // Allow if no app secret configured
+        }
+
+        $signature = str_replace('sha256=', '', $signature);
+        $expected = hash_hmac('sha256', $body, $secret);
+        return hash_equals($expected, $signature);
+    }
+}

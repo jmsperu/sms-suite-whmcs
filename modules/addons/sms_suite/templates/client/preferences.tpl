@@ -151,6 +151,139 @@
             </div>
         </div>
     </form>
+
+    <!-- WhatsApp Business Configuration -->
+    <div class="row" style="margin-top: 30px;">
+        <div class="col-md-6" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title" style="display: inline-block;">
+                        <i class="fab fa-whatsapp"></i> {$lang.wa_config_title|default:'WhatsApp Business Configuration'}
+                    </h3>
+                    {if $wa_gateway}
+                        {if $wa_gateway->status}
+                            <span class="label label-success" style="margin-left: 10px;"><i class="fas fa-check"></i> {$lang.wa_status_active|default:'Active'}</span>
+                        {else}
+                            <span class="label label-warning" style="margin-left: 10px;"><i class="fas fa-clock"></i> {$lang.wa_status_pending|default:'Pending Approval'}</span>
+                        {/if}
+                    {/if}
+                </div>
+                <div class="card-body">
+                    <p class="text-muted" style="margin-bottom: 16px;">
+                        {$lang.wa_config_help|default:'Connect your own Meta WhatsApp Business account to send messages using your own number. Credentials require admin approval before activation.'}
+                    </p>
+
+                    <form method="post" action="{$modulelink}&action=preferences">
+                        <input type="hidden" name="csrf_token" value="{$csrf_token}">
+
+                        <div class="form-group">
+                            <label>{$lang.wa_phone_number_id|default:'Phone Number ID'}</label>
+                            <input type="text" name="wa_phone_number_id" class="form-control" value="{$wa_config.phone_number_id}" placeholder="e.g. 123456789012345">
+                            <span class="form-text text-muted">{$lang.wa_phone_number_id_help|default:'From Meta Business Suite > WhatsApp > API Setup'}</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label>{$lang.wa_access_token|default:'Access Token'}</label>
+                            <input type="password" name="wa_access_token" class="form-control" placeholder="{if $wa_config.access_token_masked}{$wa_config.access_token_masked}{else}Enter your permanent access token{/if}">
+                            {if $wa_config.access_token_masked}
+                            <span class="form-text text-muted">{$lang.wa_token_current|default:'Current token:'} {$wa_config.access_token_masked}</span>
+                            {/if}
+                        </div>
+
+                        <div class="form-group">
+                            <label>{$lang.wa_waba_id|default:'WABA ID'}</label>
+                            <input type="text" name="wa_waba_id" class="form-control" value="{$wa_config.waba_id}" placeholder="e.g. 123456789012345">
+                            <span class="form-text text-muted">{$lang.wa_waba_id_help|default:'WhatsApp Business Account ID from Meta Business Settings'}</span>
+                        </div>
+
+                        <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button type="submit" name="save_whatsapp_gateway" class="btn btn-success">
+                                <i class="fab fa-whatsapp"></i> {$lang.wa_save|default:'Save Configuration'}
+                            </button>
+                            {if $wa_gateway}
+                            <button type="submit" name="test_whatsapp_gateway" class="btn btn-info">
+                                <i class="fas fa-plug"></i> {$lang.wa_test|default:'Test Connection'}
+                            </button>
+                            <button type="submit" name="delete_whatsapp_gateway" class="btn btn-danger" onclick="return confirm('{$lang.wa_confirm_delete|default:'Remove your WhatsApp Business configuration?'}');">
+                                <i class="fas fa-trash"></i> {$lang.wa_remove|default:'Remove'}
+                            </button>
+                            {/if}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6" style="margin-bottom: 24px;">
+            {if $wa_gateway}
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-info-circle"></i> {$lang.wa_status_title|default:'Gateway Status'}</h3>
+                </div>
+                <div class="card-body">
+                    <table class="table" style="margin-bottom: 0;">
+                        <tr>
+                            <td style="width: 40%; font-weight: 600;">{$lang.wa_label_status|default:'Status'}</td>
+                            <td>
+                                {if $wa_gateway->status}
+                                    <span class="label label-success"><i class="fas fa-check"></i> {$lang.wa_status_active|default:'Active'}</span>
+                                {else}
+                                    <span class="label label-warning"><i class="fas fa-clock"></i> {$lang.wa_status_pending|default:'Pending Approval'}</span>
+                                {/if}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">{$lang.wa_label_type|default:'Gateway Type'}</td>
+                            <td>Meta WhatsApp Cloud API</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">{$lang.wa_label_channel|default:'Channel'}</td>
+                            <td><span class="label label-success"><i class="fab fa-whatsapp"></i> WhatsApp</span></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            {/if}
+
+            {if $wa_webhook_url}
+            <div class="card" {if $wa_gateway}style="margin-top: 16px;"{/if}>
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-link"></i> {$lang.wa_callback_title|default:'Webhook Callback URL'}</h3>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted" style="font-size: .85rem; margin-bottom: 10px;">
+                        {$lang.wa_callback_help|default:'Paste this URL in Meta Business Suite > WhatsApp > Configuration > Webhook URL for delivery receipts and inbound messages.'}
+                    </p>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="wa_webhook_url" value="{$wa_webhook_url}" readonly style="background: #fff; font-family: monospace; font-size: .85rem;">
+                        <span class="input-group-btn">
+                            <button class="btn btn-default" type="button" onclick="var el=document.getElementById('wa_webhook_url');el.select();document.execCommand('copy');this.innerHTML='<i class=\'fas fa-check\'></i> Copied!';">
+                                <i class="fas fa-copy"></i> {$lang.wa_copy|default:'Copy'}
+                            </button>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            {/if}
+
+            {if !$wa_gateway}
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-info-circle"></i> {$lang.wa_setup_title|default:'Setup Guide'}</h3>
+                </div>
+                <div class="card-body">
+                    <ol style="padding-left: 18px; margin-bottom: 0; line-height: 2;">
+                        <li>{$lang.wa_step1|default:'Go to <strong>Meta Business Suite</strong> and set up a WhatsApp Business account'}</li>
+                        <li>{$lang.wa_step2|default:'Navigate to <strong>WhatsApp > API Setup</strong> to get your credentials'}</li>
+                        <li>{$lang.wa_step3|default:'Enter your <strong>Phone Number ID</strong>, <strong>Access Token</strong>, and <strong>WABA ID</strong>'}</li>
+                        <li>{$lang.wa_step4|default:'Click <strong>Save</strong> and wait for admin approval'}</li>
+                        <li>{$lang.wa_step5|default:'Once approved, configure the <strong>Webhook URL</strong> in Meta'}</li>
+                    </ol>
+                </div>
+            </div>
+            {/if}
+        </div>
+    </div>
 </div>
 
 <script>

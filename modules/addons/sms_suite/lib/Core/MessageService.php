@@ -79,9 +79,20 @@ class MessageService
             // Calculate segments
             $segmentResult = SegmentCounter::count($message, $channel);
 
-            // Calculate cost and check balance (skip for admin broadcasts with clientId = 0)
+            // Check if this is a client-owned gateway (skip billing if so)
+            $isClientOwnedGateway = false;
+            try {
+                $gwRecord = Capsule::table('mod_sms_gateways')->where('id', $gatewayId)->first();
+                if ($gwRecord && !empty($gwRecord->client_id)) {
+                    $isClientOwnedGateway = true;
+                }
+            } catch (\Exception $e) {
+                // client_id column may not exist yet
+            }
+
+            // Calculate cost and check balance (skip for admin broadcasts and client-owned gateways)
             $cost = 0;
-            if ($clientId > 0) {
+            if ($clientId > 0 && !$isClientOwnedGateway) {
                 require_once dirname(__DIR__) . '/Billing/BillingService.php';
 
                 // Extract country code and detect network for rate lookup
@@ -201,8 +212,19 @@ class MessageService
                 ->update($updateData);
 
             if ($result->success) {
-                // Deduct billing (only for client messages)
-                if ($message->client_id > 0) {
+                // Check if gateway is client-owned (skip billing)
+                $skipBilling = false;
+                try {
+                    $gwRec = Capsule::table('mod_sms_gateways')->where('id', $message->gateway_id)->first();
+                    if ($gwRec && !empty($gwRec->client_id)) {
+                        $skipBilling = true;
+                    }
+                } catch (\Exception $e) {
+                    // client_id column may not exist
+                }
+
+                // Deduct billing (only for client messages using shared gateways)
+                if ($message->client_id > 0 && !$skipBilling) {
                     require_once dirname(__DIR__) . '/Billing/BillingService.php';
                     $countryCode = self::extractCountryCode($message->to_number);
                     $network = self::detectNetworkFromPhone($message->to_number);
@@ -356,7 +378,23 @@ class MessageService
      */
     public static function getDefaultGateway(int $clientId, string $channel = 'sms'): ?int
     {
-        // Check client settings
+        // For WhatsApp, always prefer client-owned gateway first (before generic default)
+        try {
+            if ($channel === 'whatsapp') {
+                $clientGw = Capsule::table('mod_sms_gateways')
+                    ->where('client_id', $clientId)
+                    ->where('type', 'meta_whatsapp')
+                    ->where('status', 1)
+                    ->first();
+                if ($clientGw) {
+                    return $clientGw->id;
+                }
+            }
+        } catch (\Exception $e) {
+            // client_id column may not exist yet
+        }
+
+        // Check client settings for default gateway
         $settings = Capsule::table('mod_sms_settings')
             ->where('client_id', $clientId)
             ->first();
@@ -365,15 +403,29 @@ class MessageService
             return $settings->default_gateway_id;
         }
 
-        // Get first active gateway that supports the channel
-        $gateway = Capsule::table('mod_sms_gateways')
-            ->where('status', 1)
-            ->where(function ($query) use ($channel) {
-                $query->where('channel', $channel)
-                      ->orWhere('channel', 'both');
-            })
-            ->orderBy('id')
-            ->first();
+        try {
+
+            // Get first active global gateway that supports the channel
+            $gateway = Capsule::table('mod_sms_gateways')
+                ->whereNull('client_id')
+                ->where('status', 1)
+                ->where(function ($query) use ($channel) {
+                    $query->where('channel', $channel)
+                          ->orWhere('channel', 'both');
+                })
+                ->orderBy('id')
+                ->first();
+        } catch (\Exception $e) {
+            // Fallback if client_id column not yet added
+            $gateway = Capsule::table('mod_sms_gateways')
+                ->where('status', 1)
+                ->where(function ($query) use ($channel) {
+                    $query->where('channel', $channel)
+                          ->orWhere('channel', 'both');
+                })
+                ->orderBy('id')
+                ->first();
+        }
 
         return $gateway ? $gateway->id : null;
     }

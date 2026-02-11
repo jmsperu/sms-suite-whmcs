@@ -9,6 +9,7 @@
 
 // Capture raw input BEFORE WHMCS init (php://input can only be read once)
 $_SMS_RAW_INPUT = file_get_contents('php://input');
+define('SMS_RAW_BODY', $_SMS_RAW_INPUT);
 
 // Bootstrap WHMCS
 $whmcsPath = dirname(__DIR__, 3);
@@ -18,6 +19,29 @@ use WHMCS\Database\Capsule;
 
 // ---- API Routing: if 'route' param is present, handle as API request ----
 if (isset($_GET['route'])) {
+    // Parse body from pre-captured raw input
+    $_API_METHOD = $_SERVER['REQUEST_METHOD'];
+    $_API_PARAMS = [];
+    if (in_array($_API_METHOD, ['POST', 'PUT'])) {
+        // Use the raw body captured at top of file (before WHMCS init consumed php://input)
+        $body = $GLOBALS['_SMS_RAW_INPUT'] ?? '';
+        if (empty($body)) $body = file_get_contents('php://input');
+
+
+        if (!empty($body)) {
+            $json = json_decode($body, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($json)) {
+                $_API_PARAMS = $json;
+            }
+        }
+        if (empty($_API_PARAMS) && !empty($_POST)) {
+            $_API_PARAMS = $_POST;
+        }
+    }
+    $safeGetParams = $_GET;
+    unset($safeGetParams['route'], $safeGetParams['api_key'], $safeGetParams['api_secret'], $safeGetParams['key'], $safeGetParams['secret'], $safeGetParams['token']);
+    $_API_PARAMS = array_merge($safeGetParams, $_API_PARAMS);
+
     header('Content-Type: application/json; charset=utf-8');
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: DENY');
@@ -38,7 +62,7 @@ if (isset($_GET['route'])) {
             }
         }
     }
-    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    if ($_API_METHOD === 'OPTIONS') {
         if ($corsAllowed) {
             header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
             header('Access-Control-Allow-Headers: X-API-Key, X-API-Secret, Authorization, Content-Type');
@@ -52,38 +76,10 @@ if (isset($_GET['route'])) {
     require_once __DIR__ . '/lib/Api/ApiKeyService.php';
     require_once __DIR__ . '/lib/Api/ApiController.php';
 
-    $method = $_SERVER['REQUEST_METHOD'];
     $endpoint = preg_replace('/[^a-zA-Z0-9\/_-]/', '', $_GET['route']);
 
-    $params = [];
-    if (in_array($method, ['POST', 'PUT'])) {
-        // Read raw body (try pre-captured, then php://input as fallback)
-        $body = !empty($_SMS_RAW_INPUT) ? $_SMS_RAW_INPUT : file_get_contents('php://input');
-        if (strlen($body) > 1048576) {
-            http_response_code(413);
-            echo json_encode(['success' => false, 'error' => ['code' => 413, 'message' => 'Request body too large (max 1MB)']]);
-            exit;
-        }
-        // Check Content-Type (some servers use HTTP_CONTENT_TYPE instead of CONTENT_TYPE)
-        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
-        if (strpos($contentType, 'application/json') !== false) {
-            $json = json_decode($body, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($json)) $params = $json;
-        } elseif (!empty($_POST)) {
-            $params = $_POST;
-        } elseif (!empty($body)) {
-            // Fallback: try parsing as JSON regardless of Content-Type
-            $json = json_decode($body, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($json)) $params = $json;
-        }
-    }
-
-    $safeGetParams = $_GET;
-    unset($safeGetParams['route'], $safeGetParams['api_key'], $safeGetParams['api_secret'], $safeGetParams['key'], $safeGetParams['secret'], $safeGetParams['token']);
-    $params = array_merge($safeGetParams, $params);
-
     $controller = new \SMSSuite\Api\ApiController();
-    $response = $controller->handle($method, $endpoint, $params);
+    $response = $controller->handle($_API_METHOD, $endpoint, $_API_PARAMS);
     http_response_code($controller->getHttpCode());
     echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     exit;
@@ -92,8 +88,30 @@ if (isset($_GET['route'])) {
 
 // Log incoming webhook
 $gatewayType = $_GET['gateway'] ?? 'unknown';
+$gatewayIdParam = isset($_GET['gw_id']) ? (int)$_GET['gw_id'] : null;
 $rawPayload = $_SMS_RAW_INPUT;
 $payload = [];
+
+// Meta WhatsApp webhook verification (GET challenge)
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['hub_verify_token'], $_GET['hub_challenge'])) {
+    // Look up gateway to verify token
+    $verifyGw = null;
+    if ($gatewayIdParam) {
+        $verifyGw = Capsule::table('mod_sms_gateways')->where('id', $gatewayIdParam)->first();
+    } else {
+        $verifyGw = Capsule::table('mod_sms_gateways')
+            ->where('type', $gatewayType)->where('status', 1)->first();
+    }
+
+    if ($verifyGw && !empty($verifyGw->webhook_token) && $_GET['hub_verify_token'] === $verifyGw->webhook_token) {
+        http_response_code(200);
+        echo $_GET['hub_challenge'];
+        exit;
+    }
+    http_response_code(403);
+    echo 'Verification failed';
+    exit;
+}
 
 // Parse payload
 $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
@@ -105,11 +123,22 @@ if (strpos($contentType, 'application/json') !== false) {
     $payload = array_merge($payload, $_POST, $_GET);
 }
 
-// Verify webhook signature/token if configured
-$gatewayRecord = Capsule::table('mod_sms_gateways')
-    ->where('type', $gatewayType)
-    ->where('status', 1)
-    ->first();
+// Resolve gateway record: by gw_id (unique per-client) or by type (legacy)
+if ($gatewayIdParam) {
+    $gatewayRecord = Capsule::table('mod_sms_gateways')
+        ->where('id', $gatewayIdParam)
+        ->where('status', 1)
+        ->first();
+    // Override gatewayType from the resolved record
+    if ($gatewayRecord) {
+        $gatewayType = $gatewayRecord->type;
+    }
+} else {
+    $gatewayRecord = Capsule::table('mod_sms_gateways')
+        ->where('type', $gatewayType)
+        ->where('status', 1)
+        ->first();
+}
 
 if ($gatewayRecord && !empty($gatewayRecord->webhook_token)) {
     // Build headers array from $_SERVER
@@ -183,6 +212,7 @@ if ($gatewayRecord && !empty($gatewayRecord->webhook_token)) {
 
 // Store in inbox for processing
 $inboxId = Capsule::table('mod_sms_webhooks_inbox')->insertGetId([
+    'gateway_id' => $gatewayRecord ? $gatewayRecord->id : null,
     'gateway_type' => $gatewayType,
     'payload' => json_encode($payload),
     'raw_payload' => $rawPayload,
@@ -191,9 +221,12 @@ $inboxId = Capsule::table('mod_sms_webhooks_inbox')->insertGetId([
     'created_at' => date('Y-m-d H:i:s'),
 ]);
 
+// Make gateway ID available to processing functions
+$resolvedGatewayId = $gatewayRecord ? $gatewayRecord->id : null;
+
 // Try to process immediately
 try {
-    $result = processWebhook($gatewayType, $payload, $inboxId);
+    $result = processWebhook($gatewayType, $payload, $inboxId, $resolvedGatewayId);
 
     if ($result['processed']) {
         Capsule::table('mod_sms_webhooks_inbox')
@@ -226,7 +259,7 @@ try {
 /**
  * Process webhook based on gateway type
  */
-function processWebhook(string $gatewayType, array $payload, int $inboxId): array
+function processWebhook(string $gatewayType, array $payload, int $inboxId, ?int $resolvedGatewayId = null): array
 {
     // Load gateway classes
     $baseDir = __DIR__ . '/lib/Gateways/';
@@ -267,6 +300,11 @@ function processWebhook(string $gatewayType, array $payload, int $inboxId): arra
             require_once $baseDir . 'GenericHttpGateway.php';
             $gatewayClass = \SMSSuite\Gateways\GenericHttpGateway::class;
             break;
+
+        case 'meta_whatsapp':
+        case 'facebook_whatsapp':
+            // Meta Cloud API webhook — process directly
+            return processMetaWhatsAppWebhook($payload, $inboxId, $resolvedGatewayId);
 
         default:
             // Try generic processing
@@ -433,4 +471,90 @@ function handleInbound(\SMSSuite\Gateways\InboundResult $inbound, string $gatewa
     }
 
     return ['processed' => true, 'type' => 'inbound', 'message_id' => $messageId];
+}
+
+/**
+ * Process Meta WhatsApp Cloud API webhook
+ *
+ * Meta sends: { object: "whatsapp_business_account", entry: [{ changes: [{ value: { ... } }] }] }
+ */
+function processMetaWhatsAppWebhook(array $payload, int $inboxId, ?int $resolvedGatewayId = null): array
+{
+    $entries = $payload['entry'] ?? [];
+    if (empty($entries)) {
+        return ['processed' => false, 'reason' => 'No entries in Meta webhook'];
+    }
+
+    $processed = false;
+
+    foreach ($entries as $entry) {
+        $changes = $entry['changes'] ?? [];
+        foreach ($changes as $change) {
+            $value = $change['value'] ?? [];
+            $field = $change['field'] ?? '';
+
+            if ($field !== 'messages') {
+                continue;
+            }
+
+            // Handle delivery status updates
+            $statuses = $value['statuses'] ?? [];
+            foreach ($statuses as $statusUpdate) {
+                $providerMsgId = $statusUpdate['id'] ?? null;
+                $status = $statusUpdate['status'] ?? null; // sent, delivered, read, failed
+                if ($providerMsgId && $status) {
+                    $statusMap = [
+                        'sent' => 'sent',
+                        'delivered' => 'delivered',
+                        'read' => 'delivered',
+                        'failed' => 'failed',
+                    ];
+                    $mapped = $statusMap[$status] ?? $status;
+
+                    // Update message by provider_message_id
+                    Capsule::table('mod_sms_messages')
+                        ->where('provider_message_id', $providerMsgId)
+                        ->update([
+                            'status' => $mapped,
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    $processed = true;
+                }
+            }
+
+            // Handle inbound messages
+            $messages = $value['messages'] ?? [];
+            $contacts = $value['contacts'] ?? [];
+            foreach ($messages as $msg) {
+                $from = $msg['from'] ?? null;
+                $msgType = $msg['type'] ?? 'text';
+                $text = '';
+                $mediaUrl = null;
+
+                if ($msgType === 'text') {
+                    $text = $msg['text']['body'] ?? '';
+                } elseif (in_array($msgType, ['image', 'video', 'audio', 'document'])) {
+                    $text = $msg[$msgType]['caption'] ?? "[$msgType]";
+                    $mediaUrl = $msg[$msgType]['id'] ?? null; // Media ID, needs download
+                }
+
+                if ($from) {
+                    // Route to WhatsApp inbound handler
+                    require_once __DIR__ . '/lib/WhatsApp/WhatsAppService.php';
+                    \SMSSuite\WhatsApp\WhatsAppService::handleInbound([
+                        'from' => $from,
+                        'text' => $text,
+                        'type' => $msgType,
+                        'message_id' => $msg['id'] ?? null,
+                        'timestamp' => $msg['timestamp'] ?? time(),
+                        'gateway_id' => $resolvedGatewayId,
+                        $msgType => $msg[$msgType] ?? null,
+                    ]);
+                    $processed = true;
+                }
+            }
+        }
+    }
+
+    return ['processed' => $processed, 'type' => 'meta_whatsapp'];
 }
