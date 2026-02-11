@@ -60,25 +60,25 @@ class WhatsAppService
                 return ['success' => false, 'error' => 'Invalid phone number'];
             }
 
-            // Load WhatsApp template
-            $template = self::getWhatsAppTemplate($templateName, $options['language'] ?? 'en');
-            if (!$template) {
-                return ['success' => false, 'error' => 'Template not found: ' . $templateName];
-            }
-
-            // Get gateway
+            // Resolve gateway first — client-owned takes priority over system
             $gatewayId = $options['gateway_id'] ?? self::getWhatsAppGateway($clientId);
             if (!$gatewayId) {
                 return ['success' => false, 'error' => 'No WhatsApp gateway configured'];
             }
 
-            // Build template message
+            // Load WhatsApp template scoped to the resolved gateway, with system fallback
+            $template = self::getWhatsAppTemplate($templateName, $options['language'] ?? 'en', $gatewayId);
+            if (!$template) {
+                return ['success' => false, 'error' => 'Template not found: ' . $templateName];
+            }
+
+            // Build template message — use the template's actual language code for Meta API
             $messagePayload = [
                 'type' => 'template',
                 'template' => [
                     'name' => $templateName,
                     'language' => [
-                        'code' => $options['language'] ?? 'en',
+                        'code' => $template->language ?? $options['language'] ?? 'en',
                     ],
                     'components' => self::buildTemplateComponents($template, $params),
                 ],
@@ -774,6 +774,7 @@ class WhatsAppService
             $wabaId = $credentials['waba_id'];
             $accessToken = $credentials['access_token'];
 
+            // Note: waba_id must be the WhatsApp Business Account ID, NOT the Phone Number ID
             $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
                  . http_build_query(['limit' => 250, 'fields' => 'name,status,category,language,components,id']);
 
@@ -969,13 +970,36 @@ class WhatsAppService
         return $gateway ? $gateway->id : null;
     }
 
-    private static function getWhatsAppTemplate(string $name, string $language = 'en'): ?object
+    private static function getWhatsAppTemplate(string $name, string $language = 'en', ?int $gatewayId = null): ?object
     {
+        // If a gateway is specified, prefer templates tied to that gateway first
+        if ($gatewayId) {
+            $template = Capsule::table('mod_sms_whatsapp_templates')
+                ->where('template_name', $name)
+                ->where('gateway_id', $gatewayId)
+                ->where(function ($q) use ($language) {
+                    $q->where('language', $language)
+                      ->orWhere('language', 'LIKE', $language . '%')
+                      ->orWhere('language', 'LIKE', 'en%');
+                })
+                ->where('status', 'approved')
+                ->first();
+            if ($template) {
+                return $template;
+            }
+        }
+
+        // Fall back to system templates (client_id = 0 or NULL)
         return Capsule::table('mod_sms_whatsapp_templates')
-            ->where('name', $name)
+            ->where('template_name', $name)
+            ->where(function ($q) {
+                $q->where('client_id', 0)
+                  ->orWhereNull('client_id');
+            })
             ->where(function ($q) use ($language) {
                 $q->where('language', $language)
-                  ->orWhere('language', 'en');
+                  ->orWhere('language', 'LIKE', $language . '%')
+                  ->orWhere('language', 'LIKE', 'en%');
             })
             ->where('status', 'approved')
             ->first();
@@ -1033,7 +1057,13 @@ class WhatsAppService
                 return ['success' => false, 'error' => 'Gateway not found'];
             }
 
-            $credentials = json_decode($gatewayConfig->credentials, true);
+            // Decrypt credentials (they are stored encrypted)
+            require_once dirname(__DIR__, 2) . '/sms_suite.php';
+            $decrypted = sms_suite_decrypt($gatewayConfig->credentials);
+            $credentials = json_decode($decrypted, true);
+            if (!is_array($credentials)) {
+                return ['success' => false, 'error' => 'Failed to decrypt gateway credentials'];
+            }
 
             // Use cURL to send to WhatsApp Business API
             $ch = curl_init();

@@ -694,6 +694,7 @@ function sms_suite_admin_gateway_edit($vars, $lang)
         'plivo' => ['name' => 'Plivo', 'channels' => ['sms', 'mms']],
         'vonage' => ['name' => 'Vonage (Nexmo)', 'channels' => ['sms']],
         'infobip' => ['name' => 'Infobip', 'channels' => ['sms', 'whatsapp']],
+        'meta_whatsapp' => ['name' => 'Meta WhatsApp Cloud API', 'channels' => ['whatsapp']],
     ];
 
     // Current values
@@ -1088,6 +1089,11 @@ function sms_suite_get_all_gateway_fields()
             ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
             ['name' => 'sender_id', 'label' => 'Sender ID', 'type' => 'text', 'description' => 'Optional: Leave blank to use default'],
             ['name' => 'environment', 'label' => 'Environment', 'type' => 'select', 'options' => ['production' => 'Production', 'sandbox' => 'Sandbox'], 'default' => 'production'],
+        ],
+        'meta_whatsapp' => [
+            ['name' => 'phone_number_id', 'label' => 'Phone Number ID', 'type' => 'text', 'required' => true, 'description' => 'From Meta Developer Dashboard → WhatsApp → API Setup'],
+            ['name' => 'access_token', 'label' => 'Permanent Access Token', 'type' => 'password', 'required' => true, 'description' => 'System user token with whatsapp_business_messaging permission'],
+            ['name' => 'waba_id', 'label' => 'WhatsApp Business Account ID', 'type' => 'text', 'required' => true, 'description' => 'WABA ID from Meta Business Manager'],
         ],
     ];
 }

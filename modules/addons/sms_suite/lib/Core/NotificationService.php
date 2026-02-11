@@ -766,11 +766,39 @@ class NotificationService
             return ['success' => false, 'error' => 'No WhatsApp template mapping for: ' . $notificationType];
         }
 
-        // Check WhatsApp template is approved
-        $waTemplate = Capsule::table('mod_sms_whatsapp_templates')
-            ->where('template_name', $mapping->wa_template_name)
-            ->where('status', 'approved')
+        // Resolve gateway — client-owned WA gateway takes priority over system
+        require_once __DIR__ . '/../WhatsApp/WhatsAppService.php';
+        $resolvedGatewayId = $mapping->gateway_id ?: null;
+
+        // Check if client has their own WA gateway
+        $clientGw = Capsule::table('mod_sms_gateways')
+            ->where('client_id', $clientId)
+            ->where('type', 'meta_whatsapp')
+            ->where('status', 1)
             ->first();
+
+        if ($clientGw) {
+            $resolvedGatewayId = $clientGw->id;
+        }
+
+        // Check WhatsApp template is approved — prefer client's gateway template, then system
+        $waTemplate = null;
+        if ($resolvedGatewayId) {
+            $waTemplate = Capsule::table('mod_sms_whatsapp_templates')
+                ->where('template_name', $mapping->wa_template_name)
+                ->where('gateway_id', $resolvedGatewayId)
+                ->where('status', 'approved')
+                ->first();
+        }
+        if (!$waTemplate) {
+            $waTemplate = Capsule::table('mod_sms_whatsapp_templates')
+                ->where('template_name', $mapping->wa_template_name)
+                ->where('status', 'approved')
+                ->where(function ($q) {
+                    $q->where('client_id', 0)->orWhereNull('client_id');
+                })
+                ->first();
+        }
 
         if (!$waTemplate) {
             return ['success' => false, 'error' => 'WhatsApp template not approved: ' . $mapping->wa_template_name];
@@ -784,17 +812,15 @@ class NotificationService
 
         $resolvedParams = self::resolveParamMapping($paramMapping, $mergeData);
 
-        // Build options
+        // Build options — pass the resolved gateway
         $options = [];
-        if (!empty($mapping->gateway_id)) {
-            $options['gateway_id'] = $mapping->gateway_id;
-        }
-        if (!empty($waTemplate->gateway_id)) {
+        if ($resolvedGatewayId) {
+            $options['gateway_id'] = $resolvedGatewayId;
+        } elseif (!empty($waTemplate->gateway_id)) {
             $options['gateway_id'] = $waTemplate->gateway_id;
         }
 
         // Send via WhatsAppService
-        require_once __DIR__ . '/../WhatsApp/WhatsAppService.php';
         $result = \SMSSuite\WhatsApp\WhatsAppService::sendTemplate(
             $clientId,
             $phone,
