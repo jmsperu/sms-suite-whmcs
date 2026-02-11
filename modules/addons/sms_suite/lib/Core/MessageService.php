@@ -460,16 +460,61 @@ class MessageService
     /**
      * Normalize phone number
      *
+     * Handles WHMCS format (+CC.number), duplicate country codes, and leading zeros.
+     *
      * @param string $phone
      * @return string
      */
     public static function normalizePhone(string $phone): string
     {
+        $phone = trim($phone);
+
+        // Handle WHMCS phone format: +CC.localNumber (e.g. +254.0702324532 or +254.254702324532)
+        if (strpos($phone, '.') !== false) {
+            $parts = explode('.', $phone, 2);
+            $cc = preg_replace('/[^0-9]/', '', $parts[0]);   // e.g. "254"
+            $local = preg_replace('/[^0-9]/', '', $parts[1]); // e.g. "254702324532" or "0702324532"
+
+            if (!empty($cc) && !empty($local)) {
+                // If local part already starts with the country code, use it as-is
+                if (strpos($local, $cc) === 0) {
+                    $phone = '+' . $local;
+                } else {
+                    // Strip leading zero from local number and prepend CC
+                    $phone = '+' . $cc . ltrim($local, '0');
+                }
+            }
+        }
+
         // Remove all non-digit characters except +
         $phone = preg_replace('/[^0-9+]/', '', $phone);
 
+        // Strip leading + for digit-only processing, then re-add
+        $hasPlus = (strpos($phone, '+') === 0);
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+
+        // Detect duplicate country code (e.g. 254254702324532)
+        // Check common country code lengths (1-3 digits)
+        for ($len = 1; $len <= 3; $len++) {
+            if (strlen($digits) > $len * 2) {
+                $prefix = substr($digits, 0, $len);
+                $rest = substr($digits, $len);
+                if (strpos($rest, $prefix) === 0) {
+                    // The remaining number after stripping duplicate should be 9-12 digits
+                    $withoutDup = $rest;
+                    $localLen = strlen($withoutDup) - $len; // digits after country code
+                    if ($localLen >= 6 && $localLen <= 12) {
+                        $digits = $rest;
+                        break;
+                    }
+                }
+            }
+        }
+
+        $phone = ($hasPlus ? '+' : '') . $digits;
+
         // Ensure it has at least some digits
-        if (strlen(preg_replace('/[^0-9]/', '', $phone)) < 7) {
+        if (strlen($digits) < 7) {
             return '';
         }
 

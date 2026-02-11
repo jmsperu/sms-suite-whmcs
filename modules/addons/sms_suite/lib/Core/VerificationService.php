@@ -470,11 +470,11 @@ class VerificationService
     }
 
     /**
-     * Normalize phone number
+     * Normalize phone number — delegates to MessageService for consistent WHMCS format handling
      */
     private static function normalizePhone(string $phone): string
     {
-        return preg_replace('/[^0-9+]/', '', $phone);
+        return MessageService::normalizePhone($phone);
     }
 
     /**

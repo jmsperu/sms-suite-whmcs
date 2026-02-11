@@ -168,14 +168,28 @@ function sms_suite_parse_phone_numbers($input)
     $numbers = [];
 
     foreach ($parts as $part) {
-        // Trim and clean — keep only digits, plus sign, and spaces (then strip spaces)
         $cleaned = trim($part);
         if (empty($cleaned)) {
             continue;
         }
 
-        // Remove any non-phone characters but keep + and digits
-        $phone = preg_replace('/[^\d+]/', '', $cleaned);
+        // Handle WHMCS phone format: +CC.localNumber (e.g. +254.254702324532)
+        if (strpos($cleaned, '.') !== false) {
+            $dotParts = explode('.', $cleaned, 2);
+            $cc = preg_replace('/[^0-9]/', '', $dotParts[0]);
+            $local = preg_replace('/[^0-9]/', '', $dotParts[1]);
+            if (!empty($cc) && !empty($local)) {
+                if (strpos($local, $cc) === 0) {
+                    $phone = '+' . $local;
+                } else {
+                    $phone = '+' . $cc . ltrim($local, '0');
+                }
+            } else {
+                $phone = preg_replace('/[^\d+]/', '', $cleaned);
+            }
+        } else {
+            $phone = preg_replace('/[^\d+]/', '', $cleaned);
+        }
 
         // Basic validation: at least 7 digits
         if (preg_match('/^\+?\d{7,15}$/', $phone)) {

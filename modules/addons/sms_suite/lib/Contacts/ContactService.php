@@ -377,17 +377,11 @@ class ContactService
     }
 
     /**
-     * Normalize phone number
+     * Normalize phone number — delegates to MessageService for consistent WHMCS format handling
      */
     private static function normalizePhone(string $phone): string
     {
-        $phone = preg_replace('/[^0-9+]/', '', $phone);
-
-        if (strlen(preg_replace('/[^0-9]/', '', $phone)) < 7) {
-            return '';
-        }
-
-        return $phone;
+        return \SMSSuite\Core\MessageService::normalizePhone($phone);
     }
 
     /**
