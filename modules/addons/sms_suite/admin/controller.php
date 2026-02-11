@@ -8203,13 +8203,17 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
             $templateName = trim($_POST['template_name'] ?? '');
             if (!empty($templateName)) {
                 $result = \SMSSuite\WhatsApp\WhatsAppService::deleteMetaTemplate($postGatewayId, $templateName);
+                // Always remove locally
+                Capsule::table('mod_sms_whatsapp_templates')
+                    ->where('template_name', $templateName)
+                    ->delete();
                 if ($result['success']) {
-                    Capsule::table('mod_sms_whatsapp_templates')
-                        ->where('template_name', $templateName)
-                        ->delete();
                     $message = 'Template "<strong>' . htmlspecialchars($templateName) . '</strong>" deleted.';
                     $messageType = 'success';
                     logActivity('SMS Suite: WhatsApp template deleted from Meta - ' . $templateName);
+                } elseif (!empty($result['local_only'])) {
+                    $message = 'Template "<strong>' . htmlspecialchars($templateName) . '</strong>" removed locally. Please also delete it from <a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank">Meta Business Manager</a>.';
+                    $messageType = 'warning';
                 } else {
                     $message = 'Failed to delete template: ' . htmlspecialchars($result['error'] ?? 'Unknown error');
                     $messageType = 'danger';

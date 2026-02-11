@@ -774,7 +774,8 @@ class WhatsAppService
             $wabaId = $credentials['waba_id'];
             $accessToken = $credentials['access_token'];
 
-            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?limit=250";
+            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+                 . http_build_query(['limit' => 250, 'fields' => 'name,status,category,language,components,id']);
 
             $ch = curl_init($url);
             curl_setopt_array($ch, [
@@ -870,8 +871,18 @@ class WhatsAppService
             $wabaId = $credentials['waba_id'];
             $accessToken = $credentials['access_token'];
 
-            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
-                 . http_build_query(['name' => $templateName]);
+            // First get the template ID
+            $templateData = self::getMetaTemplate($gatewayId, $templateName);
+            $templateId = $templateData['template']['id'] ?? null;
+
+            // Try deleting by template ID (preferred) or by name on WABA
+            if ($templateId) {
+                $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+                     . http_build_query(['hsm_id' => $templateId, 'name' => $templateName]);
+            } else {
+                $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+                     . http_build_query(['name' => $templateName]);
+            }
 
             $ch = curl_init($url);
             curl_setopt_array($ch, [
@@ -894,9 +905,12 @@ class WhatsAppService
                 ];
             }
 
+            // If Meta delete fails (permission issue), still allow local removal
+            $errorMsg = $result['error']['message'] ?? 'Meta API error';
             return [
                 'success' => false,
-                'error' => $result['error']['message'] ?? 'Meta API error',
+                'error' => $errorMsg . ' (template removed locally — delete from Meta Business Manager manually)',
+                'local_only' => true,
             ];
 
         } catch (Exception $e) {
