@@ -595,10 +595,28 @@ add_hook('DomainExpiryNotice', 10, function($vars) {
 add_hook('EmailPreSend', 1, function ($vars) {
     try {
         $templateName = $vars['messagename'] ?? '';
-        $clientId = $vars['relid'] ?? 0;
+        $relId = $vars['relid'] ?? 0;
 
-        // Skip if no template name or client ID
-        if (empty($templateName) || empty($clientId)) {
+        // Skip if no template name or related ID
+        if (empty($templateName) || empty($relId)) {
+            return;
+        }
+
+        // Resolve the actual client ID — relid can be invoice ID for invoice emails
+        $mergeFields = $vars['mergefields'] ?? [];
+        $clientId = !empty($mergeFields['client_id']) ? (int) $mergeFields['client_id'] : 0;
+        if (!$clientId) {
+            // Fallback: check if relid is a client
+            $isClient = Capsule::table('tblclients')->where('id', $relId)->exists();
+            if ($isClient) {
+                $clientId = (int) $relId;
+            } else {
+                // Try as invoice ID
+                $inv = Capsule::table('tblinvoices')->where('id', $relId)->first();
+                $clientId = $inv ? (int) $inv->userid : 0;
+            }
+        }
+        if (!$clientId) {
             return;
         }
 
@@ -647,19 +665,15 @@ add_hook('EmailPreSend', 1, function ($vars) {
             }
         }
 
-        // For invoice-related emails, try to resolve invoice data if not already in merge fields
-        if (empty($mergeData['invoice_number']) || empty($mergeData['total'])) {
-            $invoiceId = $mergeData['invoice_id'] ?? $mergeData['invoiceid'] ?? null;
-            if ($invoiceId) {
-                $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
-                if ($invoice) {
-                    if (empty($mergeData['invoice_number'])) {
-                        $mergeData['invoice_number'] = $invoice->invoicenum ?: $invoice->id;
-                    }
-                    if (empty($mergeData['total'])) {
-                        $mergeData['total'] = $invoice->total;
-                    }
-                }
+        // For invoice-related emails, always resolve clean data from DB
+        // WHMCS merge fields like invoice_total include currency prefix (e.g. "KES2102.50")
+        // We need raw numbers since our templates handle currency separately
+        $invoiceId = $mergeData['invoice_id'] ?? $mergeData['invoiceid'] ?? null;
+        if ($invoiceId) {
+            $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+            if ($invoice) {
+                $mergeData['invoice_number'] = $invoice->invoicenum ?: $invoice->id;
+                $mergeData['total'] = number_format($invoice->total, 2);
             }
         }
 
