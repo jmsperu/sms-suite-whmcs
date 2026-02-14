@@ -242,6 +242,9 @@
                                 <i class="fab fa-whatsapp"></i> {$lang.wa_save|default:'Save Configuration'}
                             </button>
                             {if $wa_gateway}
+                            <button type="submit" name="register_whatsapp_phone" class="btn btn-warning">
+                                <i class="fas fa-phone"></i> Register Phone
+                            </button>
                             <button type="submit" name="test_whatsapp_gateway" class="btn btn-info">
                                 <i class="fas fa-plug"></i> {$lang.wa_test|default:'Test Connection'}
                             </button>

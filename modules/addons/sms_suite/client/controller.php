@@ -2514,6 +2514,57 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
             }
         }
 
+        // Handle WhatsApp phone registration
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register_whatsapp_phone'])) {
+            if (!SecurityHelper::verifyCsrfPost()) {
+                $error = $lang['error_csrf'] ?? 'Security token invalid. Please try again.';
+            } else {
+                $regGw = Capsule::table('mod_sms_gateways')
+                    ->where('client_id', $clientId)
+                    ->where('type', 'meta_whatsapp')
+                    ->first();
+
+                if (!$regGw || empty($regGw->credentials)) {
+                    $error = 'Please save your WhatsApp credentials first.';
+                } else {
+                    $decrypted = sms_suite_decrypt($regGw->credentials);
+                    $creds = json_decode($decrypted, true);
+
+                    if (empty($creds['phone_number_id']) || empty($creds['access_token'])) {
+                        $error = 'Saved credentials are invalid. Please re-enter them.';
+                    } else {
+                        $regUrl = 'https://graph.facebook.com/v24.0/' . urlencode($creds['phone_number_id']) . '/register';
+                        $ch = curl_init($regUrl);
+                        curl_setopt_array($ch, [
+                            CURLOPT_RETURNTRANSFER => true,
+                            CURLOPT_POST => true,
+                            CURLOPT_POSTFIELDS => json_encode(['messaging_product' => 'whatsapp', 'pin' => '123456']),
+                            CURLOPT_HTTPHEADER => [
+                                'Authorization: Bearer ' . $creds['access_token'],
+                                'Content-Type: application/json',
+                            ],
+                            CURLOPT_TIMEOUT => 30,
+                            CURLOPT_SSL_VERIFYPEER => true,
+                        ]);
+                        $regResp = curl_exec($ch);
+                        $regCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        $regErr = curl_error($ch);
+                        curl_close($ch);
+
+                        if ($regErr) {
+                            $error = 'Connection error: ' . $regErr;
+                        } elseif ($regCode === 200) {
+                            $success = 'Phone number registered with WhatsApp Cloud API successfully! You can now send messages.';
+                        } else {
+                            $data = json_decode($regResp, true);
+                            $metaError = $data['error']['message'] ?? 'Unknown error';
+                            $error = "Registration failed (HTTP {$regCode}): {$metaError}";
+                        }
+                    }
+                }
+            }
+        }
+
         // Handle WhatsApp gateway delete
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_whatsapp_gateway'])) {
             if (!SecurityHelper::verifyCsrfPost()) {

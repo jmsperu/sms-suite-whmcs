@@ -72,8 +72,8 @@
                             </div>
                         </div>
 
-                        <!-- Sender ID -->
-                        <div class="form-group">
+                        <!-- Sender ID (SMS only) -->
+                        <div class="form-group" id="sender_id_group">
                             <label for="sender_id">{$lang.sender_id}</label>
                             {if $sender_ids && count($sender_ids) > 0}
                             <select name="sender_id" id="sender_id" class="form-control">
@@ -355,8 +355,26 @@ if (toField) {
         messageField.addEventListener('paste', function() { setTimeout(updateCounter, 10); });
     }
     if (channelField) {
-        channelField.addEventListener('change', updateCounter);
+        channelField.addEventListener('change', function() {
+            updateCounter();
+            toggleChannelFields();
+        });
     }
+
+    function toggleChannelFields() {
+        var ch = document.getElementById('channel').value;
+        var senderGroup = document.getElementById('sender_id_group');
+        var segmentInfo = document.getElementById('segmentInfo');
+        if (ch === 'whatsapp') {
+            if (senderGroup) senderGroup.style.display = 'none';
+            if (segmentInfo) segmentInfo.style.display = 'none';
+        } else {
+            if (senderGroup) senderGroup.style.display = '';
+            if (segmentInfo) segmentInfo.style.display = '';
+        }
+    }
+
     updateCounter();
+    toggleChannelFields();
 })();
 </script>

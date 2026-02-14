@@ -12,25 +12,18 @@ if (!defined('WHMCS')) {
 use WHMCS\Database\Capsule;
 
 /**
- * Add client area navigation menu item
+ * Add client area navigation menu items
  */
 add_hook('ClientAreaPrimarySidebar', 1, function ($sidebar) {
     try {
-        // Check if module is active
         $module = Capsule::table('tbladdonmodules')
             ->where('module', 'sms_suite')
             ->where('setting', 'version')
             ->first();
+        if (!$module) return;
 
-        if (!$module) {
-            return;
-        }
-
-        // Add menu item under "Your Account" or as standalone
-        $primarySidebar = $sidebar;
-
-        if (!is_null($primarySidebar->getChild('My Account'))) {
-            $primarySidebar->getChild('My Account')
+        if (!is_null($sidebar->getChild('My Account'))) {
+            $sidebar->getChild('My Account')
                 ->addChild('SMS Suite', [
                     'label' => 'SMS Suite',
                     'uri' => 'index.php?m=sms_suite',
@@ -39,8 +32,61 @@ add_hook('ClientAreaPrimarySidebar', 1, function ($sidebar) {
                 ]);
         }
     } catch (Exception $e) {
-        // Silently fail - don't break WHMCS
         logActivity('SMS Suite Hook Error (ClientAreaPrimarySidebar): ' . $e->getMessage());
+    }
+});
+
+/**
+ * Add "Messaging" to the primary client area navbar
+ */
+add_hook('ClientAreaPrimaryNavbar', 1, function ($navbar) {
+    try {
+        $module = Capsule::table('tbladdonmodules')
+            ->where('module', 'sms_suite')
+            ->where('setting', 'version')
+            ->first();
+        if (!$module) return;
+
+        // Only show for logged-in clients
+        $client = Menu::context('client');
+        if (!$client) return;
+
+        $navbar->addChild('Messaging', [
+            'label' => '<i class="fas fa-comments"></i> Messaging',
+            'uri' => 'index.php?m=sms_suite',
+            'order' => 50,
+        ]);
+
+        $messaging = $navbar->getChild('Messaging');
+        if ($messaging) {
+            $messaging->addChild('Send Message', [
+                'label' => 'Send Message',
+                'uri' => 'index.php?m=sms_suite&action=send',
+                'order' => 10,
+            ]);
+            $messaging->addChild('Inbox', [
+                'label' => 'Inbox',
+                'uri' => 'index.php?m=sms_suite&action=inbox',
+                'order' => 20,
+            ]);
+            $messaging->addChild('Campaigns', [
+                'label' => 'Campaigns',
+                'uri' => 'index.php?m=sms_suite&action=campaigns',
+                'order' => 30,
+            ]);
+            $messaging->addChild('Contacts', [
+                'label' => 'Contacts',
+                'uri' => 'index.php?m=sms_suite&action=contacts',
+                'order' => 40,
+            ]);
+            $messaging->addChild('Preferences', [
+                'label' => 'Preferences',
+                'uri' => 'index.php?m=sms_suite&action=preferences',
+                'order' => 90,
+            ]);
+        }
+    } catch (Exception $e) {
+        logActivity('SMS Suite Hook Error (ClientAreaPrimaryNavbar): ' . $e->getMessage());
     }
 });
 
