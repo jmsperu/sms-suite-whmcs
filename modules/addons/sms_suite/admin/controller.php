@@ -803,7 +803,6 @@ function sms_suite_admin_gateways($vars, $lang)
 
     echo '</div>';
     echo '</div>';
-    echo '</div>'; // Close ms-content
 
     // JavaScript for gateway actions
     echo '<script>
@@ -920,6 +919,8 @@ function sms_suite_admin_gateways($vars, $lang)
         // Use json_encode for safe JavaScript string escaping
         echo '<script>alert(' . json_encode($testResult, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) . ');</script>';
     }
+
+    echo '</div>'; // Close ms-content
 }
 
 /**
