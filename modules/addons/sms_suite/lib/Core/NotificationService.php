@@ -442,6 +442,7 @@ class NotificationService
 
         // Merge client data
         $mergeData = array_merge([
+            'client_id' => $clientId,
             'first_name' => $client->firstname,
             'last_name' => $client->lastname,
             'company' => $client->companyname,
@@ -449,10 +450,12 @@ class NotificationService
         ], $mergeData);
 
         // Process template
+        require_once __DIR__ . '/TemplateService.php';
         $message = TemplateService::render($template->content, $mergeData);
 
-        // Send via MessageService (SMS)
-        $result = MessageService::send($clientId, $phone, $message, ['context' => 'notification']);
+        // Send via MessageService (SMS) — send immediately for notifications
+        require_once __DIR__ . '/MessageService.php';
+        $result = MessageService::send($clientId, $phone, $message, ['context' => 'notification', 'send_now' => true]);
 
         // Send WhatsApp notification in parallel (failures never block SMS)
         try {
@@ -793,6 +796,10 @@ class NotificationService
                     $q->where('client_id', 0)->orWhereNull('client_id');
                 })
                 ->first();
+            // When falling back to system template, use its gateway
+            if ($waTemplate && !empty($waTemplate->gateway_id)) {
+                $resolvedGatewayId = $waTemplate->gateway_id;
+            }
         }
 
         if (!$waTemplate) {
@@ -845,14 +852,15 @@ class NotificationService
         $resolved = [];
         foreach ($mapping as $paramKey => $mergeField) {
             // Direct lookup first
-            if (isset($mergeData[$mergeField])) {
+            if (isset($mergeData[$mergeField]) && $mergeData[$mergeField] !== '') {
                 $resolved[$paramKey] = (string) $mergeData[$mergeField];
             } else {
                 // Try processing as a template tag via TemplateService
+                require_once __DIR__ . '/TemplateService.php';
                 $processed = TemplateService::render('{' . $mergeField . '}', $mergeData);
-                // If still unresolved (tag remains), use empty string
+                // If still unresolved (tag remains), use a dash (Meta rejects empty params)
                 if ($processed === '{' . $mergeField . '}') {
-                    $resolved[$paramKey] = '';
+                    $resolved[$paramKey] = '-';
                 } else {
                     $resolved[$paramKey] = $processed;
                 }

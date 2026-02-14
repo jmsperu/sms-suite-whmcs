@@ -127,6 +127,11 @@ class TemplateService
      */
     private static function resolveTag(string $tag, array $data): ?string
     {
+        // Direct data lookup first — if the caller provided the value, use it
+        if (isset($data[$tag]) && $data[$tag] !== '') {
+            return (string) $data[$tag];
+        }
+
         // Handle dot notation (e.g., client.first_name)
         if (strpos($tag, '.') !== false) {
             list($category, $field) = explode('.', $tag, 2);

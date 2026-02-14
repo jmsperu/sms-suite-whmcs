@@ -617,12 +617,54 @@ add_hook('EmailPreSend', 1, function ($vars) {
         // Add common fields
         $client = Capsule::table('tblclients')->where('id', $clientId)->first();
         if ($client) {
+            $mergeData['client_id'] = $clientId;
             $mergeData['first_name'] = $client->firstname;
             $mergeData['last_name'] = $client->lastname;
             $mergeData['company'] = $client->companyname;
             $mergeData['email'] = $client->email;
         } else {
             return; // No client found, skip notification
+        }
+
+        // Map WHMCS merge field names to our template variable names
+        $fieldAliases = [
+            'invoice_num' => 'invoice_number',
+            'invoicenum' => 'invoice_number',
+            'invoice_id' => 'invoice_id',
+            'invoiceid' => 'invoice_id',
+            'invoice_total' => 'total',
+            'invoice_balance' => 'balance',
+            'amount' => 'total',
+            'client_first_name' => 'first_name',
+            'client_last_name' => 'last_name',
+            'client_company_name' => 'company',
+            'client_email' => 'email',
+        ];
+        foreach ($fieldAliases as $whmcsKey => $ourKey) {
+            if (!empty($mergeData[$whmcsKey]) && empty($mergeData[$ourKey])) {
+                $mergeData[$ourKey] = $mergeData[$whmcsKey];
+            }
+        }
+
+        // For invoice-related emails, try to resolve invoice data if not already in merge fields
+        if (empty($mergeData['invoice_number']) || empty($mergeData['total'])) {
+            $invoiceId = $mergeData['invoice_id'] ?? $mergeData['invoiceid'] ?? null;
+            if ($invoiceId) {
+                $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+                if ($invoice) {
+                    if (empty($mergeData['invoice_number'])) {
+                        $mergeData['invoice_number'] = $invoice->invoicenum ?: $invoice->id;
+                    }
+                    if (empty($mergeData['total'])) {
+                        $mergeData['total'] = $invoice->total;
+                    }
+                }
+            }
+        }
+
+        // Provide sensible defaults for fields that may not be available
+        if (empty($mergeData['error_message'])) {
+            $mergeData['error_message'] = 'Please update your payment method or contact support.';
         }
 
         // Send SMS notification
@@ -635,7 +677,7 @@ add_hook('EmailPreSend', 1, function ($vars) {
         }
 
         $message = \SMSSuite\Core\TemplateService::render($smsTemplate['content'], $mergeData);
-        \SMSSuite\Core\MessageService::send($clientId, $phone, $message, ['context' => 'notification']);
+        \SMSSuite\Core\MessageService::send($clientId, $phone, $message, ['context' => 'notification', 'send_now' => true]);
 
         // Send WhatsApp template notification in parallel
         try {
