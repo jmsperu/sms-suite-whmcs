@@ -246,10 +246,10 @@ class SecurityHelper
             return ['valid' => false, 'error' => 'Invalid file type detected'];
         }
 
-        // Check for CSV injection in first few lines
+        // Check for CSV injection in first 50 lines
         $handle = fopen($file['tmp_name'], 'r');
         if ($handle) {
-            for ($i = 0; $i < 5 && ($line = fgets($handle)) !== false; $i++) {
+            for ($i = 0; $i < 50 && ($line = fgets($handle)) !== false; $i++) {
                 if (preg_match('/^[\s]*[=+\-@\t\r]/', $line)) {
                     fclose($handle);
                     return ['valid' => false, 'error' => 'File contains potentially dangerous content'];

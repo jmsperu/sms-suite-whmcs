@@ -2588,7 +2588,7 @@ function sms_suite_admin_messages($vars, $lang)
     echo '<div class="panel-heading">';
     echo '<h3 class="panel-title" style="display:inline-block;"><i class="fa fa-list"></i> ' . $lang['messages'] . ' (' . number_format($total) . ' results)</h3>';
     echo '<div class="pull-right">';
-    echo '<a href="' . $modulelink . '&action=messages&export=csv&' . http_build_query($_GET) . '" class="btn btn-xs btn-info"><i class="fa fa-download"></i> Export CSV</a>';
+    echo '<a href="' . htmlspecialchars($modulelink . '&action=messages&export=csv&' . http_build_query($_GET)) . '" class="btn btn-xs btn-info"><i class="fa fa-download"></i> Export CSV</a>';
     echo '</div>';
     echo '</div>';
     echo '<div class="panel-body" style="padding:0;">';
@@ -2705,8 +2705,9 @@ function sms_suite_admin_messages($vars, $lang)
         if (!confirm("Retry sending this message?")) return;
 
         jQuery.ajax({
-            url: "addonmodules.php?module=sms_suite&action=ajax_retry_message&id=" + msgId,
+            url: "addonmodules.php?module=sms_suite&action=ajax_retry_message",
             method: "POST",
+            data: { id: msgId, csrf_token: "' . SecurityHelper::getCsrfToken() . '" },
             success: function(data) {
                 alert(data.message || "Message queued for retry");
                 location.reload();
@@ -4855,6 +4856,12 @@ function sms_suite_admin_client_messages($vars, $lang)
 function sms_suite_admin_send_to_client($vars, $lang)
 {
     $modulelink = $vars['modulelink'];
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !SecurityHelper::verifyCsrfPost()) {
+        echo '<div class="alert alert-danger">Invalid security token.</div>';
+        return;
+    }
+
     $clientId = isset($_POST['client_id']) ? (int)$_POST['client_id'] : 0;
     $phone = isset($_POST['phone']) ? trim($_POST['phone']) : '';
     $message = isset($_POST['message']) ? trim($_POST['message']) : '';
@@ -7694,7 +7701,12 @@ function sms_suite_ajax_retry_message()
 {
     header('Content-Type: application/json');
 
-    $msgId = (int)($_GET['id'] ?? 0);
+    if (!SecurityHelper::verifyCsrfPost()) {
+        echo json_encode(['success' => false, 'message' => 'Invalid security token']);
+        exit;
+    }
+
+    $msgId = (int)($_POST['id'] ?? 0);
     if (!$msgId) {
         echo json_encode(['success' => false, 'message' => 'Invalid message ID']);
         exit;
@@ -9822,16 +9834,20 @@ function sms_suite_admin_inbox_conversation($vars, $lang)
 
     // Handle reply submission
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['send_reply'])) {
-        $replyMsg = trim($_POST['message'] ?? '');
-        if (!empty($replyMsg)) {
-            require_once __DIR__ . '/../lib/WhatsApp/WhatsAppService.php';
-            $result = \SMSSuite\WhatsApp\WhatsAppService::replyToConversation($chatboxId, $replyMsg);
-            if ($result['success']) {
-                // Refresh chatbox
-                $chatbox = Capsule::table('mod_sms_chatbox')->where('id', $chatboxId)->first();
-                echo '<div class="alert alert-success"><i class="fa fa-check"></i> Message sent successfully.</div>';
-            } else {
-                echo '<div class="alert alert-danger"><i class="fa fa-times"></i> ' . htmlspecialchars($result['error'] ?? 'Failed to send message') . '</div>';
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
+            $replyMsg = trim($_POST['message'] ?? '');
+            if (!empty($replyMsg)) {
+                require_once __DIR__ . '/../lib/WhatsApp/WhatsAppService.php';
+                $result = \SMSSuite\WhatsApp\WhatsAppService::replyToConversation($chatboxId, $replyMsg);
+                if ($result['success']) {
+                    // Refresh chatbox
+                    $chatbox = Capsule::table('mod_sms_chatbox')->where('id', $chatboxId)->first();
+                    echo '<div class="alert alert-success"><i class="fa fa-check"></i> Message sent successfully.</div>';
+                } else {
+                    echo '<div class="alert alert-danger"><i class="fa fa-times"></i> ' . htmlspecialchars($result['error'] ?? 'Failed to send message') . '</div>';
+                }
             }
         }
     }
@@ -9945,6 +9961,7 @@ function sms_suite_admin_inbox_conversation($vars, $lang)
     echo '<div class="panel panel-default">';
     echo '<div class="panel-body" style="padding:12px 15px;">';
     echo '<form method="post" id="adminReplyForm">';
+    echo SecurityHelper::csrfField();
     echo '<input type="hidden" name="send_reply" value="1">';
     echo '<div class="row">';
     echo '<div class="col-sm-10" style="margin-bottom:6px;">';
@@ -9998,6 +10015,11 @@ function sms_suite_admin_inbox_conversation($vars, $lang)
 function sms_suite_ajax_telegram_set_webhook()
 {
     header('Content-Type: application/json; charset=utf-8');
+
+    if (!SecurityHelper::verifyCsrfPost()) {
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit;
+    }
 
     $gatewayId = (int)($_POST['gateway_id'] ?? 0);
     $remove = !empty($_POST['remove']);
@@ -10073,6 +10095,11 @@ function sms_suite_ajax_messenger_subscribe()
 {
     header('Content-Type: application/json; charset=utf-8');
 
+    if (!SecurityHelper::verifyCsrfPost()) {
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit;
+    }
+
     $gatewayId = (int)($_POST['gateway_id'] ?? 0);
 
     if (!$gatewayId) {
@@ -10113,6 +10140,11 @@ function sms_suite_ajax_inbox_reply()
 {
     header('Content-Type: application/json; charset=utf-8');
 
+    if (!SecurityHelper::verifyCsrfPost()) {
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit;
+    }
+
     $chatboxId = (int)($_POST['chatbox_id'] ?? 0);
     $message = trim($_POST['message'] ?? '');
 
@@ -10140,6 +10172,11 @@ function sms_suite_ajax_inbox_reply()
 function sms_suite_ajax_chatbot_test()
 {
     header('Content-Type: application/json; charset=utf-8');
+
+    if (!SecurityHelper::verifyCsrfPost()) {
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit;
+    }
 
     $testMessage = trim($_POST['message'] ?? 'Hello, how can you help me?');
     $clientId = !empty($_POST['client_id']) ? (int)$_POST['client_id'] : null;
@@ -10453,7 +10490,7 @@ function sms_suite_admin_chatbot_settings($vars, $lang)
                 }
             }
         };
-        xhr.send("message=" + encodeURIComponent(msg));
+        xhr.send("message=" + encodeURIComponent(msg) + "&csrf_token=' . SecurityHelper::getCsrfToken() . '");
     }
     </script>';
 

@@ -4403,7 +4403,7 @@ function sms_suite_encrypt($data)
     global $cc_encryption_hash;
     if (!empty($cc_encryption_hash)) {
         $key = hash('sha256', $cc_encryption_hash, true);
-        $iv = openssl_random_pseudo_bytes(16);
+        $iv = random_bytes(16);
         $encrypted = openssl_encrypt($data, 'AES-256-CBC', $key, 0, $iv);
         if ($encrypted !== false) {
             return base64_encode($iv . $encrypted);

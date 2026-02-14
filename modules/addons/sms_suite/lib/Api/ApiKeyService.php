@@ -44,7 +44,7 @@ class ApiKeyService
         $secret = bin2hex(random_bytes(32));
 
         // Hash the secret for storage (using bcrypt)
-        $secretHash = password_hash($secret, PASSWORD_BCRYPT, ['cost' => 10]);
+        $secretHash = password_hash($secret, PASSWORD_BCRYPT, ['cost' => 12]);
 
         // Validate scopes
         $validScopes = array_intersect($scopes, array_keys(self::SCOPES));

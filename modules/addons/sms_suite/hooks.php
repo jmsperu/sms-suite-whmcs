@@ -267,6 +267,7 @@ HTML;
  */
 add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
     try {
+        require_once __DIR__ . '/lib/Core/SecurityHelper.php';
         $clientId = $vars['userid'];
 
         // Get client details
@@ -336,6 +337,7 @@ add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
                 </div>
                 <hr style="margin: 10px 0;">
                 <form method="post" action="addonmodules.php?module=sms_suite&action=send_to_client" id="sms-suite-send-form">
+                    ' . \SMSSuite\Core\SecurityHelper::csrfField() . '
                     <input type="hidden" name="client_id" value="' . $clientId . '">
                     <input type="hidden" name="phone" value="' . htmlspecialchars($phone) . '">
                     <input type="hidden" name="channel" id="sms-suite-channel" value="sms">

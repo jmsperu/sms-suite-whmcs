@@ -1519,7 +1519,7 @@ class MetaWhatsAppGateway extends AbstractGateway
     {
         $signature = $headers['X-Hub-Signature-256'] ?? $headers['x-hub-signature-256'] ?? '';
         if (empty($signature) || empty($secret)) {
-            return true; // Allow if no app secret configured
+            return false; // Reject if signature or secret is missing
         }
 
         $signature = str_replace('sha256=', '', $signature);

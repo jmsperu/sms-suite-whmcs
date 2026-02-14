@@ -115,7 +115,7 @@ class MessengerGateway extends AbstractGateway
             ?? '';
 
         if (empty($signature) || empty($secret)) {
-            return true;
+            return false; // Reject if signature or secret is missing
         }
 
         $signature = str_replace('sha256=', '', $signature);
