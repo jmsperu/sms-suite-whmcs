@@ -262,6 +262,22 @@ class MessageService
                     }
                 }
 
+                // Track outbound message in chatbox for unified inbox
+                try {
+                    require_once dirname(__DIR__) . '/WhatsApp/WhatsAppService.php';
+                    \SMSSuite\WhatsApp\WhatsAppService::trackMessageInChatbox(
+                        $message->client_id ?? 0,
+                        $message->to_number,
+                        $messageId,
+                        'outbound',
+                        $message->channel ?? 'sms',
+                        $message->gateway_id ?? null
+                    );
+                } catch (\Exception $chatboxErr) {
+                    // Non-fatal — don't break message delivery
+                    logActivity('SMS Suite: Chatbox tracking error - ' . $chatboxErr->getMessage());
+                }
+
                 return [
                     'success' => true,
                     'message_id' => $messageId,
@@ -378,16 +394,27 @@ class MessageService
      */
     public static function getDefaultGateway(int $clientId, string $channel = 'sms'): ?int
     {
-        // For WhatsApp, always prefer client-owned gateway first (before generic default)
+        // For WhatsApp/Telegram/Messenger, always prefer client-owned gateway first (before generic default)
         try {
-            if ($channel === 'whatsapp') {
+            if ($channel === 'whatsapp' || $channel === 'telegram' || $channel === 'messenger') {
+                $typeMap = ['whatsapp' => 'meta_whatsapp', 'telegram' => 'telegram', 'messenger' => 'messenger'];
                 $clientGw = Capsule::table('mod_sms_gateways')
                     ->where('client_id', $clientId)
-                    ->where('type', 'meta_whatsapp')
+                    ->where('type', $typeMap[$channel])
                     ->where('status', 1)
                     ->first();
                 if ($clientGw) {
                     return $clientGw->id;
+                }
+
+                // Also check system gateways for this channel
+                $systemGw = Capsule::table('mod_sms_gateways')
+                    ->whereNull('client_id')
+                    ->where('type', $typeMap[$channel])
+                    ->where('status', 1)
+                    ->first();
+                if ($systemGw) {
+                    return $systemGw->id;
                 }
             }
         } catch (\Exception $e) {

@@ -78,6 +78,9 @@ function sms_suite_client_dispatch($vars, $action, $clientId, $lang)
         case 'preferences':
             return sms_suite_client_preferences($vars, $clientId, $lang);
 
+        case 'chatbot':
+            return sms_suite_client_chatbot($vars, $clientId, $lang);
+
         case 'dashboard':
         default:
             return sms_suite_client_dashboard($vars, $clientId, $lang);
@@ -623,6 +626,18 @@ function sms_suite_client_send($vars, $clientId, $lang)
     // Get client currency
     $currency = sms_suite_get_client_currency($clientId);
 
+    // Check if client has Telegram/Messenger gateways available
+    $hasTelegram = false;
+    $hasMessenger = false;
+    foreach ($gateways as $gw) {
+        if ($gw->type === 'telegram') {
+            $hasTelegram = true;
+        }
+        if ($gw->type === 'messenger') {
+            $hasMessenger = true;
+        }
+    }
+
     return [
         'pagetitle' => $lang['module_name'] . ' - ' . $lang['menu_send_sms'],
         'breadcrumb' => [
@@ -645,6 +660,8 @@ function sms_suite_client_send($vars, $clientId, $lang)
             'currency_symbol' => $currency['symbol'],
             'currency_code' => $currency['code'],
             'csrf_token' => SecurityHelper::getCsrfToken(),
+            'has_telegram' => $hasTelegram,
+            'has_messenger' => $hasMessenger,
         ],
     ];
 }
@@ -1869,38 +1886,70 @@ function sms_suite_client_inbox($vars, $clientId, $lang)
         }
     }
 
-    // Get unique conversations (grouped by phone number)
-    $conversations = Capsule::table('mod_sms_messages')
-        ->where('client_id', $clientId)
-        ->select([
-            'to_number',
-            Capsule::raw('MAX(created_at) as last_message_at'),
-            Capsule::raw('COUNT(*) as message_count'),
-            Capsule::raw('SUM(CASE WHEN direction = "inbound" AND status != "read" THEN 1 ELSE 0 END) as unread_count'),
-        ])
-        ->groupBy('to_number')
-        ->orderBy('last_message_at', 'desc')
-        ->limit(50)
-        ->get();
+    // Channel filter
+    $channelFilter = $_GET['channel'] ?? 'all';
+    $search = trim($_GET['search'] ?? '');
 
-    // Get last message preview for each conversation
-    foreach ($conversations as &$conv) {
-        $lastMsg = Capsule::table('mod_sms_messages')
-            ->where('client_id', $clientId)
-            ->where('to_number', $conv->to_number)
-            ->orderBy('created_at', 'desc')
-            ->first();
-        $conv->last_message = $lastMsg ? substr($lastMsg->message, 0, 50) . (strlen($lastMsg->message) > 50 ? '...' : '') : '';
-        $conv->last_direction = $lastMsg ? ($lastMsg->direction ?? 'outbound') : 'outbound';
-        $conv->last_status = $lastMsg ? ($lastMsg->status ?? '') : '';
+    // Get conversations from chatbox table
+    $query = Capsule::table('mod_sms_chatbox')->where('client_id', $clientId);
 
-        // Try to get contact name
-        $contact = Capsule::table('mod_sms_contacts')
-            ->where('client_id', $clientId)
-            ->where('phone', $conv->to_number)
-            ->first();
-        $conv->contact_name = $contact ? trim($contact->first_name . ' ' . $contact->last_name) : null;
+    if ($channelFilter !== 'all') {
+        $query->where('channel', $channelFilter);
     }
+
+    if (!empty($search)) {
+        $query->where(function ($q) use ($search) {
+            $q->where('phone', 'like', "%{$search}%")
+              ->orWhere('contact_name', 'like', "%{$search}%");
+        });
+    }
+
+    $conversations = $query->orderBy('last_message_at', 'desc')->limit(50)->get();
+
+    // Also load legacy conversations from mod_sms_messages that may not be in chatbox yet
+    // (backwards compatibility — will be covered by backfill migration)
+    if ($conversations->isEmpty() && $channelFilter === 'all' && empty($search)) {
+        $legacyConvs = Capsule::table('mod_sms_messages')
+            ->where('client_id', $clientId)
+            ->select([
+                'to_number',
+                Capsule::raw('MAX(created_at) as last_message_at'),
+                Capsule::raw('COUNT(*) as message_count'),
+                Capsule::raw('SUM(CASE WHEN direction = "inbound" AND status != "read" THEN 1 ELSE 0 END) as unread_count'),
+            ])
+            ->groupBy('to_number')
+            ->orderBy('last_message_at', 'desc')
+            ->limit(50)
+            ->get();
+
+        foreach ($legacyConvs as &$conv) {
+            $lastMsg = Capsule::table('mod_sms_messages')
+                ->where('client_id', $clientId)
+                ->where('to_number', $conv->to_number)
+                ->orderBy('created_at', 'desc')
+                ->first();
+            $conv->last_message = $lastMsg ? substr($lastMsg->message, 0, 60) : '';
+            $conv->last_direction = $lastMsg ? ($lastMsg->direction ?? 'outbound') : 'outbound';
+            $conv->channel = $lastMsg ? ($lastMsg->channel ?? 'sms') : 'sms';
+            $conv->id = null; // No chatbox ID — use legacy phone link
+            $conv->phone = $conv->to_number;
+            $contact = Capsule::table('mod_sms_contacts')
+                ->where('client_id', $clientId)
+                ->where('phone', $conv->to_number)
+                ->first();
+            $conv->contact_name = $contact ? trim($contact->first_name . ' ' . $contact->last_name) : null;
+        }
+        $conversations = $legacyConvs;
+    }
+
+    // Channel counts for filter tabs
+    $channelCounts = [
+        'all' => Capsule::table('mod_sms_chatbox')->where('client_id', $clientId)->count(),
+        'sms' => Capsule::table('mod_sms_chatbox')->where('client_id', $clientId)->where('channel', 'sms')->count(),
+        'whatsapp' => Capsule::table('mod_sms_chatbox')->where('client_id', $clientId)->where('channel', 'whatsapp')->count(),
+        'telegram' => Capsule::table('mod_sms_chatbox')->where('client_id', $clientId)->where('channel', 'telegram')->count(),
+        'messenger' => Capsule::table('mod_sms_chatbox')->where('client_id', $clientId)->where('channel', 'messenger')->count(),
+    ];
 
     // Get sender IDs for new message
     $senderIds = Capsule::table('mod_sms_client_sender_ids')
@@ -1921,6 +1970,9 @@ function sms_suite_client_inbox($vars, $clientId, $lang)
             'client_id' => $clientId,
             'conversations' => $conversations,
             'sender_ids' => $senderIds,
+            'channel_filter' => $channelFilter,
+            'channel_counts' => $channelCounts,
+            'search' => $search,
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),
@@ -1934,14 +1986,40 @@ function sms_suite_client_inbox($vars, $clientId, $lang)
 function sms_suite_client_conversation($vars, $clientId, $lang)
 {
     $modulelink = $vars['modulelink'];
+    $chatboxId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
     $phone = preg_replace('/[^0-9+]/', '', $_GET['phone'] ?? '');
     $success = null;
     $error = null;
+
+    // Resolve chatbox
+    $chatbox = null;
+    if ($chatboxId) {
+        $chatbox = Capsule::table('mod_sms_chatbox')
+            ->where('id', $chatboxId)
+            ->where('client_id', $clientId)
+            ->first();
+        if ($chatbox) {
+            $phone = $chatbox->phone;
+        }
+    }
+
+    // Legacy fallback: look up by phone
+    if (!$chatbox && !empty($phone)) {
+        $chatbox = Capsule::table('mod_sms_chatbox')
+            ->where('phone', $phone)
+            ->where('client_id', $clientId)
+            ->first();
+        if ($chatbox) {
+            $chatboxId = $chatbox->id;
+        }
+    }
 
     if (empty($phone)) {
         header('Location: ' . $modulelink . '&action=inbox');
         exit;
     }
+
+    $channel = $chatbox ? ($chatbox->channel ?? 'sms') : 'sms';
 
     // Handle sending reply
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -1954,11 +2032,18 @@ function sms_suite_client_conversation($vars, $clientId, $lang)
             if (empty($message)) {
                 $error = 'Message cannot be empty.';
             } else {
-                require_once __DIR__ . '/../lib/Core/MessageService.php';
-                $result = \SMSSuite\Core\MessageService::send($clientId, $phone, $message, [
-                    'sender_id' => $senderId,
-                    'send_now' => true,
-                ]);
+                // Use chatbox reply for WA/TG/Messenger channels, direct send for SMS
+                if ($chatboxId && in_array($channel, ['whatsapp', 'telegram', 'messenger'])) {
+                    require_once __DIR__ . '/../lib/WhatsApp/WhatsAppService.php';
+                    $result = \SMSSuite\WhatsApp\WhatsAppService::replyToConversation($chatboxId, $message);
+                } else {
+                    require_once __DIR__ . '/../lib/Core/MessageService.php';
+                    $result = \SMSSuite\Core\MessageService::send($clientId, $phone, $message, [
+                        'channel' => $channel,
+                        'sender_id' => $senderId,
+                        'send_now' => true,
+                    ]);
+                }
 
                 if ($result['success']) {
                     $success = 'Message sent!';
@@ -1969,21 +2054,44 @@ function sms_suite_client_conversation($vars, $clientId, $lang)
         }
     }
 
-    // Mark inbound messages as read
-    Capsule::table('mod_sms_messages')
-        ->where('client_id', $clientId)
-        ->where('to_number', $phone)
-        ->where('direction', 'inbound')
-        ->where('status', '!=', 'read')
-        ->update(['status' => 'read', 'updated_at' => date('Y-m-d H:i:s')]);
+    // Get messages via chatbox if available
+    if ($chatboxId) {
+        $messages = Capsule::table('mod_sms_chatbox_messages as cm')
+            ->join('mod_sms_messages as m', 'cm.message_id', '=', 'm.id')
+            ->where('cm.chatbox_id', $chatboxId)
+            ->select('m.*', 'cm.direction')
+            ->orderBy('m.created_at', 'asc')
+            ->limit(100)
+            ->get();
 
-    // Get messages for this conversation
-    $messages = Capsule::table('mod_sms_messages')
-        ->where('client_id', $clientId)
-        ->where('to_number', $phone)
-        ->orderBy('created_at', 'asc')
-        ->limit(100)
-        ->get();
+        // Mark chatbox as read
+        Capsule::table('mod_sms_chatbox')
+            ->where('id', $chatboxId)
+            ->update(['unread_count' => 0, 'updated_at' => date('Y-m-d H:i:s')]);
+    } else {
+        // Fallback: direct query
+        $messages = Capsule::table('mod_sms_messages')
+            ->where('client_id', $clientId)
+            ->where('to_number', $phone)
+            ->orderBy('created_at', 'asc')
+            ->limit(100)
+            ->get();
+
+        // Mark inbound as read
+        Capsule::table('mod_sms_messages')
+            ->where('client_id', $clientId)
+            ->where('to_number', $phone)
+            ->where('direction', 'inbound')
+            ->where('status', '!=', 'read')
+            ->update(['status' => 'read', 'updated_at' => date('Y-m-d H:i:s')]);
+    }
+
+    // Check WhatsApp 24h window
+    $windowExpired = false;
+    if ($channel === 'whatsapp' && $chatbox && $chatbox->last_message_at) {
+        $lastMessage = strtotime($chatbox->last_message_at);
+        $windowExpired = (time() > $lastMessage + (24 * 60 * 60));
+    }
 
     // Get contact info
     $contact = Capsule::table('mod_sms_contacts')
@@ -1998,7 +2106,7 @@ function sms_suite_client_conversation($vars, $clientId, $lang)
         ->get();
 
     return [
-        'pagetitle' => $lang['module_name'] . ' - Chat with ' . ($contact ? trim($contact->first_name . ' ' . $contact->last_name) : $phone),
+        'pagetitle' => $lang['module_name'] . ' - Chat with ' . ($contact ? trim($contact->first_name . ' ' . $contact->last_name) : ($chatbox->contact_name ?? $phone)),
         'breadcrumb' => [
             $modulelink => $lang['module_name'],
             $modulelink . '&action=inbox' => 'Inbox',
@@ -2011,8 +2119,12 @@ function sms_suite_client_conversation($vars, $clientId, $lang)
             'client_id' => $clientId,
             'phone' => $phone,
             'contact' => $contact,
+            'chatbox' => $chatbox,
+            'chatbox_id' => $chatboxId,
+            'channel' => $channel,
             'messages' => $messages,
             'sender_ids' => $senderIds,
+            'window_expired' => $windowExpired,
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),
@@ -2694,4 +2806,132 @@ function sms_suite_client_ajax_meta_token_exchange($clientId)
 
     echo json_encode(['success' => true, 'access_token' => $data['access_token']]);
     exit;
+}
+
+/**
+ * Client chatbot configuration page
+ */
+function sms_suite_client_chatbot($vars, $clientId, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    require_once __DIR__ . '/../lib/AI/ChatbotService.php';
+
+    $success = null;
+    $error = null;
+
+    // Get client's gateways
+    $gateways = Capsule::table('mod_sms_gateways')
+        ->where('client_id', $clientId)
+        ->where('status', 1)
+        ->get();
+
+    // Handle form submission
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_chatbot'])) {
+        $gatewayId = !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null;
+
+        // Verify gateway belongs to this client
+        if ($gatewayId) {
+            $gwOwned = Capsule::table('mod_sms_gateways')
+                ->where('id', $gatewayId)
+                ->where('client_id', $clientId)
+                ->exists();
+            if (!$gwOwned) {
+                $error = 'Invalid gateway selected.';
+            }
+        }
+
+        if (!$error) {
+            $data = [
+                'enabled' => !empty($_POST['enabled']) ? 1 : 0,
+                'provider' => $_POST['provider'] ?? 'claude',
+                'model' => $_POST['model'] ?? null,
+                'system_prompt' => trim($_POST['system_prompt'] ?? ''),
+                'channels' => implode(',', $_POST['channels'] ?? ['whatsapp', 'telegram']),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            // Handle client's own API key
+            $clientApiKey = trim($_POST['api_key'] ?? '');
+            if (!empty($clientApiKey)) {
+                require_once __DIR__ . '/../sms_suite.php';
+                $data['api_key'] = sms_suite_encrypt($clientApiKey);
+            } elseif (isset($_POST['clear_api_key'])) {
+                $data['api_key'] = null;
+            }
+
+            $existing = Capsule::table('mod_sms_chatbot_config')
+                ->where('client_id', $clientId)
+                ->where('gateway_id', $gatewayId)
+                ->first();
+
+            if ($existing) {
+                Capsule::table('mod_sms_chatbot_config')
+                    ->where('id', $existing->id)
+                    ->update($data);
+            } else {
+                $data['client_id'] = $clientId;
+                $data['gateway_id'] = $gatewayId;
+                $data['created_at'] = date('Y-m-d H:i:s');
+                Capsule::table('mod_sms_chatbot_config')->insert($data);
+            }
+
+            $success = 'Chatbot settings saved.';
+        }
+    }
+
+    // Build gateway configs list
+    $gatewayConfigs = [];
+    foreach ($gateways as $gw) {
+        $config = Capsule::table('mod_sms_chatbot_config')
+            ->where('client_id', $clientId)
+            ->where('gateway_id', $gw->id)
+            ->first();
+        $gatewayConfigs[] = [
+            'gateway' => $gw,
+            'config' => $config,
+        ];
+    }
+
+    // Check if system AI is configured
+    $systemProvider = Capsule::table('tbladdonmodules')
+        ->where('module', 'sms_suite')
+        ->where('setting', 'ai_provider')
+        ->value('value');
+    $systemKeySet = !empty(Capsule::table('tbladdonmodules')
+        ->where('module', 'sms_suite')
+        ->where('setting', 'ai_api_key')
+        ->value('value'));
+    // AI is available if system has a provider set OR client can use their own key
+    $aiAvailable = (!empty($systemProvider) && $systemProvider !== 'none') || true; // always show — clients can bring their own key
+
+    // Build providers & models JSON for JS
+    $providers = \SMSSuite\AI\ChatbotService::getProviders();
+    $allModels = [];
+    foreach (array_keys($providers) as $p) {
+        $allModels[$p] = \SMSSuite\AI\ChatbotService::getModels($p);
+    }
+
+    return [
+        'pagetitle' => ($lang['module_name'] ?? 'Messaging Suite') . ' - AI Chatbot',
+        'breadcrumb' => [
+            $modulelink => $lang['module_name'] ?? 'Messaging Suite',
+            $modulelink . '&action=chatbot' => 'AI Chatbot',
+        ],
+        'templatefile' => 'templates/client/chatbot',
+        'vars' => [
+            'modulelink' => $modulelink,
+            'lang' => $lang,
+            'client_id' => $clientId,
+            'gateways' => $gateways,
+            'gateway_configs' => $gatewayConfigs,
+            'ai_available' => $aiAvailable,
+            'system_key_set' => $systemKeySet,
+            'providers' => $providers,
+            'all_models_json' => json_encode($allModels),
+            'success' => $success,
+            'error' => $error,
+            'csrf_token' => SecurityHelper::getCsrfToken(),
+        ],
+    ];
 }

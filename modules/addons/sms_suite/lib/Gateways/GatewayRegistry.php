@@ -181,6 +181,8 @@ class GatewayRegistry
         // Load additional gateway drivers
         require_once __DIR__ . '/GatewayDrivers.php';
         require_once __DIR__ . '/AirtouchGateway.php';
+        require_once __DIR__ . '/TelegramGateway.php';
+        require_once __DIR__ . '/MessengerGateway.php';
 
         // Register core gateway drivers
         self::register('generic_http', GenericHttpGateway::class);
@@ -210,6 +212,8 @@ class GatewayRegistry
         self::register('signalwire', SignalWireGateway::class);
         self::register('zenvia', ZenviaGateway::class);
         self::register('meta_whatsapp', MetaWhatsAppGateway::class);
+        self::register('telegram', TelegramGateway::class);
+        self::register('messenger', MessengerGateway::class);
 
         // Allow extensions via hook
         if (function_exists('run_hook')) {

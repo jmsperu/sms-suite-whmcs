@@ -33,6 +33,18 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
         case 'ajax_meta_token_exchange':
             sms_suite_ajax_meta_token_exchange();
             return;
+        case 'ajax_telegram_set_webhook':
+            sms_suite_ajax_telegram_set_webhook();
+            return;
+        case 'ajax_chatbot_test':
+            sms_suite_ajax_chatbot_test();
+            return;
+        case 'ajax_messenger_subscribe':
+            sms_suite_ajax_messenger_subscribe();
+            return;
+        case 'ajax_inbox_reply':
+            sms_suite_ajax_inbox_reply();
+            return;
     }
 
     // Build navigation
@@ -161,6 +173,18 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_download_document();
             break;
 
+        case 'chatbot_settings':
+            sms_suite_admin_chatbot_settings($vars, $lang);
+            break;
+
+        case 'inbox':
+            sms_suite_admin_inbox($vars, $lang);
+            break;
+
+        case 'inbox_conversation':
+            sms_suite_admin_inbox_conversation($vars, $lang);
+            break;
+
         // AJAX handlers
         case 'ajax_message_detail':
             sms_suite_ajax_message_detail();
@@ -178,6 +202,12 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
 
     // Global Select2 initialization for all searchable dropdowns
     sms_suite_admin_select2_init();
+
+    // Close ms-admin-wrap (each page function already closes ms-content via its own </div>)
+    // Dashboard handles both closings itself
+    if ($action !== 'dashboard') {
+        echo '</div>'; // Close ms-admin-wrap
+    }
 }
 
 /**
@@ -185,47 +215,212 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
  */
 function sms_suite_admin_nav($modulelink, $currentAction, $lang)
 {
-    $menuItems = [
-        'dashboard' => ['icon' => 'fa-dashboard', 'label' => $lang['menu_dashboard']],
-        'send' => ['icon' => 'fa-paper-plane', 'label' => $lang['menu_send_sms']],
-        'gateways' => ['icon' => 'fa-server', 'label' => $lang['menu_gateways']],
-        'sender_id_pool' => ['icon' => 'fa-id-card', 'label' => 'Sender IDs'],
-        'sender_id_requests' => ['icon' => 'fa-inbox', 'label' => 'ID Requests'],
-        'credit_packages' => ['icon' => 'fa-credit-card', 'label' => 'SMS Packages'],
-        'billing_rates' => ['icon' => 'fa-dollar', 'label' => 'Billing Rates'],
-        'network_prefixes' => ['icon' => 'fa-globe', 'label' => 'Network Prefixes'],
-        'client_rates' => ['icon' => 'fa-user-circle', 'label' => 'Client Rates'],
-        'contacts' => ['icon' => 'fa-address-book', 'label' => 'Contacts'],
-        'contact_groups' => ['icon' => 'fa-users', 'label' => 'Contact Groups'],
-        'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
-        'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
-        'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
-        'whatsapp_templates' => ['icon' => 'fa-whatsapp', 'label' => 'WA Templates'],
-        'notifications' => ['icon' => 'fa-bell', 'label' => 'Notifications'],
-        'automation' => ['icon' => 'fa-magic', 'label' => $lang['menu_automation']],
-        'reports' => ['icon' => 'fa-bar-chart', 'label' => $lang['menu_reports']],
-        'clients' => ['icon' => 'fa-users', 'label' => 'Clients'],
-        'webhooks' => ['icon' => 'fa-exchange', 'label' => 'Webhooks'],
-        'diagnostics' => ['icon' => 'fa-stethoscope', 'label' => 'Diagnostics'],
-        'settings' => ['icon' => 'fa-cog', 'label' => $lang['menu_settings']],
+    // Grouped sidebar navigation
+    $menuGroups = [
+        'Main' => [
+            'dashboard' => ['icon' => 'fa-dashboard', 'label' => $lang['menu_dashboard']],
+            'send' => ['icon' => 'fa-paper-plane', 'label' => $lang['menu_send_sms']],
+        ],
+        'Messaging' => [
+            'inbox' => ['icon' => 'fa-inbox', 'label' => 'Inbox'],
+            'messages' => ['icon' => 'fa-envelope', 'label' => $lang['menu_messages']],
+            'campaigns' => ['icon' => 'fa-bullhorn', 'label' => $lang['menu_campaigns']],
+            'templates' => ['icon' => 'fa-file-text', 'label' => $lang['menu_templates']],
+            'whatsapp_templates' => ['icon' => 'fa-whatsapp', 'label' => 'WA Templates', 'icon_prefix' => 'fab'],
+            'notifications' => ['icon' => 'fa-bell', 'label' => 'Notifications'],
+            'chatbot_settings' => ['icon' => 'fa-robot', 'label' => 'AI Chatbot'],
+        ],
+        'Gateways' => [
+            'gateways' => ['icon' => 'fa-server', 'label' => $lang['menu_gateways']],
+            'webhooks' => ['icon' => 'fa-exchange', 'label' => 'Webhooks'],
+        ],
+        'Contacts' => [
+            'contacts' => ['icon' => 'fa-address-book', 'label' => 'Contacts'],
+            'contact_groups' => ['icon' => 'fa-users', 'label' => 'Groups'],
+        ],
+        'Sender IDs' => [
+            'sender_id_pool' => ['icon' => 'fa-id-card', 'label' => 'Sender IDs'],
+            'sender_id_requests' => ['icon' => 'fa-inbox', 'label' => 'ID Requests'],
+        ],
+        'Billing' => [
+            'credit_packages' => ['icon' => 'fa-credit-card', 'label' => 'SMS Packages'],
+            'billing_rates' => ['icon' => 'fa-dollar', 'label' => 'Billing Rates'],
+            'client_rates' => ['icon' => 'fa-user-circle', 'label' => 'Client Rates'],
+            'network_prefixes' => ['icon' => 'fa-globe', 'label' => 'Network Prefixes'],
+        ],
+        'Analytics' => [
+            'reports' => ['icon' => 'fa-bar-chart', 'label' => $lang['menu_reports']],
+            'automation' => ['icon' => 'fa-magic', 'label' => $lang['menu_automation']],
+        ],
+        'System' => [
+            'clients' => ['icon' => 'fa-users', 'label' => 'Clients'],
+            'settings' => ['icon' => 'fa-cog', 'label' => $lang['menu_settings']],
+            'diagnostics' => ['icon' => 'fa-stethoscope', 'label' => 'Diagnostics'],
+        ],
     ];
 
-    // Load Select2 CSS/JS for searchable dropdowns
+    // Determine which group the current action belongs to
+    $activeGroup = 'Main';
+    foreach ($menuGroups as $group => $items) {
+        if (isset($items[$currentAction])) {
+            $activeGroup = $group;
+            break;
+        }
+    }
+    // Sub-pages that should highlight their parent
+    $parentMap = [
+        'gateway_edit' => 'gateways',
+        'gateway_countries' => 'gateways',
+        'campaign_create' => 'campaigns',
+        'campaign_edit' => 'campaigns',
+        'campaign_view' => 'campaigns',
+        'client_settings' => 'clients',
+        'client_messages' => 'clients',
+        'send_to_client' => 'send',
+        'download_doc' => 'messages',
+        'inbox_conversation' => 'inbox',
+    ];
+    $highlightAction = $parentMap[$currentAction] ?? $currentAction;
+    if ($activeGroup === 'Main' && !isset($menuGroups['Main'][$highlightAction])) {
+        foreach ($menuGroups as $group => $items) {
+            if (isset($items[$highlightAction])) {
+                $activeGroup = $group;
+                break;
+            }
+        }
+    }
+
+    // Load Select2 CSS/JS
     echo '<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />';
-    echo '<style>.select2-container { min-width: 100%; } .select2-container .select2-selection--single { height: 34px; border: 1px solid #ccc; border-radius: 4px; } .select2-container .select2-selection--single .select2-selection__rendered { line-height: 34px; } .select2-container .select2-selection--single .select2-selection__arrow { height: 32px; } .select2-container--default .select2-selection--multiple { border: 1px solid #ccc; border-radius: 4px; min-height: 34px; }</style>';
     echo '<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>';
 
-    echo '<ul class="nav nav-tabs admin-tabs" role="tablist">';
-    foreach ($menuItems as $action => $item) {
-        $active = ($currentAction === $action) ? 'active' : '';
-        echo '<li role="presentation" class="' . $active . '">';
-        echo '<a href="' . $modulelink . '&action=' . $action . '">';
-        echo '<i class="fa ' . $item['icon'] . '"></i> ' . $item['label'];
-        echo '</a>';
-        echo '</li>';
+    // Custom CSS
+    echo '<style>
+    /* Select2 */
+    .select2-container { min-width: 100%; }
+    .select2-container .select2-selection--single { height: 34px; border: 1px solid #ccc; border-radius: 4px; }
+    .select2-container .select2-selection--single .select2-selection__rendered { line-height: 34px; }
+    .select2-container .select2-selection--single .select2-selection__arrow { height: 32px; }
+    .select2-container--default .select2-selection--multiple { border: 1px solid #ccc; border-radius: 4px; min-height: 34px; }
+
+    /* Sidebar Layout */
+    .ms-admin-wrap { display: flex; gap: 0; min-height: 600px; margin: -10px -15px 0; }
+    .ms-sidebar { width: 220px; min-width: 220px; background: #1e293b; border-radius: 8px 0 0 8px; padding: 0; overflow-y: auto; }
+    .ms-content { flex: 1; padding: 24px; background: #f8fafc; border-radius: 0 8px 8px 0; min-width: 0; }
+
+    /* Sidebar Brand */
+    .ms-sidebar-brand { padding: 18px 16px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .ms-sidebar-brand h4 { margin: 0; color: #fff; font-size: 15px; font-weight: 600; letter-spacing: .3px; }
+    .ms-sidebar-brand small { color: #94a3b8; font-size: 11px; }
+
+    /* Sidebar Groups */
+    .ms-nav-group { border-bottom: 1px solid rgba(255,255,255,.06); }
+    .ms-nav-group:last-child { border-bottom: none; }
+    .ms-nav-group-label { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 4px; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; user-select: none; }
+    .ms-nav-group-label:hover { color: #94a3b8; }
+    .ms-nav-group-label .caret-icon { transition: transform .2s; font-size: 10px; }
+    .ms-nav-group.collapsed .ms-nav-group-label .caret-icon { transform: rotate(-90deg); }
+    .ms-nav-group.collapsed .ms-nav-items { display: none; }
+
+    /* Sidebar Items */
+    .ms-nav-items { list-style: none; margin: 0 0 4px; padding: 0; }
+    .ms-nav-items li a { display: flex; align-items: center; gap: 10px; padding: 7px 16px 7px 20px; color: #cbd5e1; font-size: 13px; text-decoration: none; transition: all .15s; border-left: 3px solid transparent; }
+    .ms-nav-items li a:hover { color: #fff; background: rgba(255,255,255,.06); }
+    .ms-nav-items li a.active { color: #fff; background: rgba(59,130,246,.15); border-left-color: #3b82f6; font-weight: 600; }
+    .ms-nav-items li a i { width: 18px; text-align: center; font-size: 13px; opacity: .7; }
+    .ms-nav-items li a.active i { opacity: 1; }
+
+    /* Content Area */
+    .ms-content .panel { border: none; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    .ms-content .panel-heading { background: #fff; border-bottom: 1px solid #e2e8f0; border-radius: 8px 8px 0 0; }
+    .ms-content .panel-heading .panel-title { font-weight: 600; color: #1e293b; }
+    .ms-content .panel-body { background: #fff; border-radius: 0 0 8px 8px; }
+
+    /* Stats Cards */
+    .ms-stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .ms-stat-card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; align-items: center; gap: 16px; transition: transform .15s, box-shadow .15s; }
+    .ms-stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+    .ms-stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    .ms-stat-icon.blue { background: #eff6ff; color: #3b82f6; }
+    .ms-stat-icon.green { background: #f0fdf4; color: #22c55e; }
+    .ms-stat-icon.amber { background: #fffbeb; color: #f59e0b; }
+    .ms-stat-icon.purple { background: #faf5ff; color: #a855f7; }
+    .ms-stat-icon.red { background: #fef2f2; color: #ef4444; }
+    .ms-stat-icon.cyan { background: #ecfeff; color: #06b6d4; }
+    .ms-stat-info h3 { margin: 0; font-size: 24px; font-weight: 700; color: #1e293b; line-height: 1.1; }
+    .ms-stat-info p { margin: 2px 0 0; font-size: 12px; color: #64748b; }
+
+    /* Quick Action Buttons */
+    .ms-quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .ms-quick-btn { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; color: #334155; font-size: 13px; font-weight: 500; text-decoration: none; transition: all .15s; }
+    .ms-quick-btn:hover { border-color: #3b82f6; color: #3b82f6; background: #f8fafc; text-decoration: none; }
+    .ms-quick-btn i { font-size: 16px; width: 20px; text-align: center; opacity: .6; }
+    .ms-quick-btn:hover i { opacity: 1; }
+
+    /* Recent Messages Table */
+    .ms-content .table { margin-bottom: 0; }
+    .ms-content .table > thead > tr > th { background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; padding: 10px 12px; }
+    .ms-content .table > tbody > tr > td { padding: 10px 12px; vertical-align: middle; border-top: 1px solid #f1f5f9; color: #334155; font-size: 13px; }
+    .ms-content .table > tbody > tr:hover { background: #f8fafc; }
+
+    /* Badge/Label Improvements */
+    .ms-content .label { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
+
+    /* Section Headers */
+    .ms-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .ms-section-header h3 { margin: 0; font-size: 20px; font-weight: 700; color: #1e293b; }
+    .ms-section-header p { margin: 4px 0 0; color: #64748b; font-size: 13px; }
+
+    /* Responsive */
+    @media (max-width: 991px) {
+        .ms-admin-wrap { flex-direction: column; }
+        .ms-sidebar { width: 100%; min-width: 100%; border-radius: 8px 8px 0 0; }
+        .ms-nav-items { display: flex; flex-wrap: wrap; }
+        .ms-nav-items li a { padding: 6px 12px; border-left: none; border-bottom: 2px solid transparent; }
+        .ms-nav-items li a.active { border-left-color: transparent; border-bottom-color: #3b82f6; }
+        .ms-content { border-radius: 0 0 8px 8px; }
+        .ms-nav-group.collapsed .ms-nav-items { display: flex; }
     }
-    echo '</ul>';
-    echo '<div class="tab-content admin-tabs-content" style="margin-top: 20px;">';
+    </style>';
+
+    // Sidebar + Content layout
+    echo '<div class="ms-admin-wrap">';
+
+    // Sidebar
+    echo '<div class="ms-sidebar">';
+    echo '<div class="ms-sidebar-brand"><h4><i class="fa fa-comments"></i> Messaging Suite</h4><small>Administration Panel</small></div>';
+
+    foreach ($menuGroups as $group => $items) {
+        $isActiveGroup = ($group === $activeGroup);
+        $collapsed = (!$isActiveGroup && $group !== 'Main') ? ' collapsed' : '';
+        echo '<div class="ms-nav-group' . $collapsed . '">';
+        if ($group !== 'Main') {
+            echo '<div class="ms-nav-group-label" onclick="this.parentElement.classList.toggle(\'collapsed\')">' . $group . ' <i class="fa fa-chevron-down caret-icon"></i></div>';
+        }
+        echo '<ul class="ms-nav-items">';
+        foreach ($items as $action => $item) {
+            $active = ($highlightAction === $action) ? ' active' : '';
+            $iconPrefix = $item['icon_prefix'] ?? 'fas';
+            echo '<li><a href="' . $modulelink . '&action=' . $action . '" class="' . $active . '"><i class="' . $iconPrefix . ' ' . $item['icon'] . '"></i> ' . $item['label'] . '</a></li>';
+        }
+        echo '</ul>';
+        echo '</div>';
+    }
+
+    echo '</div>';
+
+    // Content area
+    echo '<div class="ms-content">';
+}
+
+/**
+ * Close the admin layout wrapper (ms-content + ms-admin-wrap)
+ * Call at end of each page function instead of manually echoing </div> for tab-content
+ */
+function sms_suite_admin_close()
+{
+    echo '</div>'; // ms-content
+    echo '</div>'; // ms-admin-wrap
 }
 
 /**
@@ -315,6 +510,7 @@ function sms_suite_admin_select2_init()
  */
 function sms_suite_admin_dashboard($vars, $lang)
 {
+    $modulelink = $vars['modulelink'];
     $stats = sms_suite_get_stats();
 
     // Get today's messages
@@ -333,84 +529,184 @@ function sms_suite_admin_dashboard($vars, $lang)
         ->whereIn('status', ['failed', 'rejected', 'undelivered'])
         ->count();
 
-    echo '<div class="row">';
+    // Week messages for trend
+    $weekStart = date('Y-m-d 00:00:00', strtotime('-7 days'));
+    $weekMessages = Capsule::table('mod_sms_messages')
+        ->where('created_at', '>=', $weekStart)
+        ->count();
+
+    // Active gateways count
+    $activeGateways = Capsule::table('mod_sms_gateways')
+        ->where('status', 1)
+        ->whereNull('client_id')
+        ->count();
+
+    // Pending items
+    $pendingRequests = 0;
+    try {
+        $pendingRequests = Capsule::table('mod_sms_sender_id_requests')
+            ->where('status', 'pending')
+            ->count();
+    } catch (\Exception $e) {}
+
+    $pendingClientGw = 0;
+    try {
+        $pendingClientGw = Capsule::table('mod_sms_gateways')
+            ->whereNotNull('client_id')
+            ->where('status', 0)
+            ->count();
+    } catch (\Exception $e) {}
+
+    // Section header
+    echo '<div class="ms-section-header">';
+    echo '<div><h3>Dashboard</h3><p>Overview of your messaging platform</p></div>';
+    echo '<a href="' . $modulelink . '&action=send" class="btn btn-primary"><i class="fa fa-paper-plane"></i> Send Message</a>';
+    echo '</div>';
 
     // Stats cards
+    echo '<div class="ms-stats-row">';
+
     $cards = [
-        ['value' => $stats['total_messages'], 'label' => $lang['total_messages'], 'color' => 'primary', 'icon' => 'fa-envelope'],
-        ['value' => $todayMessages, 'label' => $lang['messages_today'], 'color' => 'info', 'icon' => 'fa-calendar'],
-        ['value' => $stats['total_gateways'], 'label' => $lang['total_gateways'], 'color' => 'success', 'icon' => 'fa-server'],
-        ['value' => $stats['total_campaigns'], 'label' => $lang['total_campaigns'], 'color' => 'warning', 'icon' => 'fa-bullhorn'],
+        ['value' => number_format($stats['total_messages']), 'label' => 'Total Messages', 'icon' => 'fa-envelope', 'color' => 'blue'],
+        ['value' => number_format($todayMessages), 'label' => 'Today', 'sub' => $todayDelivered . ' delivered', 'icon' => 'fa-calendar-check-o', 'color' => 'green'],
+        ['value' => number_format($todayFailed), 'label' => 'Failed Today', 'icon' => 'fa-exclamation-circle', 'color' => 'red'],
+        ['value' => number_format($weekMessages), 'label' => 'This Week', 'icon' => 'fa-bar-chart', 'color' => 'purple'],
+        ['value' => $activeGateways, 'label' => 'Active Gateways', 'icon' => 'fa-server', 'color' => 'cyan'],
+        ['value' => number_format($stats['total_clients']), 'label' => 'Clients', 'icon' => 'fa-users', 'color' => 'amber'],
     ];
 
     foreach ($cards as $card) {
-        echo '<div class="col-md-3">';
-        echo '<div class="panel panel-' . $card['color'] . '">';
-        echo '<div class="panel-heading">';
-        echo '<div class="row">';
-        echo '<div class="col-xs-3"><i class="fa ' . $card['icon'] . ' fa-3x"></i></div>';
-        echo '<div class="col-xs-9 text-right">';
-        echo '<div class="huge">' . number_format($card['value']) . '</div>';
-        echo '<div>' . $card['label'] . '</div>';
-        echo '</div>';
-        echo '</div>';
-        echo '</div>';
-        echo '</div>';
+        echo '<div class="ms-stat-card">';
+        echo '<div class="ms-stat-icon ' . $card['color'] . '"><i class="fa ' . $card['icon'] . '"></i></div>';
+        echo '<div class="ms-stat-info"><h3>' . $card['value'] . '</h3><p>' . $card['label'];
+        if (!empty($card['sub'])) {
+            echo ' <span style="color:#22c55e">(' . $card['sub'] . ')</span>';
+        }
+        echo '</p></div>';
         echo '</div>';
     }
 
     echo '</div>';
 
-    // Recent messages
+    // Alerts for pending items
+    if ($pendingRequests > 0 || $pendingClientGw > 0) {
+        echo '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">';
+        if ($pendingRequests > 0) {
+            echo '<a href="' . $modulelink . '&action=sender_id_requests" class="alert alert-warning" style="flex:1;min-width:200px;margin:0;display:flex;align-items:center;gap:10px;text-decoration:none">';
+            echo '<i class="fa fa-inbox fa-lg"></i> <strong>' . $pendingRequests . '</strong> sender ID request' . ($pendingRequests > 1 ? 's' : '') . ' pending approval';
+            echo '</a>';
+        }
+        if ($pendingClientGw > 0) {
+            echo '<a href="' . $modulelink . '&action=gateways" class="alert alert-info" style="flex:1;min-width:200px;margin:0;display:flex;align-items:center;gap:10px;text-decoration:none">';
+            echo '<i class="fab fa-whatsapp fa-lg"></i> <strong>' . $pendingClientGw . '</strong> client gateway' . ($pendingClientGw > 1 ? 's' : '') . ' awaiting approval';
+            echo '</a>';
+        }
+        echo '</div>';
+    }
+
     echo '<div class="row">';
+
+    // Recent messages (left)
     echo '<div class="col-md-8">';
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">Recent Messages</h3></div>';
-    echo '<div class="panel-body">';
+    echo '<div class="panel-heading" style="display:flex;align-items:center;justify-content:space-between">';
+    echo '<h3 class="panel-title"><i class="fa fa-clock-o"></i> Recent Messages</h3>';
+    echo '<a href="' . $modulelink . '&action=messages" class="btn btn-xs btn-default">View All</a>';
+    echo '</div>';
+    echo '<div class="panel-body" style="padding:0">';
 
-    $recentMessages = Capsule::table('mod_sms_messages')
-        ->orderBy('created_at', 'desc')
+    $recentMessages = Capsule::table('mod_sms_messages as m')
+        ->leftJoin('mod_sms_gateways as g', 'm.gateway_id', '=', 'g.id')
+        ->orderBy('m.created_at', 'desc')
         ->limit(10)
+        ->select('m.*', 'g.name as gateway_name', 'g.type as gateway_type')
         ->get();
 
     if (count($recentMessages) > 0) {
-        echo '<table class="table table-striped">';
-        echo '<thead><tr><th>To</th><th>Status</th><th>Gateway</th><th>Date</th></tr></thead>';
+        echo '<table class="table">';
+        echo '<thead><tr><th>Recipient</th><th>Channel</th><th>Status</th><th>Gateway</th><th>Date</th></tr></thead>';
         echo '<tbody>';
         foreach ($recentMessages as $msg) {
             $statusClass = sms_suite_status_class($msg->status);
+            $channel = $msg->channel ?? 'sms';
+            $channelIcon = $channel === 'whatsapp' ? 'fab fa-whatsapp' : ($channel === 'telegram' ? 'fab fa-telegram' : 'fas fa-comment');
+            $channelColor = $channel === 'whatsapp' ? '#25d366' : ($channel === 'telegram' ? '#0088cc' : '#6b7280');
+            $gwName = $msg->gateway_name ? htmlspecialchars($msg->gateway_name) : '#' . (int)($msg->gateway_id ?: 0);
+            $timeAgo = sms_suite_time_ago($msg->created_at);
+            $direction = ($msg->direction ?? 'outbound') === 'inbound' ? '<i class="fas fa-arrow-down" style="color:#3b82f6" title="Inbound"></i>' : '<i class="fas fa-arrow-up" style="color:#22c55e" title="Outbound"></i>';
+
             echo '<tr>';
-            echo '<td>' . htmlspecialchars($msg->to_number, ENT_QUOTES, 'UTF-8') . '</td>';
-            echo '<td><span class="label label-' . htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars(ucfirst($msg->status), ENT_QUOTES, 'UTF-8') . '</span></td>';
-            echo '<td>' . (int)($msg->gateway_id ?: 0) . '</td>';
-            echo '<td>' . htmlspecialchars($msg->created_at, ENT_QUOTES, 'UTF-8') . '</td>';
+            echo '<td>' . $direction . ' <span style="font-family:monospace;font-size:12px">' . htmlspecialchars($msg->to_number ?? '') . '</span></td>';
+            echo '<td><i class="' . $channelIcon . '" style="color:' . $channelColor . '"></i> ' . ucfirst($channel) . '</td>';
+            echo '<td><span class="label label-' . $statusClass . '">' . ucfirst($msg->status ?? 'unknown') . '</span></td>';
+            echo '<td><span style="font-size:12px">' . $gwName . '</span></td>';
+            echo '<td title="' . htmlspecialchars($msg->created_at ?? '') . '"><span style="font-size:12px;color:#64748b">' . $timeAgo . '</span></td>';
             echo '</tr>';
         }
         echo '</tbody>';
         echo '</table>';
     } else {
-        echo '<p class="text-muted">No messages yet.</p>';
+        echo '<div style="padding:40px;text-align:center;color:#94a3b8"><i class="fa fa-inbox fa-3x" style="margin-bottom:10px;display:block"></i>No messages yet</div>';
     }
 
     echo '</div>';
     echo '</div>';
     echo '</div>';
 
-    // Quick actions
+    // Right column
     echo '<div class="col-md-4">';
+
+    // Quick actions
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title">' . $lang['quick_links'] . '</h3></div>';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-bolt"></i> Quick Actions</h3></div>';
     echo '<div class="panel-body">';
-    echo '<a href="' . $vars['modulelink'] . '&action=gateways" class="btn btn-default btn-block"><i class="fa fa-plus"></i> Add Gateway</a>';
-    echo '<a href="' . $vars['modulelink'] . '&action=sender_ids" class="btn btn-default btn-block"><i class="fa fa-check"></i> Manage Sender IDs</a>';
-    echo '<a href="' . $vars['modulelink'] . '&action=messages" class="btn btn-default btn-block"><i class="fa fa-search"></i> Search Messages</a>';
-    echo '<a href="' . $vars['modulelink'] . '&action=reports" class="btn btn-default btn-block"><i class="fa fa-bar-chart"></i> View Reports</a>';
+    echo '<div class="ms-quick-actions">';
+    echo '<a href="' . $modulelink . '&action=send" class="ms-quick-btn"><i class="fa fa-paper-plane"></i> Send Message</a>';
+    echo '<a href="' . $modulelink . '&action=campaigns&new=1" class="ms-quick-btn"><i class="fa fa-bullhorn"></i> New Campaign</a>';
+    echo '<a href="' . $modulelink . '&action=gateway_edit&id=new" class="ms-quick-btn"><i class="fa fa-plus"></i> Add Gateway</a>';
+    echo '<a href="' . $modulelink . '&action=reports" class="ms-quick-btn"><i class="fa fa-bar-chart"></i> View Reports</a>';
+    echo '<a href="' . $modulelink . '&action=contacts" class="ms-quick-btn"><i class="fa fa-address-book"></i> Contacts</a>';
+    echo '<a href="' . $modulelink . '&action=chatbot_settings" class="ms-quick-btn"><i class="fas fa-robot"></i> AI Chatbot</a>';
     echo '</div>';
     echo '</div>';
     echo '</div>';
 
+    // Delivery rate donut (CSS only)
+    $totalToday = max($todayMessages, 1);
+    $deliveryRate = $todayMessages > 0 ? round(($todayDelivered / $totalToday) * 100) : 0;
+    $failRate = $todayMessages > 0 ? round(($todayFailed / $totalToday) * 100) : 0;
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-pie-chart"></i> Today\'s Delivery</h3></div>';
+    echo '<div class="panel-body text-center">';
+
+    if ($todayMessages > 0) {
+        echo '<div style="display:inline-block;position:relative;width:120px;height:120px;margin-bottom:12px">';
+        echo '<svg viewBox="0 0 36 36" style="transform:rotate(-90deg)">';
+        $dashDelivered = $deliveryRate * 0.01 * 100;
+        $dashFailed = $failRate * 0.01 * 100;
+        echo '<circle cx="18" cy="18" r="15.91" fill="none" stroke="#e2e8f0" stroke-width="3"></circle>';
+        echo '<circle cx="18" cy="18" r="15.91" fill="none" stroke="#22c55e" stroke-width="3" stroke-dasharray="' . $dashDelivered . ' ' . (100 - $dashDelivered) . '" stroke-linecap="round"></circle>';
+        echo '<circle cx="18" cy="18" r="15.91" fill="none" stroke="#ef4444" stroke-width="3" stroke-dasharray="' . $dashFailed . ' ' . (100 - $dashFailed) . '" stroke-dashoffset="-' . $dashDelivered . '" stroke-linecap="round"></circle>';
+        echo '</svg>';
+        echo '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:22px;font-weight:700;color:#1e293b">' . $deliveryRate . '%</div>';
+        echo '</div>';
+
+        echo '<div style="display:flex;justify-content:center;gap:16px;font-size:12px;color:#64748b">';
+        echo '<span><i class="fa fa-circle" style="color:#22c55e;font-size:8px"></i> Delivered ' . $todayDelivered . '</span>';
+        echo '<span><i class="fa fa-circle" style="color:#ef4444;font-size:8px"></i> Failed ' . $todayFailed . '</span>';
+        echo '</div>';
+    } else {
+        echo '<div style="padding:20px;color:#94a3b8"><i class="fa fa-moon-o fa-2x" style="margin-bottom:8px;display:block"></i>No messages today</div>';
+    }
+
     echo '</div>';
-    echo '</div>'; // Close tab-content
+    echo '</div>';
+
+    echo '</div>'; // col-md-4
+    echo '</div>'; // row
+    echo '</div>'; // Close ms-content
+    echo '</div>'; // Close ms-admin-wrap
 }
 
 /**
@@ -507,7 +803,7 @@ function sms_suite_admin_gateways($vars, $lang)
 
     echo '</div>';
     echo '</div>';
-    echo '</div>'; // Close tab-content
+    echo '</div>'; // Close ms-content
 
     // JavaScript for gateway actions
     echo '<script>
@@ -544,7 +840,7 @@ function sms_suite_admin_gateways($vars, $lang)
     if (count($clientGateways) > 0) {
         echo '<div class="panel panel-default" style="margin-top: 20px;">';
         echo '<div class="panel-heading">';
-        echo '<h3 class="panel-title"><i class="fa fa-whatsapp"></i> Client WhatsApp Gateways</h3>';
+        echo '<h3 class="panel-title"><i class="fab fa-whatsapp"></i> Client WhatsApp Gateways</h3>';
         echo '</div>';
         echo '<div class="panel-body">';
         echo '<table class="table table-striped">';
@@ -698,6 +994,7 @@ function sms_suite_admin_gateway_edit($vars, $lang)
         'vonage' => ['name' => 'Vonage (Nexmo)', 'channels' => ['sms']],
         'infobip' => ['name' => 'Infobip', 'channels' => ['sms', 'whatsapp']],
         'meta_whatsapp' => ['name' => 'Meta WhatsApp Cloud API', 'channels' => ['whatsapp']],
+        'telegram' => ['name' => 'Telegram Bot', 'channels' => ['telegram']],
     ];
 
     // Current values
@@ -815,6 +1112,70 @@ function sms_suite_admin_gateway_edit($vars, $lang)
     }
     echo '</div>';
 
+    // Telegram Set Webhook section
+    $tgDisplay = ($currentType === 'telegram') ? 'block' : 'none';
+    echo '<div id="telegram_webhook_section" style="display:' . $tgDisplay . '">';
+    echo '<hr><h4><i class="fa fa-paper-plane text-info"></i> Telegram Webhook Setup</h4>';
+    if (!$isNew) {
+        $tgWebhookUrl = rtrim($GLOBALS['CONFIG']['SystemURL'], '/') . '/modules/addons/sms_suite/webhook.php?gateway=telegram&gw_id=' . $id;
+        echo '<div class="alert alert-info">';
+        echo '<i class="fa fa-info-circle"></i> Click the button below to register this webhook URL with Telegram so your bot can receive messages.';
+        echo '</div>';
+        echo '<div class="form-group">';
+        echo '<label class="col-sm-3 control-label">Telegram Webhook URL</label>';
+        echo '<div class="col-sm-6">';
+        echo '<input type="text" class="form-control" value="' . htmlspecialchars($tgWebhookUrl) . '" readonly onclick="this.select()">';
+        echo '</div>';
+        echo '</div>';
+        echo '<div class="form-group">';
+        echo '<div class="col-sm-offset-3 col-sm-6">';
+        echo '<button type="button" onclick="setTelegramWebhook(' . (int)$id . ')" class="btn btn-info">';
+        echo '<i class="fa fa-paper-plane"></i> Set Webhook with Telegram';
+        echo '</button>';
+        echo ' <button type="button" onclick="setTelegramWebhook(' . (int)$id . ', true)" class="btn btn-default">';
+        echo '<i class="fa fa-times"></i> Remove Webhook';
+        echo '</button>';
+        echo '<div id="tg_status" style="margin-top:10px"></div>';
+        echo '</div>';
+        echo '</div>';
+    } else {
+        echo '<div class="alert alert-warning">';
+        echo '<i class="fa fa-exclamation-triangle"></i> Save the gateway first, then you can set up the Telegram webhook.';
+        echo '</div>';
+    }
+    echo '</div>';
+
+    // Messenger Subscribe Webhook section
+    $msgrDisplay = ($currentType === 'messenger') ? 'block' : 'none';
+    echo '<div id="messenger_webhook_section" style="display:' . $msgrDisplay . '">';
+    echo '<hr><h4><i class="fa fa-facebook text-primary"></i> Messenger Webhook Setup</h4>';
+    if (!$isNew) {
+        $msgrWebhookUrl = rtrim($GLOBALS['CONFIG']['SystemURL'], '/') . '/modules/addons/sms_suite/webhook.php?gateway=messenger&gw_id=' . $id;
+        echo '<div class="alert alert-info">';
+        echo '<i class="fa fa-info-circle"></i> Click "Subscribe" to register your app with the Facebook Page so it can receive messages. ';
+        echo 'Make sure you have also set the webhook URL in your Meta App dashboard to the URL below.';
+        echo '</div>';
+        echo '<div class="form-group">';
+        echo '<label class="col-sm-3 control-label">Messenger Webhook URL</label>';
+        echo '<div class="col-sm-6">';
+        echo '<input type="text" class="form-control" value="' . htmlspecialchars($msgrWebhookUrl) . '" readonly onclick="this.select()">';
+        echo '</div>';
+        echo '</div>';
+        echo '<div class="form-group">';
+        echo '<div class="col-sm-offset-3 col-sm-6">';
+        echo '<button type="button" onclick="subscribeMessengerWebhook(' . (int)$id . ')" class="btn btn-primary">';
+        echo '<i class="fa fa-check-circle"></i> Subscribe to Page Messages';
+        echo '</button>';
+        echo '<div id="msgr_status" style="margin-top:10px"></div>';
+        echo '</div>';
+        echo '</div>';
+    } else {
+        echo '<div class="alert alert-warning">';
+        echo '<i class="fa fa-exclamation-triangle"></i> Save the gateway first, then you can subscribe to page messages.';
+        echo '</div>';
+    }
+    echo '</div>';
+
     // Rate limiting
     echo '<hr><h4>Rate Limiting</h4>';
     echo '<div class="form-group">';
@@ -918,6 +1279,16 @@ function sms_suite_admin_gateway_edit($vars, $lang)
         if (esSection) {
             esSection.style.display = (type === "meta_whatsapp") ? "block" : "none";
         }
+        // Toggle Telegram webhook section
+        var tgSection = document.getElementById("telegram_webhook_section");
+        if (tgSection) {
+            tgSection.style.display = (type === "telegram") ? "block" : "none";
+        }
+        // Toggle Messenger webhook section
+        var msgrSection = document.getElementById("messenger_webhook_section");
+        if (msgrSection) {
+            msgrSection.style.display = (type === "messenger") ? "block" : "none";
+        }
     }
     </script>';
 
@@ -1003,6 +1374,52 @@ function sms_suite_admin_gateway_edit($vars, $lang)
         function esStatus(html) {
             var el = document.getElementById("es_status");
             if (el) el.innerHTML = html;
+        }
+
+        function subscribeMessengerWebhook(gatewayId) {
+            var el = document.getElementById("msgr_status");
+            if (el) el.innerHTML = "<i class=\"fa fa-spinner fa-spin\"></i> Subscribing to page messages...";
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "' . htmlspecialchars($modulelink) . '&action=ajax_messenger_subscribe", true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    try {
+                        var resp = JSON.parse(xhr.responseText);
+                        if (resp.success) {
+                            if (el) el.innerHTML = "<i class=\"fa fa-check-circle text-success\"></i> " + (resp.description || "Subscribed successfully!");
+                        } else {
+                            if (el) el.innerHTML = "<i class=\"fa fa-times text-danger\"></i> " + (resp.error || "Failed");
+                        }
+                    } catch(e) {
+                        if (el) el.innerHTML = "<i class=\"fa fa-times text-danger\"></i> Unexpected response";
+                    }
+                }
+            };
+            xhr.send("gateway_id=" + gatewayId + "&csrf_token=' . $csrfToken . '");
+        }
+
+        function setTelegramWebhook(gatewayId, remove) {
+            var el = document.getElementById("tg_status");
+            if (el) el.innerHTML = "<i class=\"fa fa-spinner fa-spin\"></i> " + (remove ? "Removing" : "Setting") + " webhook...";
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "' . htmlspecialchars($modulelink) . '&action=ajax_telegram_set_webhook", true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    try {
+                        var resp = JSON.parse(xhr.responseText);
+                        if (resp.success) {
+                            if (el) el.innerHTML = "<i class=\"fa fa-check-circle text-success\"></i> " + (resp.description || "Webhook set successfully!");
+                        } else {
+                            if (el) el.innerHTML = "<i class=\"fa fa-times text-danger\"></i> " + (resp.error || "Failed");
+                        }
+                    } catch(e) {
+                        if (el) el.innerHTML = "<i class=\"fa fa-times text-danger\"></i> Unexpected response";
+                    }
+                }
+            };
+            xhr.send("gateway_id=" + gatewayId + "&remove=" + (remove ? "1" : "0") + "&csrf_token=' . $csrfToken . '");
         }
         </script>';
     }
@@ -1218,6 +1635,10 @@ function sms_suite_get_all_gateway_fields()
             ['name' => 'phone_number_id', 'label' => 'Phone Number ID', 'type' => 'text', 'required' => true, 'description' => 'From Meta Developer Dashboard → WhatsApp → API Setup'],
             ['name' => 'access_token', 'label' => 'Permanent Access Token', 'type' => 'password', 'required' => true, 'description' => 'System user token with whatsapp_business_messaging permission'],
             ['name' => 'waba_id', 'label' => 'WhatsApp Business Account ID', 'type' => 'text', 'required' => true, 'description' => 'WABA ID from Meta Business Manager'],
+        ],
+        'telegram' => [
+            ['name' => 'bot_token', 'label' => 'Bot Token', 'type' => 'password', 'required' => true, 'description' => 'Token from @BotFather on Telegram'],
+            ['name' => 'bot_username', 'label' => 'Bot Username', 'type' => 'text', 'required' => true, 'placeholder' => 'YourBot (without @)', 'description' => 'Your bot\'s username without the @ sign'],
         ],
     ];
 }
@@ -4013,6 +4434,23 @@ function sms_suite_status_class($status)
 }
 
 /**
+ * Human-readable time ago format
+ */
+function sms_suite_time_ago($datetime)
+{
+    if (empty($datetime)) return 'N/A';
+    $now = time();
+    $ts = strtotime($datetime);
+    if ($ts === false) return htmlspecialchars($datetime);
+    $diff = $now - $ts;
+    if ($diff < 60) return 'just now';
+    if ($diff < 3600) return floor($diff / 60) . 'm ago';
+    if ($diff < 86400) return floor($diff / 3600) . 'h ago';
+    if ($diff < 604800) return floor($diff / 86400) . 'd ago';
+    return date('M j', $ts);
+}
+
+/**
  * Client SMS Settings page - Manage individual client's sender ID and gateway
  */
 function sms_suite_admin_client_settings($vars, $lang)
@@ -4678,7 +5116,7 @@ function sms_suite_admin_notifications($vars, $lang)
     echo '<input type="hidden" name="create_defaults" value="1">';
     echo '<button type="submit" class="btn btn-xs btn-default">Create Default SMS Templates</button>';
     echo '</form>';
-    echo '<button type="button" class="btn btn-xs btn-success" data-toggle="modal" data-target="#createWaDefaultsModal"><i class="fa fa-whatsapp"></i> Create Default WA Templates</button>';
+    echo '<button type="button" class="btn btn-xs btn-success" data-toggle="modal" data-target="#createWaDefaultsModal"><i class="fab fa-whatsapp"></i> Create Default WA Templates</button>';
     echo '</div>';
     echo '</h3>';
     echo '</div>';
@@ -4718,7 +5156,7 @@ function sms_suite_admin_notifications($vars, $lang)
                 echo '<input type="hidden" name="template_id" value="' . $t->id . '">';
                 echo '<input type="hidden" name="wa_enabled" value="' . ($waEnabled ? '0' : '1') . '">';
                 echo '<button type="submit" class="btn btn-xs btn-' . $waClass . '" title="' . ($waEnabled ? 'Click to disable WhatsApp' : 'Click to enable WhatsApp') . '">';
-                echo '<i class="fa fa-whatsapp"></i> ' . ($waEnabled ? 'Enabled' : 'Disabled');
+                echo '<i class="fab fa-whatsapp"></i> ' . ($waEnabled ? 'Enabled' : 'Disabled');
                 echo '</button>';
                 echo '</form>';
                 if ($hasMapping) {
@@ -4727,7 +5165,7 @@ function sms_suite_admin_notifications($vars, $lang)
                 echo '</td>';
                 echo '<td>';
                 echo '<button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->message), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->status), ENT_QUOTES, 'UTF-8') . ')">Edit SMS</button> ';
-                echo '<button class="btn btn-xs btn-info" onclick="editWaMapping(' . htmlspecialchars(json_encode($t->notification_type), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ')"><i class="fa fa-whatsapp"></i> Mapping</button>';
+                echo '<button class="btn btn-xs btn-info" onclick="editWaMapping(' . htmlspecialchars(json_encode($t->notification_type), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ')"><i class="fab fa-whatsapp"></i> Mapping</button>';
                 echo '</td>';
                 echo '</tr>';
             }
@@ -4785,7 +5223,7 @@ function sms_suite_admin_notifications($vars, $lang)
                     <input type="hidden" name="notification_type" id="wa_map_notif_type">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
-                        <h4 class="modal-title"><i class="fa fa-whatsapp"></i> WhatsApp Mapping: <span id="wa_map_title"></span></h4>
+                        <h4 class="modal-title"><i class="fab fa-whatsapp"></i> WhatsApp Mapping: <span id="wa_map_title"></span></h4>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
@@ -4832,7 +5270,7 @@ function sms_suite_admin_notifications($vars, $lang)
                     <input type="hidden" name="create_wa_defaults" value="1">
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal">&times;</button>
-                        <h4 class="modal-title"><i class="fa fa-whatsapp"></i> Create Default WhatsApp Templates</h4>
+                        <h4 class="modal-title"><i class="fab fa-whatsapp"></i> Create Default WhatsApp Templates</h4>
                     </div>
                     <div class="modal-body">
                         <p>This will create new <code>sms_suite_*</code> WhatsApp templates and submit them to Meta for approval:</p>
@@ -4863,7 +5301,7 @@ function sms_suite_admin_notifications($vars, $lang)
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-success"><i class="fa fa-whatsapp"></i> Create Templates</button>
+                        <button type="submit" class="btn btn-success"><i class="fab fa-whatsapp"></i> Create Templates</button>
                     </div>
                 </form>
             </div>
@@ -9028,7 +9466,7 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
 
     // Page header
     echo '<div class="panel panel-default">';
-    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fa fa-whatsapp"></i> WhatsApp Message Templates (Meta Business API)</h3></div>';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fab fa-whatsapp"></i> WhatsApp Message Templates (Meta Business API)</h3></div>';
     echo '<div class="panel-body">';
 
     // Show messages
@@ -9136,7 +9574,7 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
 
     echo '<div class="modal-header">';
     echo '<button type="button" class="close" data-dismiss="modal">&times;</button>';
-    echo '<h4 class="modal-title"><i class="fa fa-whatsapp"></i> Create WhatsApp Template</h4>';
+    echo '<h4 class="modal-title"><i class="fab fa-whatsapp"></i> Create WhatsApp Template</h4>';
     echo '</div>';
 
     echo '<div class="modal-body">';
@@ -9190,4 +9628,833 @@ function sms_suite_admin_whatsapp_templates($vars, $lang)
     echo '</div></div></div>';
 
     echo '</div>'; // tab-content wrapper
+}
+
+/**
+ * Admin Inbox - Unified conversation list from system gateways
+ */
+function sms_suite_admin_inbox($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $channelFilter = $_GET['channel'] ?? 'all';
+    $search = trim($_GET['search'] ?? '');
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $perPage = 30;
+
+    // Channel counts
+    $countQuery = Capsule::table('mod_sms_chatbox')
+        ->join('mod_sms_gateways', 'mod_sms_chatbox.gateway_id', '=', 'mod_sms_gateways.id')
+        ->whereNull('mod_sms_gateways.client_id');
+    // Also include SMS chatboxes without gateway_id (system SMS)
+    $channelCounts = Capsule::table('mod_sms_chatbox')
+        ->selectRaw("channel, COUNT(*) as cnt")
+        ->where(function($q) {
+            $q->whereIn('gateway_id', function($sub) {
+                $sub->select('id')->from('mod_sms_gateways')->whereNull('client_id');
+            })->orWhereNull('gateway_id');
+        })
+        ->groupBy('channel')
+        ->pluck('cnt', 'channel')
+        ->toArray();
+    $totalAll = array_sum($channelCounts);
+
+    // Build main query
+    $query = Capsule::table('mod_sms_chatbox')
+        ->where(function($q) {
+            $q->whereIn('mod_sms_chatbox.gateway_id', function($sub) {
+                $sub->select('id')->from('mod_sms_gateways')->whereNull('client_id');
+            })->orWhereNull('mod_sms_chatbox.gateway_id');
+        });
+
+    if ($channelFilter !== 'all') {
+        $query->where('mod_sms_chatbox.channel', $channelFilter);
+    }
+    if (!empty($search)) {
+        $query->where(function($q) use ($search) {
+            $q->where('mod_sms_chatbox.phone', 'like', "%{$search}%")
+              ->orWhere('mod_sms_chatbox.contact_name', 'like', "%{$search}%");
+        });
+    }
+
+    $total = (clone $query)->count();
+    $conversations = $query->orderBy('mod_sms_chatbox.last_message_at', 'desc')
+        ->offset(($page - 1) * $perPage)
+        ->limit($perPage)
+        ->get();
+    $totalPages = ceil($total / $perPage);
+
+    // Page header
+    echo '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">';
+    echo '<h2><i class="fa fa-inbox"></i> Inbox</h2>';
+    echo '</div>';
+
+    // Channel filter tabs
+    echo '<div class="panel panel-default" style="margin-bottom:0;border-bottom:none;border-radius:4px 4px 0 0;">';
+    echo '<div class="panel-body" style="padding:10px 15px;">';
+    echo '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">';
+
+    // Channel buttons
+    echo '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
+    $activeClass = ($channelFilter === 'all') ? 'btn-primary' : 'btn-default';
+    echo '<a href="' . $modulelink . '&action=inbox&channel=all' . (!empty($search) ? '&search=' . urlencode($search) : '') . '" class="btn btn-sm ' . $activeClass . '">';
+    echo '<i class="fa fa-comments"></i> All';
+    if ($totalAll) echo ' <span class="badge">' . $totalAll . '</span>';
+    echo '</a>';
+
+    $channelMeta = [
+        'sms' => ['icon' => 'fa fa-sms', 'label' => 'SMS', 'btn' => 'btn-info'],
+        'whatsapp' => ['icon' => 'fa fa-whatsapp', 'label' => 'WhatsApp', 'btn' => 'btn-success'],
+        'telegram' => ['icon' => 'fa fa-paper-plane', 'label' => 'Telegram', 'btn' => 'btn-info'],
+        'messenger' => ['icon' => 'fa fa-facebook', 'label' => 'Messenger', 'btn' => 'btn-primary'],
+    ];
+    foreach ($channelMeta as $ch => $meta) {
+        if (($channelCounts[$ch] ?? 0) > 0) {
+            $active = ($channelFilter === $ch) ? $meta['btn'] : 'btn-default';
+            echo '<a href="' . $modulelink . '&action=inbox&channel=' . $ch . (!empty($search) ? '&search=' . urlencode($search) : '') . '" class="btn btn-sm ' . $active . '">';
+            echo '<i class="' . $meta['icon'] . '"></i> ' . $meta['label'] . ' <span class="badge">' . $channelCounts[$ch] . '</span>';
+            echo '</a>';
+        }
+    }
+    echo '</div>';
+
+    // Search form
+    echo '<form method="get" style="display:flex;gap:4px;margin:0;">';
+    echo '<input type="hidden" name="module" value="sms_suite">';
+    echo '<input type="hidden" name="action" value="inbox">';
+    echo '<input type="hidden" name="channel" value="' . htmlspecialchars($channelFilter) . '">';
+    echo '<input type="text" name="search" class="form-control input-sm" placeholder="Search..." value="' . htmlspecialchars($search) . '" style="width:180px;">';
+    echo '<button type="submit" class="btn btn-sm btn-default"><i class="fa fa-search"></i></button>';
+    if (!empty($search)) {
+        echo '<a href="' . $modulelink . '&action=inbox&channel=' . urlencode($channelFilter) . '" class="btn btn-sm btn-danger" title="Clear"><i class="fa fa-times"></i></a>';
+    }
+    echo '</form>';
+
+    echo '</div>';
+    echo '</div></div>';
+
+    // Conversation list
+    echo '<div class="panel panel-default" style="border-radius:0 0 4px 4px;margin-top:0;">';
+
+    if (count($conversations) > 0) {
+        echo '<table class="table table-hover" style="margin-bottom:0;">';
+        echo '<tbody>';
+        foreach ($conversations as $conv) {
+            $isUnread = ($conv->unread_count > 0);
+            $rowStyle = $isUnread ? 'background:#f0f7ff;font-weight:600;' : '';
+            $channelIcons = [
+                'sms' => '<span style="display:inline-block;width:32px;height:32px;border-radius:50%;background:#667eea;color:#fff;text-align:center;line-height:32px;font-size:14px;"><i class="fa fa-sms"></i></span>',
+                'whatsapp' => '<span style="display:inline-block;width:32px;height:32px;border-radius:50%;background:#25D366;color:#fff;text-align:center;line-height:32px;font-size:14px;"><i class="fa fa-whatsapp"></i></span>',
+                'telegram' => '<span style="display:inline-block;width:32px;height:32px;border-radius:50%;background:#0088cc;color:#fff;text-align:center;line-height:32px;font-size:14px;"><i class="fa fa-paper-plane"></i></span>',
+                'messenger' => '<span style="display:inline-block;width:32px;height:32px;border-radius:50%;background:#006AFF;color:#fff;text-align:center;line-height:32px;font-size:14px;"><i class="fa fa-facebook"></i></span>',
+            ];
+            $icon = $channelIcons[$conv->channel] ?? $channelIcons['sms'];
+            $name = $conv->contact_name ? htmlspecialchars($conv->contact_name) . ' <small style="color:#94a3b8;">(' . htmlspecialchars($conv->phone) . ')</small>' : htmlspecialchars($conv->phone);
+            $lastMsg = htmlspecialchars(mb_substr($conv->last_message ?? '', 0, 80));
+            $timeAgo = sms_suite_time_ago($conv->last_message_at);
+
+            echo '<tr style="cursor:pointer;' . $rowStyle . '" onclick="window.location=\'' . $modulelink . '&action=inbox_conversation&id=' . $conv->id . '\'">';
+            echo '<td style="width:50px;vertical-align:middle;">' . $icon . '</td>';
+            echo '<td style="vertical-align:middle;">';
+            echo '<div>' . $name;
+            if ($isUnread) {
+                echo ' <span class="label label-primary" style="font-size:.7em;">' . $conv->unread_count . ' new</span>';
+            }
+            echo '</div>';
+            echo '<div style="color:#64748b;font-size:.85em;font-weight:400;margin-top:2px;">' . $lastMsg . '</div>';
+            echo '</td>';
+            echo '<td style="width:100px;text-align:right;vertical-align:middle;white-space:nowrap;color:#94a3b8;font-size:.85em;">' . $timeAgo . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+
+        // Pagination
+        if ($totalPages > 1) {
+            echo '<div class="panel-footer text-center">';
+            echo '<nav><ul class="pagination" style="margin:0;">';
+            if ($page > 1) {
+                echo '<li><a href="' . $modulelink . '&action=inbox&channel=' . urlencode($channelFilter) . '&search=' . urlencode($search) . '&page=' . ($page - 1) . '">&laquo;</a></li>';
+            }
+            for ($i = max(1, $page - 3); $i <= min($totalPages, $page + 3); $i++) {
+                $cls = ($i === $page) ? 'active' : '';
+                echo '<li class="' . $cls . '"><a href="' . $modulelink . '&action=inbox&channel=' . urlencode($channelFilter) . '&search=' . urlencode($search) . '&page=' . $i . '">' . $i . '</a></li>';
+            }
+            if ($page < $totalPages) {
+                echo '<li><a href="' . $modulelink . '&action=inbox&channel=' . urlencode($channelFilter) . '&search=' . urlencode($search) . '&page=' . ($page + 1) . '">&raquo;</a></li>';
+            }
+            echo '</ul></nav></div>';
+        }
+    } else {
+        echo '<div class="panel-body text-center" style="padding:50px 20px;color:#94a3b8;">';
+        echo '<i class="fa fa-comments" style="font-size:3em;"></i>';
+        if (!empty($search)) {
+            echo '<h4 style="margin-top:15px;">No conversations matching "' . htmlspecialchars($search) . '"</h4>';
+        } elseif ($channelFilter !== 'all') {
+            echo '<h4 style="margin-top:15px;">No ' . htmlspecialchars($channelFilter) . ' conversations yet</h4>';
+        } else {
+            echo '<h4 style="margin-top:15px;">No conversations yet</h4>';
+            echo '<p>Conversations will appear here when messages are sent or received.</p>';
+        }
+        echo '</div>';
+    }
+
+    echo '</div>';
+}
+
+/**
+ * Admin Inbox - Single conversation view with reply
+ */
+function sms_suite_admin_inbox_conversation($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+    $chatboxId = (int)($_GET['id'] ?? 0);
+
+    if (!$chatboxId) {
+        echo '<div class="alert alert-danger">Conversation ID required.</div>';
+        return;
+    }
+
+    $chatbox = Capsule::table('mod_sms_chatbox')->where('id', $chatboxId)->first();
+    if (!$chatbox) {
+        echo '<div class="alert alert-danger">Conversation not found.</div>';
+        return;
+    }
+
+    // Handle reply submission
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['send_reply'])) {
+        $replyMsg = trim($_POST['message'] ?? '');
+        if (!empty($replyMsg)) {
+            require_once __DIR__ . '/../lib/WhatsApp/WhatsAppService.php';
+            $result = \SMSSuite\WhatsApp\WhatsAppService::replyToConversation($chatboxId, $replyMsg);
+            if ($result['success']) {
+                // Refresh chatbox
+                $chatbox = Capsule::table('mod_sms_chatbox')->where('id', $chatboxId)->first();
+                echo '<div class="alert alert-success"><i class="fa fa-check"></i> Message sent successfully.</div>';
+            } else {
+                echo '<div class="alert alert-danger"><i class="fa fa-times"></i> ' . htmlspecialchars($result['error'] ?? 'Failed to send message') . '</div>';
+            }
+        }
+    }
+
+    // Mark as read
+    if ($chatbox->unread_count > 0) {
+        Capsule::table('mod_sms_chatbox')->where('id', $chatboxId)->update(['unread_count' => 0]);
+    }
+
+    // Load messages via chatbox_messages join
+    $messages = Capsule::table('mod_sms_chatbox_messages')
+        ->leftJoin('mod_sms_messages', 'mod_sms_chatbox_messages.message_id', '=', 'mod_sms_messages.id')
+        ->where('mod_sms_chatbox_messages.chatbox_id', $chatboxId)
+        ->select([
+            'mod_sms_chatbox_messages.*',
+            'mod_sms_messages.message',
+            'mod_sms_messages.status as msg_status',
+            'mod_sms_messages.to_number',
+            'mod_sms_messages.sender_id',
+        ])
+        ->orderBy('mod_sms_chatbox_messages.created_at', 'asc')
+        ->limit(200)
+        ->get();
+
+    $channel = $chatbox->channel ?? 'sms';
+    $channelColors = ['sms' => '#667eea', 'whatsapp' => '#25D366', 'telegram' => '#0088cc', 'messenger' => '#006AFF'];
+    $channelColor = $channelColors[$channel] ?? '#667eea';
+    $channelIcons = ['sms' => 'fa fa-sms', 'whatsapp' => 'fa fa-whatsapp', 'telegram' => 'fa fa-paper-plane', 'messenger' => 'fa fa-facebook'];
+    $channelIcon = $channelIcons[$channel] ?? 'fa fa-sms';
+
+    // Check WhatsApp 24h window
+    $windowExpired = false;
+    if ($channel === 'whatsapp' && $chatbox->last_message_at) {
+        // Find last inbound message time
+        $lastInbound = Capsule::table('mod_sms_chatbox_messages')
+            ->where('chatbox_id', $chatboxId)
+            ->where('direction', 'inbound')
+            ->orderBy('created_at', 'desc')
+            ->value('created_at');
+        if ($lastInbound && (time() - strtotime($lastInbound)) > 86400) {
+            $windowExpired = true;
+        }
+    }
+
+    // Header
+    echo '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">';
+    echo '<a href="' . $modulelink . '&action=inbox" class="btn btn-default btn-sm"><i class="fa fa-arrow-left"></i> Back to Inbox</a>';
+    echo '<h3 style="margin:0;font-size:1.1em;">';
+    echo '<span style="display:inline-block;width:28px;height:28px;border-radius:50%;background:' . $channelColor . ';color:#fff;text-align:center;line-height:28px;font-size:12px;margin-right:6px;"><i class="' . $channelIcon . '"></i></span>';
+    if ($chatbox->contact_name) {
+        echo htmlspecialchars($chatbox->contact_name) . ' <small style="color:#94a3b8;">(' . htmlspecialchars($chatbox->phone) . ')</small>';
+    } else {
+        echo htmlspecialchars($chatbox->phone);
+    }
+    echo ' <span class="label" style="background:' . $channelColor . ';color:#fff;font-size:.7em;margin-left:4px;">' . strtoupper($channel) . '</span>';
+    echo '</h3>';
+    echo '</div>';
+
+    if ($windowExpired) {
+        echo '<div class="alert alert-warning"><i class="fa fa-clock-o"></i> <strong>24-hour window expired.</strong> The last customer message was over 24 hours ago. You must use a template message to re-engage.</div>';
+    }
+
+    // Chat messages area
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-body" id="chatMessages" style="height:420px;overflow-y:auto;background:#f8fafc;padding:20px;">';
+
+    if (count($messages) > 0) {
+        foreach ($messages as $msg) {
+            $isOutbound = ($msg->direction === 'outbound');
+            $align = $isOutbound ? 'flex-end' : 'flex-start';
+            $bubbleBg = $isOutbound ? 'background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;' : 'background:#fff;color:#1e293b;border:1px solid #e2e8f0;';
+            $radius = $isOutbound ? '16px 16px 4px 16px' : '16px 16px 16px 4px';
+            $textAlign = $isOutbound ? 'text-align:right;' : '';
+            $msgText = htmlspecialchars($msg->message ?? '');
+            $msgText = nl2br($msgText);
+            $time = $msg->created_at ? date('M j, H:i', strtotime($msg->created_at)) : '';
+
+            // Status icon for outbound
+            $statusIcon = '';
+            if ($isOutbound) {
+                $st = $msg->msg_status ?? $msg->status ?? '';
+                if ($st === 'delivered') {
+                    $statusIcon = ' <i class="fa fa-check-circle" style="color:#4ade80;" title="Delivered"></i>';
+                } elseif ($st === 'sent') {
+                    $statusIcon = ' <i class="fa fa-check" style="color:#60a5fa;" title="Sent"></i>';
+                } elseif ($st === 'failed') {
+                    $statusIcon = ' <i class="fa fa-times-circle" style="color:#f87171;" title="Failed"></i>';
+                } else {
+                    $statusIcon = ' <i class="fa fa-clock-o" style="color:#94a3b8;" title="' . htmlspecialchars($st) . '"></i>';
+                }
+            }
+
+            echo '<div style="margin-bottom:14px;display:flex;justify-content:' . $align . ';">';
+            echo '<div style="max-width:70%;">';
+            echo '<div style="' . $bubbleBg . 'padding:10px 14px;border-radius:' . $radius . ';box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:.9em;line-height:1.5;">' . $msgText . '</div>';
+            echo '<div style="font-size:.75em;color:#94a3b8;margin-top:3px;' . $textAlign . '">' . $time . $statusIcon . '</div>';
+            echo '</div>';
+            echo '</div>';
+        }
+    } else {
+        echo '<div class="text-center text-muted" style="padding:60px 20px;">';
+        echo '<i class="fa fa-comments" style="font-size:2.5em;color:#cbd5e1;"></i>';
+        echo '<p style="margin-top:12px;">No messages yet.</p>';
+        echo '</div>';
+    }
+
+    echo '</div>'; // panel-body
+    echo '</div>'; // panel
+
+    // Reply form
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-body" style="padding:12px 15px;">';
+    echo '<form method="post" id="adminReplyForm">';
+    echo '<input type="hidden" name="send_reply" value="1">';
+    echo '<div class="row">';
+    echo '<div class="col-sm-10" style="margin-bottom:6px;">';
+    $disabledAttr = ($windowExpired && $channel === 'whatsapp') ? 'disabled' : '';
+    echo '<textarea name="message" class="form-control" rows="2" placeholder="Type your message..." required id="adminMsgInput" style="resize:none;" ' . $disabledAttr . '></textarea>';
+    echo '</div>';
+    echo '<div class="col-sm-2">';
+    echo '<button type="submit" class="btn btn-success btn-block" ' . $disabledAttr . '><i class="fa fa-paper-plane"></i> Send</button>';
+    echo '</div>';
+    echo '</div>';
+
+    // Channel-specific info
+    if ($channel === 'sms') {
+        echo '<small style="color:#94a3b8;display:block;margin-top:4px;"><span id="charCount">0</span>/160 chars | <span id="smsCount">1</span> SMS</small>';
+    } elseif ($channel === 'whatsapp') {
+        echo '<small style="color:#94a3b8;display:block;margin-top:4px;"><i class="fa fa-whatsapp" style="color:#25D366;"></i> WhatsApp | <span id="charCount">0</span>/1000 chars</small>';
+    } elseif ($channel === 'telegram') {
+        echo '<small style="color:#94a3b8;display:block;margin-top:4px;"><i class="fa fa-paper-plane" style="color:#0088cc;"></i> Telegram | <span id="charCount">0</span>/4096 chars</small>';
+    } elseif ($channel === 'messenger') {
+        echo '<small style="color:#94a3b8;display:block;margin-top:4px;"><i class="fa fa-facebook" style="color:#006AFF;"></i> Messenger | <span id="charCount">0</span>/2000 chars</small>';
+    }
+
+    echo '</form>';
+    echo '</div></div>';
+
+    // JavaScript for chat auto-scroll and char counter
+    echo '<script>';
+    echo 'document.addEventListener("DOMContentLoaded",function(){';
+    echo '  var c=document.getElementById("chatMessages");if(c)c.scrollTop=c.scrollHeight;';
+    echo '  var inp=document.getElementById("adminMsgInput");';
+    echo '  if(inp&&!inp.disabled){';
+    echo '    inp.addEventListener("input",function(){';
+    echo '      var l=this.value.length;';
+    echo '      var el=document.getElementById("charCount");if(el)el.textContent=l;';
+    if ($channel === 'sms') {
+        echo '      var s=Math.ceil(l/160)||1;var se=document.getElementById("smsCount");if(se)se.textContent=s;';
+    }
+    echo '    });';
+    echo '    inp.addEventListener("keydown",function(e){';
+    echo '      if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();if(this.value.trim())document.getElementById("adminReplyForm").submit();}';
+    echo '    });';
+    echo '    inp.focus();';
+    echo '  }';
+    echo '});';
+    echo '</script>';
+}
+
+/**
+ * AJAX: Set Telegram webhook
+ */
+function sms_suite_ajax_telegram_set_webhook()
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    $gatewayId = (int)($_POST['gateway_id'] ?? 0);
+    $remove = !empty($_POST['remove']);
+
+    if (!$gatewayId) {
+        echo json_encode(['success' => false, 'error' => 'No gateway ID']);
+        exit;
+    }
+
+    $gateway = Capsule::table('mod_sms_gateways')->where('id', $gatewayId)->first();
+    if (!$gateway || $gateway->type !== 'telegram') {
+        echo json_encode(['success' => false, 'error' => 'Gateway not found or not a Telegram gateway']);
+        exit;
+    }
+
+    require_once __DIR__ . '/../sms_suite.php';
+    $credentials = json_decode(sms_suite_decrypt($gateway->credentials), true) ?: [];
+
+    if (empty($credentials['bot_token'])) {
+        echo json_encode(['success' => false, 'error' => 'Bot token not configured. Save the gateway first.']);
+        exit;
+    }
+
+    require_once __DIR__ . '/../lib/Gateways/GatewayInterface.php';
+    require_once __DIR__ . '/../lib/Gateways/AbstractGateway.php';
+    require_once __DIR__ . '/../lib/Gateways/TelegramGateway.php';
+
+    $tg = new \SMSSuite\Gateways\TelegramGateway(0, []);
+    $tg->setConfig($credentials);
+
+    if ($remove) {
+        // Remove webhook by setting empty URL
+        $botToken = $credentials['bot_token'];
+        $ch = curl_init("https://api.telegram.org/bot{$botToken}/deleteWebhook");
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 15,
+        ]);
+        $response = curl_exec($ch);
+        curl_close($ch);
+        $data = json_decode($response, true);
+        if ($data['ok'] ?? false) {
+            echo json_encode(['success' => true, 'description' => 'Webhook removed']);
+        } else {
+            echo json_encode(['success' => false, 'error' => $data['description'] ?? 'Failed to remove webhook']);
+        }
+        exit;
+    }
+
+    // Build webhook URL
+    $webhookUrl = rtrim($GLOBALS['CONFIG']['SystemURL'], '/') . '/modules/addons/sms_suite/webhook.php?gateway=telegram&gw_id=' . $gatewayId;
+
+    // Use the gateway's webhook_token as the secret
+    $secretToken = $gateway->webhook_token ?: bin2hex(random_bytes(16));
+
+    // Update webhook_token if it was empty
+    if (empty($gateway->webhook_token)) {
+        Capsule::table('mod_sms_gateways')
+            ->where('id', $gatewayId)
+            ->update(['webhook_token' => $secretToken]);
+    }
+
+    $result = $tg->setWebhook($webhookUrl, $secretToken);
+    echo json_encode($result);
+    exit;
+}
+
+/**
+ * AJAX: Subscribe Messenger webhook (subscribe app to page)
+ */
+function sms_suite_ajax_messenger_subscribe()
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    $gatewayId = (int)($_POST['gateway_id'] ?? 0);
+
+    if (!$gatewayId) {
+        echo json_encode(['success' => false, 'error' => 'No gateway ID']);
+        exit;
+    }
+
+    $gateway = Capsule::table('mod_sms_gateways')->where('id', $gatewayId)->first();
+    if (!$gateway || $gateway->type !== 'messenger') {
+        echo json_encode(['success' => false, 'error' => 'Gateway not found or not a Messenger gateway']);
+        exit;
+    }
+
+    require_once __DIR__ . '/../sms_suite.php';
+    $credentials = json_decode(sms_suite_decrypt($gateway->credentials), true) ?: [];
+
+    if (empty($credentials['page_access_token']) || empty($credentials['page_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Page ID and Access Token not configured. Save the gateway first.']);
+        exit;
+    }
+
+    require_once __DIR__ . '/../lib/Gateways/GatewayInterface.php';
+    require_once __DIR__ . '/../lib/Gateways/AbstractGateway.php';
+    require_once __DIR__ . '/../lib/Gateways/MessengerGateway.php';
+
+    $mg = new \SMSSuite\Gateways\MessengerGateway(0, []);
+    $mg->setConfig($credentials);
+
+    $result = $mg->subscribeWebhook();
+    echo json_encode($result);
+    exit;
+}
+
+/**
+ * AJAX: Reply from admin inbox
+ */
+function sms_suite_ajax_inbox_reply()
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    $chatboxId = (int)($_POST['chatbox_id'] ?? 0);
+    $message = trim($_POST['message'] ?? '');
+
+    if (!$chatboxId || empty($message)) {
+        echo json_encode(['success' => false, 'error' => 'Chatbox ID and message are required']);
+        exit;
+    }
+
+    $chatbox = Capsule::table('mod_sms_chatbox')->where('id', $chatboxId)->first();
+    if (!$chatbox) {
+        echo json_encode(['success' => false, 'error' => 'Conversation not found']);
+        exit;
+    }
+
+    require_once __DIR__ . '/../lib/WhatsApp/WhatsAppService.php';
+    $result = \SMSSuite\WhatsApp\WhatsAppService::replyToConversation($chatboxId, $message);
+
+    echo json_encode($result);
+    exit;
+}
+
+/**
+ * AJAX: Test chatbot
+ */
+function sms_suite_ajax_chatbot_test()
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    $testMessage = trim($_POST['message'] ?? 'Hello, how can you help me?');
+    $clientId = !empty($_POST['client_id']) ? (int)$_POST['client_id'] : null;
+    $gatewayId = !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null;
+
+    require_once __DIR__ . '/../lib/AI/ChatbotService.php';
+
+    $reply = \SMSSuite\AI\ChatbotService::generateReply($testMessage, null, $clientId);
+
+    if ($reply) {
+        echo json_encode(['success' => true, 'reply' => $reply]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'No response generated. Check AI provider and API key settings.']);
+    }
+    exit;
+}
+
+/**
+ * Admin: Chatbot Settings
+ */
+function sms_suite_admin_chatbot_settings($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    require_once __DIR__ . '/../sms_suite.php';
+    require_once __DIR__ . '/../lib/AI/ChatbotService.php';
+
+    $aiProvider = sms_suite_get_module_setting('ai_provider') ?? 'none';
+    $aiKeySet = !empty(sms_suite_get_module_setting('ai_api_key'));
+
+    // Handle form submission
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_chatbot'])) {
+        $clientId = !empty($_POST['client_id']) ? (int)$_POST['client_id'] : null;
+        $gatewayId = !empty($_POST['gateway_id']) ? (int)$_POST['gateway_id'] : null;
+
+        $data = [
+            'enabled' => !empty($_POST['enabled']) ? 1 : 0,
+            'provider' => $_POST['provider'] ?? 'claude',
+            'model' => $_POST['model'] ?? null,
+            'system_prompt' => $_POST['system_prompt'] ?? '',
+            'max_tokens' => max(50, min(2000, (int)($_POST['max_tokens'] ?? 300))),
+            'temperature' => max(0, min(2, (float)($_POST['temperature'] ?? 0.7))),
+            'channels' => implode(',', $_POST['channels'] ?? ['whatsapp', 'telegram']),
+            'business_hours' => !empty($_POST['bh_enabled']) ? json_encode([
+                'start' => $_POST['bh_start'] ?? '09:00',
+                'end' => $_POST['bh_end'] ?? '17:00',
+                'timezone' => $_POST['bh_timezone'] ?? 'Africa/Nairobi',
+                'only_outside' => !empty($_POST['bh_only_outside']),
+            ]) : null,
+            'fallback_message' => $_POST['fallback_message'] ?? '',
+            'updated_at' => date('Y-m-d H:i:s'),
+        ];
+
+        // Upsert
+        $existing = Capsule::table('mod_sms_chatbot_config')
+            ->where('client_id', $clientId)
+            ->where('gateway_id', $gatewayId)
+            ->first();
+
+        if ($existing) {
+            Capsule::table('mod_sms_chatbot_config')
+                ->where('id', $existing->id)
+                ->update($data);
+        } else {
+            $data['client_id'] = $clientId;
+            $data['gateway_id'] = $gatewayId;
+            $data['created_at'] = date('Y-m-d H:i:s');
+            Capsule::table('mod_sms_chatbot_config')->insert($data);
+        }
+
+        echo '<div class="alert alert-success"><i class="fa fa-check"></i> Chatbot settings saved.</div>';
+    }
+
+    // Load current config
+    $config = \SMSSuite\AI\ChatbotService::getConfig(null, null);
+    if (!$config) {
+        $config = [
+            'enabled' => 0,
+            'provider' => $aiProvider !== 'none' ? $aiProvider : 'claude',
+            'model' => null,
+            'system_prompt' => \SMSSuite\AI\ChatbotService::getDefaultSystemPrompt(),
+            'max_tokens' => 300,
+            'temperature' => 0.7,
+            'channels' => 'whatsapp,telegram',
+            'business_hours' => null,
+            'fallback_message' => '',
+        ];
+    }
+
+    $enabledChannels = array_map('trim', explode(',', $config['channels'] ?? ''));
+    $businessHours = !empty($config['business_hours']) ? json_decode($config['business_hours'], true) : null;
+
+    echo '<div class="panel panel-default">';
+    echo '<div class="panel-heading"><h3 class="panel-title"><i class="fas fa-robot"></i> AI Chatbot Settings</h3></div>';
+    echo '<div class="panel-body">';
+
+    // Provider status
+    if ($aiProvider === 'none' || !$aiKeySet) {
+        echo '<div class="alert alert-warning">';
+        echo '<i class="fa fa-exclamation-triangle"></i> ';
+        if ($aiProvider === 'none') {
+            echo 'AI provider is set to "none". ';
+        }
+        if (!$aiKeySet) {
+            echo 'AI API key is not configured. ';
+        }
+        echo 'Go to <a href="configaddonmods.php#sms_suite">Setup &rarr; Addon Modules &rarr; Messaging Suite</a> to configure.';
+        echo '</div>';
+    } else {
+        echo '<div class="alert alert-info">';
+        echo '<i class="fa fa-info-circle"></i> AI Provider: <strong>' . ucfirst($aiProvider) . '</strong> | API Key: <strong>Configured</strong>';
+        echo '</div>';
+    }
+
+    echo '<form method="post" class="form-horizontal">';
+    echo '<input type="hidden" name="save_chatbot" value="1">';
+
+    // Enable/Disable
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Enable Chatbot</label>';
+    echo '<div class="col-sm-6">';
+    echo '<label class="checkbox-inline"><input type="checkbox" name="enabled" value="1" ' . (!empty($config['enabled']) ? 'checked' : '') . '> Enable AI auto-replies on inbound messages</label>';
+    echo '</div></div>';
+
+    // Provider
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Provider</label>';
+    echo '<div class="col-sm-4">';
+    echo '<select name="provider" id="chatbot_provider" class="form-control" onchange="updateModelOptions()">';
+    $allProviders = \SMSSuite\AI\ChatbotService::getProviders();
+    foreach ($allProviders as $pId => $pName) {
+        $selected = (($config['provider'] ?? '') === $pId) ? 'selected' : '';
+        echo '<option value="' . htmlspecialchars($pId) . '" ' . $selected . '>' . htmlspecialchars($pName) . '</option>';
+    }
+    echo '</select></div></div>';
+
+    // Model
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Model</label>';
+    echo '<div class="col-sm-4">';
+    echo '<select name="model" id="chatbot_model" class="form-control">';
+    $currentProvider = $config['provider'] ?? 'claude';
+    $models = \SMSSuite\AI\ChatbotService::getModels($currentProvider);
+    foreach ($models as $modelId => $modelName) {
+        $selected = ($config['model'] ?? '') === $modelId ? 'selected' : '';
+        echo '<option value="' . htmlspecialchars($modelId) . '" ' . $selected . '>' . htmlspecialchars($modelName) . '</option>';
+    }
+    echo '</select></div></div>';
+
+    // System prompt
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">System Prompt</label>';
+    echo '<div class="col-sm-6">';
+    echo '<textarea name="system_prompt" class="form-control" rows="5" placeholder="Instructions for the AI...">' . htmlspecialchars($config['system_prompt'] ?? '') . '</textarea>';
+    echo '<p class="help-block">Tell the AI who it is, what to do, and any business context. This shapes all responses.</p>';
+    echo '</div></div>';
+
+    // Max tokens + temperature
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Max Tokens</label>';
+    echo '<div class="col-sm-2">';
+    echo '<input type="number" name="max_tokens" class="form-control" value="' . (int)($config['max_tokens'] ?? 300) . '" min="50" max="2000">';
+    echo '</div>';
+    echo '<label class="col-sm-2 control-label">Temperature</label>';
+    echo '<div class="col-sm-2">';
+    echo '<input type="number" name="temperature" class="form-control" value="' . number_format((float)($config['temperature'] ?? 0.7), 2) . '" min="0" max="2" step="0.1">';
+    echo '</div></div>';
+
+    // Channels
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Enabled Channels</label>';
+    echo '<div class="col-sm-6">';
+    echo '<label class="checkbox-inline"><input type="checkbox" name="channels[]" value="sms" ' . (in_array('sms', $enabledChannels) ? 'checked' : '') . '> SMS</label>';
+    echo '<label class="checkbox-inline"><input type="checkbox" name="channels[]" value="whatsapp" ' . (in_array('whatsapp', $enabledChannels) ? 'checked' : '') . '> WhatsApp</label>';
+    echo '<label class="checkbox-inline"><input type="checkbox" name="channels[]" value="telegram" ' . (in_array('telegram', $enabledChannels) ? 'checked' : '') . '> Telegram</label>';
+    echo '</div></div>';
+
+    // Business hours
+    echo '<hr><h4>Business Hours (Optional)</h4>';
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Enable Schedule</label>';
+    echo '<div class="col-sm-6">';
+    echo '<label class="checkbox-inline"><input type="checkbox" name="bh_enabled" value="1" ' . ($businessHours ? 'checked' : '') . '> Restrict chatbot to specific hours</label>';
+    echo '</div></div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Hours</label>';
+    echo '<div class="col-sm-2"><input type="time" name="bh_start" class="form-control" value="' . htmlspecialchars($businessHours['start'] ?? '09:00') . '"></div>';
+    echo '<div class="col-sm-1 text-center" style="padding-top:7px">to</div>';
+    echo '<div class="col-sm-2"><input type="time" name="bh_end" class="form-control" value="' . htmlspecialchars($businessHours['end'] ?? '17:00') . '"></div>';
+    echo '</div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Timezone</label>';
+    echo '<div class="col-sm-3">';
+    echo '<input type="text" name="bh_timezone" class="form-control" value="' . htmlspecialchars($businessHours['timezone'] ?? 'Africa/Nairobi') . '">';
+    echo '</div></div>';
+
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Only Outside Hours</label>';
+    echo '<div class="col-sm-6">';
+    echo '<label class="checkbox-inline"><input type="checkbox" name="bh_only_outside" value="1" ' . (!empty($businessHours['only_outside']) ? 'checked' : '') . '> Only auto-reply when outside business hours (e.g., after-hours bot)</label>';
+    echo '</div></div>';
+
+    // Fallback message
+    echo '<hr>';
+    echo '<div class="form-group">';
+    echo '<label class="col-sm-3 control-label">Fallback Message</label>';
+    echo '<div class="col-sm-6">';
+    echo '<textarea name="fallback_message" class="form-control" rows="3" placeholder="Message to send when AI is unavailable...">' . htmlspecialchars($config['fallback_message'] ?? '') . '</textarea>';
+    echo '<p class="help-block">Sent when the AI provider fails to respond.</p>';
+    echo '</div></div>';
+
+    // Buttons
+    echo '<hr>';
+    echo '<div class="form-group">';
+    echo '<div class="col-sm-offset-3 col-sm-6">';
+    echo '<button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Save Settings</button> ';
+    echo '<button type="button" class="btn btn-info" onclick="testChatbot()"><i class="fa fa-comment"></i> Test Chatbot</button>';
+    echo '</div></div>';
+
+    echo '</form>';
+
+    // Test area
+    echo '<div id="chatbot_test_area" style="display:none; margin-top:20px">';
+    echo '<div class="well">';
+    echo '<h5><i class="fa fa-comment"></i> Chatbot Test</h5>';
+    echo '<div class="input-group">';
+    echo '<input type="text" id="test_message" class="form-control" placeholder="Type a test message..." value="Hello, what services do you offer?">';
+    echo '<span class="input-group-btn"><button class="btn btn-info" onclick="sendTestMessage()"><i class="fa fa-paper-plane"></i> Send</button></span>';
+    echo '</div>';
+    echo '<div id="test_result" style="margin-top:10px"></div>';
+    echo '</div>';
+    echo '</div>';
+
+    // Per-gateway overrides
+    echo '<hr><h4><i class="fa fa-server"></i> Per-Gateway Overrides</h4>';
+
+    $gateways = Capsule::table('mod_sms_gateways')
+        ->whereNull('client_id')
+        ->where('status', 1)
+        ->get();
+
+    if ($gateways->isEmpty()) {
+        echo '<p class="text-muted">No system gateways configured.</p>';
+    } else {
+        echo '<table class="table table-striped">';
+        echo '<thead><tr><th>Gateway</th><th>Type</th><th>Chatbot Enabled</th><th>Action</th></tr></thead>';
+        echo '<tbody>';
+        foreach ($gateways as $gw) {
+            $gwConfig = Capsule::table('mod_sms_chatbot_config')
+                ->whereNull('client_id')
+                ->where('gateway_id', $gw->id)
+                ->first();
+            $enabled = $gwConfig && $gwConfig->enabled ? '<span class="label label-success">On</span>' : '<span class="label label-default">Off</span>';
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars($gw->name) . '</td>';
+            echo '<td>' . htmlspecialchars($gw->type) . '</td>';
+            echo '<td>' . $enabled . '</td>';
+            echo '<td><a href="' . $modulelink . '&action=chatbot_settings&gateway_id=' . $gw->id . '" class="btn btn-xs btn-default">Configure</a></td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
+
+    echo '</div></div>';
+
+    // JavaScript
+    echo '<script>
+    var allModels = ' . json_encode(array_combine(
+        array_keys(\SMSSuite\AI\ChatbotService::getProviders()),
+        array_map(function($p) { return \SMSSuite\AI\ChatbotService::getModels($p); }, array_keys(\SMSSuite\AI\ChatbotService::getProviders()))
+    )) . ';
+
+    function updateModelOptions() {
+        var provider = document.getElementById("chatbot_provider").value;
+        var select = document.getElementById("chatbot_model");
+        var models = allModels[provider] || {};
+        select.innerHTML = "";
+        for (var id in models) {
+            var opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = models[id];
+            select.appendChild(opt);
+        }
+    }
+
+    function testChatbot() {
+        document.getElementById("chatbot_test_area").style.display = "block";
+        document.getElementById("test_message").focus();
+    }
+
+    function sendTestMessage() {
+        var msg = document.getElementById("test_message").value;
+        var el = document.getElementById("test_result");
+        el.innerHTML = "<i class=\"fa fa-spinner fa-spin\"></i> Generating response...";
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "' . htmlspecialchars($modulelink) . '&action=ajax_chatbot_test", true);
+        xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                try {
+                    var resp = JSON.parse(xhr.responseText);
+                    if (resp.success) {
+                        el.innerHTML = "<div class=\"alert alert-success\"><strong>AI Response:</strong><br>" + resp.reply.replace(/\\n/g, "<br>") + "</div>";
+                    } else {
+                        el.innerHTML = "<div class=\"alert alert-danger\">" + (resp.error || "No response") + "</div>";
+                    }
+                } catch(e) {
+                    el.innerHTML = "<div class=\"alert alert-danger\">Unexpected response from server</div>";
+                }
+            }
+        };
+        xhr.send("message=" + encodeURIComponent(msg));
+    }
+    </script>';
+
+    echo '</div>'; // Close ms-content
 }

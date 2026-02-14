@@ -91,6 +91,10 @@ class GatewayTypes
         'aws_sns' => ['name' => 'Amazon SNS', 'class' => 'AwsSnsGateway', 'category' => 'Enterprise'],
         'firebase' => ['name' => 'Firebase Cloud Messaging', 'class' => 'FirebaseGateway', 'category' => 'Enterprise'],
 
+        // === Messaging Apps ===
+        'telegram' => ['name' => 'Telegram Bot', 'class' => 'TelegramGateway', 'category' => 'Messaging Apps'],
+        'messenger' => ['name' => 'Facebook Messenger', 'class' => 'MessengerGateway', 'category' => 'Messaging Apps'],
+
         // === Generic/Custom ===
         'generic_http' => ['name' => 'Custom HTTP Gateway (Create Your Own)', 'class' => 'GenericHttpGateway', 'category' => 'Custom'],
         'smpp' => ['name' => 'SMPP Gateway (Direct SMSC)', 'class' => 'SmppGateway', 'category' => 'Custom'],
@@ -171,6 +175,8 @@ class GatewayTypes
             'interakt_whatsapp' => ['api_key'],
             'ultramsg_whatsapp' => ['instance_id', 'token'],
             'wati' => ['api_url', 'access_token'],
+            'telegram' => ['bot_token', 'bot_username'],
+            'messenger' => ['page_id', 'page_access_token'],
         ];
 
         return $fields[$type] ?? ['api_key'];

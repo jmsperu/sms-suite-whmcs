@@ -432,14 +432,18 @@ class WhatsAppService
                 $message = $data['document']['filename'] ?? '[Document]';
             }
 
+            // Determine channel (whatsapp or telegram)
+            $channel = $data['channel'] ?? 'whatsapp';
+            $contactName = $data['contact_name'] ?? null;
+
             // Find or create chatbox entry
-            $chatboxId = self::findOrCreateChatbox($from);
+            $chatboxId = self::findOrCreateChatbox($from, $channel, $contactName, $data['gateway_id'] ?? null);
 
             // Store inbound message
             $inboundId = Capsule::table('mod_sms_messages')->insertGetId([
                 'client_id' => 0, // Will be linked via chatbox
                 'gateway_id' => $data['gateway_id'] ?? null,
-                'channel' => 'whatsapp',
+                'channel' => $channel,
                 'direction' => 'inbound',
                 'from_number' => $from,
                 'message' => $message,
@@ -472,6 +476,25 @@ class WhatsAppService
 
             // Check for auto-reply triggers
             self::checkAutoReply($chatboxId, $message, $from);
+
+            // AI Chatbot auto-reply
+            $chatbotFile = __DIR__ . '/../AI/ChatbotService.php';
+            if (file_exists($chatbotFile) && !empty($message)) {
+                require_once $chatbotFile;
+                $gatewayId = $data['gateway_id'] ?? null;
+                // Determine gateway owner for config resolution
+                $gwClientId = null;
+                if ($gatewayId) {
+                    $gw = Capsule::table('mod_sms_gateways')->where('id', $gatewayId)->first();
+                    $gwClientId = $gw ? ($gw->client_id ?? null) : null;
+                }
+                if (\SMSSuite\AI\ChatbotService::shouldAutoReply($gwClientId ? (int)$gwClientId : null, $gatewayId ? (int)$gatewayId : null, $channel)) {
+                    $reply = \SMSSuite\AI\ChatbotService::generateReply($message, $chatboxId, $gwClientId ? (int)$gwClientId : null);
+                    if ($reply) {
+                        self::replyToConversation($chatboxId, $reply, ['gateway_id' => $gatewayId]);
+                    }
+                }
+            }
 
             return [
                 'success' => true,
@@ -572,9 +595,10 @@ class WhatsAppService
 
         $clientId = $chatbox->client_id ?: 0;
         $to = $chatbox->phone;
+        $channel = $chatbox->channel ?? 'whatsapp';
 
-        // Check if within 24-hour window
-        if ($chatbox->last_message_at) {
+        // Check if within 24-hour window (WhatsApp only)
+        if ($channel === 'whatsapp' && $chatbox->last_message_at) {
             $lastMessage = strtotime($chatbox->last_message_at);
             $windowEnd = $lastMessage + (24 * 60 * 60);
 
@@ -587,8 +611,8 @@ class WhatsAppService
             }
         }
 
-        // If template specified, send template
-        if (!empty($options['template_name'])) {
+        // If template specified, send template (WhatsApp only)
+        if (!empty($options['template_name']) && $channel === 'whatsapp') {
             return self::sendTemplate($clientId, $to, $options['template_name'], $options['template_params'] ?? []);
         }
 
@@ -596,7 +620,7 @@ class WhatsAppService
         require_once dirname(__DIR__) . '/Core/MessageService.php';
 
         $result = \SMSSuite\Core\MessageService::send($clientId, $to, $message, [
-            'channel' => 'whatsapp',
+            'channel' => $channel,
             'gateway_id' => $chatbox->gateway_id ?? $options['gateway_id'] ?? null,
             'send_now' => true,
         ]);
@@ -1393,20 +1417,34 @@ class WhatsAppService
         ];
     }
 
-    private static function findOrCreateChatbox(string $phone): int
+    public static function findOrCreateChatbox(string $phone, string $channel = 'whatsapp', ?string $contactName = null, ?int $gatewayId = null): int
     {
-        $chatbox = Capsule::table('mod_sms_chatbox')
-            ->where('phone', $phone)
-            ->first();
+        $query = Capsule::table('mod_sms_chatbox')
+            ->where('phone', $phone);
+
+        // For Telegram/Messenger, scope by gateway to avoid ID collisions across bots/pages
+        if (($channel === 'telegram' || $channel === 'messenger') && $gatewayId) {
+            $query->where('gateway_id', $gatewayId);
+        }
+
+        $chatbox = $query->first();
 
         if ($chatbox) {
+            // Update contact name if we have one now and didn't before
+            if ($contactName && empty($chatbox->contact_name)) {
+                Capsule::table('mod_sms_chatbox')
+                    ->where('id', $chatbox->id)
+                    ->update(['contact_name' => $contactName]);
+            }
             return $chatbox->id;
         }
 
         return Capsule::table('mod_sms_chatbox')->insertGetId([
             'phone' => $phone,
-            'contact_name' => null,
+            'contact_name' => $contactName,
             'client_id' => null,
+            'gateway_id' => $gatewayId,
+            'channel' => $channel,
             'status' => self::CONVERSATION_OPEN,
             'unread_count' => 0,
             'created_at' => date('Y-m-d H:i:s'),
@@ -1414,27 +1452,55 @@ class WhatsAppService
         ]);
     }
 
-    private static function updateConversation(int $clientId, string $to, int $messageId, string $direction): void
+    /**
+     * Track a message in the chatbox system (creates/updates chatbox + links message)
+     */
+    public static function trackMessageInChatbox(int $clientId, string $phone, int $messageId, string $direction, string $channel = 'sms', ?int $gatewayId = null, ?string $contactName = null): void
     {
-        $chatboxId = self::findOrCreateChatbox($to);
+        $chatboxId = self::findOrCreateChatbox($phone, $channel, $contactName, $gatewayId);
 
-        Capsule::table('mod_sms_chatbox_messages')->insert([
-            'chatbox_id' => $chatboxId,
-            'message_id' => $messageId,
-            'direction' => $direction,
-            'created_at' => date('Y-m-d H:i:s'),
-        ]);
+        // Check if already linked (avoid duplicates)
+        $exists = Capsule::table('mod_sms_chatbox_messages')
+            ->where('chatbox_id', $chatboxId)
+            ->where('message_id', $messageId)
+            ->exists();
+
+        if (!$exists) {
+            Capsule::table('mod_sms_chatbox_messages')->insert([
+                'chatbox_id' => $chatboxId,
+                'message_id' => $messageId,
+                'direction' => $direction,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
 
         $message = Capsule::table('mod_sms_messages')->where('id', $messageId)->first();
 
-        Capsule::table('mod_sms_chatbox')
-            ->where('id', $chatboxId)
-            ->update([
-                'client_id' => $clientId ?: null,
-                'last_message' => $message ? substr($message->message ?? '', 0, 255) : '',
-                'last_message_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
+        $updateData = [
+            'last_message' => $message ? substr($message->message ?? '', 0, 255) : '',
+            'last_message_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ];
+        if ($clientId > 0) {
+            $updateData['client_id'] = $clientId;
+        }
+        if ($gatewayId) {
+            $updateData['gateway_id'] = $gatewayId;
+        }
+        if ($direction === 'inbound') {
+            Capsule::table('mod_sms_chatbox')
+                ->where('id', $chatboxId)
+                ->increment('unread_count', 1, $updateData);
+        } else {
+            Capsule::table('mod_sms_chatbox')
+                ->where('id', $chatboxId)
+                ->update($updateData);
+        }
+    }
+
+    private static function updateConversation(int $clientId, string $to, int $messageId, string $direction): void
+    {
+        self::trackMessageInChatbox($clientId, $to, $messageId, $direction);
     }
 
     private static function checkAutoReply(int $chatboxId, string $message, string $from): void

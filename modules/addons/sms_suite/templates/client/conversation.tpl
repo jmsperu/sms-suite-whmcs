@@ -8,14 +8,28 @@
                     <i class="fas fa-arrow-left"></i> Back to Inbox
                 </a>
                 <h4 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #1e293b;">
-                    <i class="fas fa-user-circle" style="color: var(--sms-primary, #667eea);"></i>
+                    {if $channel eq 'whatsapp'}
+                        <i class="fab fa-whatsapp" style="color: #25D366;"></i>
+                    {elseif $channel eq 'telegram'}
+                        <i class="fab fa-telegram-plane" style="color: #0088cc;"></i>
+                    {elseif $channel eq 'messenger'}
+                        <i class="fab fa-facebook-messenger" style="color: #006AFF;"></i>
+                    {else}
+                        <i class="fas fa-sms" style="color: var(--sms-primary, #667eea);"></i>
+                    {/if}
                     {if $contact}
                         {$contact->first_name|escape:'html'} {$contact->last_name|escape:'html'}
+                        <small class="text-muted">({$phone})</small>
+                    {elseif $chatbox && $chatbox->contact_name}
+                        {$chatbox->contact_name|escape:'html'}
                         <small class="text-muted">({$phone})</small>
                     {else}
                         {$phone}
                         <a href="{$modulelink}&action=contacts&add_phone={$phone|escape:'url'}" class="btn btn-sm btn-outline-secondary" style="margin-left: 8px;">Add to Contacts</a>
                     {/if}
+                    <span class="badge" style="font-size:.7rem;margin-left:6px;background:{if $channel eq 'whatsapp'}#25D366{elseif $channel eq 'telegram'}#0088cc{elseif $channel eq 'messenger'}#006AFF{else}#667eea{/if};color:#fff;">
+                        {$channel|upper}
+                    </span>
                 </h4>
             </div>
         </div>
@@ -32,6 +46,12 @@
     <div class="alert alert-danger alert-dismissible">
         <button type="button" class="close" data-dismiss="alert">&times;</button>
         {$error}
+    </div>
+    {/if}
+
+    {if $window_expired && $channel eq 'whatsapp'}
+    <div class="alert alert-warning">
+        <i class="fas fa-clock"></i> <strong>24-hour window expired.</strong> The last customer message was over 24 hours ago. You must use a template message to re-engage.
     </div>
     {/if}
 
@@ -80,10 +100,10 @@
 
                 <div class="row">
                     <div class="col-sm-9" style="margin-bottom: 8px;">
-                        <textarea name="message" class="form-control" rows="2" placeholder="Type your message..." required id="messageInput" style="resize: none;"></textarea>
+                        <textarea name="message" class="form-control" rows="2" placeholder="Type your message..." required id="messageInput" style="resize: none;" {if $window_expired && $channel eq 'whatsapp'}disabled{/if}></textarea>
                     </div>
                     <div class="col-sm-3">
-                        {if $sender_ids && count($sender_ids) > 0}
+                        {if $channel eq 'sms' && $sender_ids && count($sender_ids) > 0}
                         <select name="sender_id" class="form-control" style="margin-bottom: 8px;">
                             <option value="">Default Sender</option>
                             {foreach $sender_ids as $sid}
@@ -91,17 +111,37 @@
                             {/foreach}
                         </select>
                         {/if}
-                        <button type="submit" class="btn btn-success btn-block">
+                        <button type="submit" class="btn btn-success btn-block" {if $window_expired && $channel eq 'whatsapp'}disabled{/if}>
                             <i class="fas fa-paper-plane"></i> Send
                         </button>
                     </div>
                 </div>
 
+                {if $channel eq 'sms'}
                 <small class="text-muted" style="display: block; margin-top: 6px;">
                     <span id="charCount">0</span>/160 characters |
                     <span id="smsCount">1</span> SMS |
                     Press Enter to send, Shift+Enter for new line
                 </small>
+                {elseif $channel eq 'whatsapp'}
+                <small class="text-muted" style="display: block; margin-top: 6px;">
+                    <i class="fab fa-whatsapp" style="color:#25D366"></i> WhatsApp |
+                    <span id="charCount">0</span>/1000 characters |
+                    Press Enter to send
+                </small>
+                {elseif $channel eq 'telegram'}
+                <small class="text-muted" style="display: block; margin-top: 6px;">
+                    <i class="fab fa-telegram-plane" style="color:#0088cc"></i> Telegram |
+                    <span id="charCount">0</span>/4096 characters |
+                    Press Enter to send
+                </small>
+                {elseif $channel eq 'messenger'}
+                <small class="text-muted" style="display: block; margin-top: 6px;">
+                    <i class="fab fa-facebook-messenger" style="color:#006AFF"></i> Messenger |
+                    <span id="charCount">0</span>/2000 characters |
+                    Press Enter to send
+                </small>
+                {/if}
             </form>
         </div>
     </div>
@@ -114,19 +154,25 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 var messageInput = document.getElementById('messageInput');
-messageInput.addEventListener('input', function() {
-    var len = this.value.length;
-    var segments = Math.ceil(len / 160) || 1;
-    document.getElementById('charCount').textContent = len;
-    document.getElementById('smsCount').textContent = segments;
-});
+if (messageInput && !messageInput.disabled) {
+    messageInput.addEventListener('input', function() {
+        var len = this.value.length;
+        var el = document.getElementById('charCount');
+        if (el) el.textContent = len;
+        {if $channel eq 'sms'}
+        var segments = Math.ceil(len / 160) || 1;
+        var smsEl = document.getElementById('smsCount');
+        if (smsEl) smsEl.textContent = segments;
+        {/if}
+    });
 
-messageInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        if (this.value.trim()) {
-            document.getElementById('replyForm').submit();
+    messageInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (this.value.trim()) {
+                document.getElementById('replyForm').submit();
+            }
         }
-    }
-});
+    });
+}
 </script>

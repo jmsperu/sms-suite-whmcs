@@ -81,46 +81,93 @@
         </div>
     </div>
 
-    <div class="card">
-        <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-comments"></i> Conversations</h3>
+    <!-- Channel Filter Tabs + Search -->
+    <div class="card" style="margin-bottom: 0; border-bottom: none; border-radius: 8px 8px 0 0;">
+        <div class="card-body" style="padding: 12px 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <a href="{$modulelink}&action=inbox&channel=all{if $search}&search={$search|escape:'url'}{/if}" class="btn btn-sm {if $channel_filter eq 'all' || !$channel_filter}btn-primary{else}btn-outline-secondary{/if}">
+                        <i class="fas fa-comments"></i> All {if $channel_counts.all}<span class="badge" style="background:rgba(255,255,255,.25);margin-left:4px;">{$channel_counts.all}</span>{/if}
+                    </a>
+                    {if $channel_counts.sms > 0}
+                    <a href="{$modulelink}&action=inbox&channel=sms{if $search}&search={$search|escape:'url'}{/if}" class="btn btn-sm {if $channel_filter eq 'sms'}btn-primary{else}btn-outline-secondary{/if}">
+                        <i class="fas fa-sms"></i> SMS <span class="badge" style="background:rgba(0,0,0,.1);margin-left:4px;">{$channel_counts.sms}</span>
+                    </a>
+                    {/if}
+                    {if $channel_counts.whatsapp > 0}
+                    <a href="{$modulelink}&action=inbox&channel=whatsapp{if $search}&search={$search|escape:'url'}{/if}" class="btn btn-sm {if $channel_filter eq 'whatsapp'}btn-success{else}btn-outline-secondary{/if}">
+                        <i class="fab fa-whatsapp"></i> WhatsApp <span class="badge" style="background:rgba(0,0,0,.1);margin-left:4px;">{$channel_counts.whatsapp}</span>
+                    </a>
+                    {/if}
+                    {if $channel_counts.telegram > 0}
+                    <a href="{$modulelink}&action=inbox&channel=telegram{if $search}&search={$search|escape:'url'}{/if}" class="btn btn-sm {if $channel_filter eq 'telegram'}btn-info{else}btn-outline-secondary{/if}">
+                        <i class="fab fa-telegram-plane"></i> Telegram <span class="badge" style="background:rgba(0,0,0,.1);margin-left:4px;">{$channel_counts.telegram}</span>
+                    </a>
+                    {/if}
+                    {if $channel_counts.messenger > 0}
+                    <a href="{$modulelink}&action=inbox&channel=messenger{if $search}&search={$search|escape:'url'}{/if}" class="btn btn-sm {if $channel_filter eq 'messenger'}btn-primary{else}btn-outline-secondary{/if}">
+                        <i class="fab fa-facebook-messenger"></i> Messenger <span class="badge" style="background:rgba(0,0,0,.1);margin-left:4px;">{$channel_counts.messenger}</span>
+                    </a>
+                    {/if}
+                </div>
+                <form method="get" style="display:flex;gap:6px;margin:0;">
+                    <input type="hidden" name="m" value="sms_suite">
+                    <input type="hidden" name="action" value="inbox">
+                    <input type="hidden" name="channel" value="{$channel_filter|default:'all'}">
+                    <input type="text" name="search" class="form-control form-control-sm" placeholder="Search..." value="{$search|escape:'html'}" style="width:180px;">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="fas fa-search"></i></button>
+                    {if $search}
+                    <a href="{$modulelink}&action=inbox&channel={$channel_filter|default:'all'}" class="btn btn-sm btn-outline-danger" title="Clear"><i class="fas fa-times"></i></a>
+                    {/if}
+                </form>
+            </div>
         </div>
+    </div>
+
+    <div class="card" style="border-radius: 0 0 8px 8px;">
         <div class="card-body" style="padding: 0;">
             {if $conversations && count($conversations) > 0}
             <div class="list-group" style="margin-bottom: 0;">
                 {foreach $conversations as $conv}
-                <a href="{$modulelink}&action=conversation&phone={$conv->to_number|escape:'url'}" class="list-group-item {if $conv->unread_count > 0}list-group-item-info{/if}" style="text-decoration: none;">
+                <a href="{$modulelink}&action=conversation{if $conv->id}&id={$conv->id}{else}&phone={$conv->phone|default:$conv->to_number|escape:'url'}{/if}" class="list-group-item {if $conv->unread_count > 0}list-group-item-info{/if}" style="text-decoration: none;">
                     <div class="row" style="display: flex; align-items: center;">
                         <div class="col-2 col-sm-1 text-center">
-                            <div style="width: 44px; height: 44px; background: {if $conv->unread_count > 0}linear-gradient(135deg, #667eea, #764ba2){else}#e2e8f0{/if}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px;">
-                                <i class="fas fa-user"></i>
+                            {if $conv->channel eq 'whatsapp'}
+                            <div style="width: 44px; height: 44px; background: #25D366; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px;">
+                                <i class="fab fa-whatsapp"></i>
                             </div>
+                            {elseif $conv->channel eq 'telegram'}
+                            <div style="width: 44px; height: 44px; background: #0088cc; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px;">
+                                <i class="fab fa-telegram-plane"></i>
+                            </div>
+                            {elseif $conv->channel eq 'messenger'}
+                            <div style="width: 44px; height: 44px; background: linear-gradient(135deg, #00B2FF, #006AFF); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px;">
+                                <i class="fab fa-facebook-messenger"></i>
+                            </div>
+                            {else}
+                            <div style="width: 44px; height: 44px; background: {if $conv->unread_count > 0}linear-gradient(135deg, #667eea, #764ba2){else}#e2e8f0{/if}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px;">
+                                <i class="fas fa-sms"></i>
+                            </div>
+                            {/if}
                         </div>
                         <div class="col-7 col-sm-8">
                             <h4 style="margin: 0 0 4px; font-size: .95rem; font-weight: 600; color: #1e293b;">
                                 {if $conv->contact_name}
                                     {$conv->contact_name|escape:'html'}
-                                    <small class="text-muted">({$conv->to_number})</small>
+                                    <small class="text-muted">({$conv->phone|default:$conv->to_number})</small>
                                 {else}
-                                    {$conv->to_number}
+                                    {$conv->phone|default:$conv->to_number}
                                 {/if}
                                 {if $conv->unread_count > 0}
                                     <span class="badge badge-primary" style="font-size: .7rem; margin-left: 6px;">{$conv->unread_count} new</span>
                                 {/if}
                             </h4>
                             <p style="margin: 0; color: #64748b; font-size: .85rem;">
-                                {if $conv->last_direction == 'outbound'}
-                                    <i class="fas fa-arrow-right" style="color: var(--sms-primary);"></i>
-                                {else}
-                                    <i class="fas fa-arrow-left" style="color: var(--sms-success);"></i>
-                                {/if}
                                 {$conv->last_message|escape:'html'|truncate:60}
                             </p>
                         </div>
                         <div class="col-3 col-sm-3 text-right">
                             <small class="text-muted">{$conv->last_message_at|date_format:"%b %d, %H:%M"}</small>
-                            <br>
-                            <small class="text-muted">{$conv->message_count} messages</small>
                         </div>
                     </div>
                 </a>
@@ -129,7 +176,9 @@
             {else}
             <div class="text-center text-muted" style="padding: 60px 20px;">
                 <i class="fas fa-comments" style="font-size: 3rem; color: #cbd5e1;"></i>
-                <h4 style="margin-top: 20px; color: #1e293b;">No conversations yet</h4>
+                <h4 style="margin-top: 20px; color: #1e293b;">
+                    {if $search}No conversations matching "{$search|escape:'html'}"{elseif $channel_filter neq 'all'}No {$channel_filter} conversations yet{else}No conversations yet{/if}
+                </h4>
                 <p>Start your first conversation by clicking the button above.</p>
             </div>
             {/if}

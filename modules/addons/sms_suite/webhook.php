@@ -188,6 +188,14 @@ if ($gatewayRecord && !empty($gatewayRecord->webhook_token)) {
             require_once $baseDir . 'GenericHttpGateway.php';
             $verifyClass = new \SMSSuite\Gateways\GenericHttpGateway(0, []);
             break;
+        case 'telegram':
+            require_once $baseDir . 'TelegramGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\TelegramGateway(0, []);
+            break;
+        case 'messenger':
+            require_once $baseDir . 'MessengerGateway.php';
+            $verifyClass = new \SMSSuite\Gateways\MessengerGateway(0, []);
+            break;
         default:
             // Use base class for token check
             $verifyClass = new class(0, []) extends \SMSSuite\Gateways\AbstractGateway {
@@ -310,6 +318,12 @@ function processWebhook(string $gatewayType, array $payload, int $inboxId, ?int 
         case 'facebook_whatsapp':
             // Meta Cloud API webhook — process directly
             return processMetaWhatsAppWebhook($payload, $inboxId, $resolvedGatewayId);
+
+        case 'telegram':
+            return processTelegramWebhook($payload, $inboxId, $resolvedGatewayId);
+
+        case 'messenger':
+            return processMessengerWebhook($payload, $inboxId, $resolvedGatewayId);
 
         default:
             // Try generic processing
@@ -453,6 +467,17 @@ function handleInbound(\SMSSuite\Gateways\InboundResult $inbound, string $gatewa
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
 
+    // Track in chatbox for unified inbox
+    require_once __DIR__ . '/lib/WhatsApp/WhatsAppService.php';
+    \SMSSuite\WhatsApp\WhatsAppService::trackMessageInChatbox(
+        $clientId,
+        $inbound->from,
+        $messageId,
+        'inbound',
+        'sms',
+        $gateway ? $gateway->id : null
+    );
+
     // Check for opt-out keywords
     $optOutKeywords = ['STOP', 'UNSUBSCRIBE', 'OPTOUT', 'OPT OUT', 'CANCEL', 'END', 'QUIT'];
     $messageUpper = strtoupper(trim($inbound->message));
@@ -472,6 +497,28 @@ function handleInbound(\SMSSuite\Gateways\InboundResult $inbound, string $gatewa
             ]);
 
             logActivity("SMS Suite: Opt-out received from {$customerPhone}");
+        }
+    }
+
+    // AI Chatbot auto-reply for SMS
+    $chatbotFile = __DIR__ . '/lib/AI/ChatbotService.php';
+    if (file_exists($chatbotFile) && !empty($inbound->message) && !in_array($messageUpper, $optOutKeywords)) {
+        require_once $chatbotFile;
+        $gwClientId = $gateway ? ($gateway->client_id ?? null) : null;
+        $gwId = $gateway ? $gateway->id : null;
+        if (\SMSSuite\AI\ChatbotService::shouldAutoReply($gwClientId ? (int)$gwClientId : null, $gwId ? (int)$gwId : null, 'sms')) {
+            $reply = \SMSSuite\AI\ChatbotService::generateReply($inbound->message, null, $gwClientId ? (int)$gwClientId : null);
+            if ($reply && $gateway) {
+                // Send SMS reply back
+                require_once __DIR__ . '/lib/Core/SegmentCounter.php';
+                require_once __DIR__ . '/lib/Core/MessageService.php';
+                \SMSSuite\Core\MessageService::send($clientId, $inbound->from, $reply, [
+                    'channel' => 'sms',
+                    'gateway_id' => $gateway->id,
+                    'sender_id' => $inbound->to,
+                    'send_now' => true,
+                ]);
+            }
         }
     }
 
@@ -562,4 +609,417 @@ function processMetaWhatsAppWebhook(array $payload, int $inboxId, ?int $resolved
     }
 
     return ['processed' => $processed, 'type' => 'meta_whatsapp'];
+}
+
+/**
+ * Process Telegram Bot API webhook
+ *
+ * Telegram sends Update objects: { update_id, message: { message_id, from, chat, text, ... } }
+ */
+function processTelegramWebhook(array $payload, int $inboxId, ?int $resolvedGatewayId = null): array
+{
+    $msg = $payload['message'] ?? $payload['edited_message'] ?? null;
+
+    // Handle callback queries (button clicks)
+    if (!$msg && isset($payload['callback_query'])) {
+        $msg = $payload['callback_query']['message'] ?? null;
+        $callbackText = $payload['callback_query']['data'] ?? '';
+        if ($msg) {
+            $msg['text'] = $callbackText;
+        }
+    }
+
+    if (!$msg) {
+        return ['processed' => false, 'reason' => 'No message in Telegram update'];
+    }
+
+    $chatId = (string)($msg['chat']['id'] ?? '');
+    $text = $msg['text'] ?? $msg['caption'] ?? '';
+    $msgType = 'text';
+    $mediaUrl = null;
+
+    if (!empty($chatId) && empty($text)) {
+        // Check for media messages
+        if (isset($msg['photo'])) {
+            $msgType = 'image';
+            $text = $msg['caption'] ?? '[Photo]';
+            // Get highest resolution photo
+            $photos = $msg['photo'];
+            $mediaUrl = end($photos)['file_id'] ?? null;
+        } elseif (isset($msg['video'])) {
+            $msgType = 'video';
+            $text = $msg['caption'] ?? '[Video]';
+            $mediaUrl = $msg['video']['file_id'] ?? null;
+        } elseif (isset($msg['document'])) {
+            $msgType = 'document';
+            $text = $msg['document']['file_name'] ?? '[Document]';
+            $mediaUrl = $msg['document']['file_id'] ?? null;
+        } elseif (isset($msg['voice'])) {
+            $msgType = 'audio';
+            $text = '[Voice message]';
+            $mediaUrl = $msg['voice']['file_id'] ?? null;
+        } elseif (isset($msg['audio'])) {
+            $msgType = 'audio';
+            $text = $msg['audio']['title'] ?? '[Audio]';
+            $mediaUrl = $msg['audio']['file_id'] ?? null;
+        } elseif (isset($msg['sticker'])) {
+            $msgType = 'text';
+            $text = $msg['sticker']['emoji'] ?? '[Sticker]';
+        }
+    }
+
+    if (empty($chatId)) {
+        return ['processed' => false, 'reason' => 'No chat_id in Telegram message'];
+    }
+
+    // Build contact name from Telegram user info
+    $from = $msg['from'] ?? [];
+    $contactName = trim(($from['first_name'] ?? '') . ' ' . ($from['last_name'] ?? ''));
+    $username = $from['username'] ?? null;
+
+    // Store/update Telegram session
+    if ($resolvedGatewayId) {
+        $existing = Capsule::table('mod_sms_telegram_sessions')
+            ->where('chat_id', $chatId)
+            ->where('gateway_id', $resolvedGatewayId)
+            ->first();
+
+        if ($existing) {
+            Capsule::table('mod_sms_telegram_sessions')
+                ->where('id', $existing->id)
+                ->update([
+                    'username' => $username,
+                    'first_name' => $from['first_name'] ?? null,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+        } else {
+            Capsule::table('mod_sms_telegram_sessions')->insert([
+                'chat_id' => $chatId,
+                'gateway_id' => $resolvedGatewayId,
+                'username' => $username,
+                'first_name' => $from['first_name'] ?? null,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
+    }
+
+    // Determine gateway owner (client_id)
+    $gateway = $resolvedGatewayId
+        ? Capsule::table('mod_sms_gateways')->where('id', $resolvedGatewayId)->first()
+        : null;
+    $gatewayClientId = $gateway ? ($gateway->client_id ?? 0) : 0;
+
+    // Use WhatsApp-style chatbox for Telegram conversations
+    require_once __DIR__ . '/lib/WhatsApp/WhatsAppService.php';
+
+    $result = \SMSSuite\WhatsApp\WhatsAppService::handleInbound([
+        'from' => $chatId,
+        'text' => $text,
+        'type' => $msgType,
+        'message_id' => (string)($msg['message_id'] ?? ''),
+        'timestamp' => $msg['date'] ?? time(),
+        'gateway_id' => $resolvedGatewayId,
+        'channel' => 'telegram',
+        'contact_name' => $contactName ?: ($username ? '@' . $username : 'Telegram User'),
+    ]);
+
+    // AI Chatbot auto-reply
+    $chatbotFile = __DIR__ . '/lib/AI/ChatbotService.php';
+    if (file_exists($chatbotFile) && !empty($text)) {
+        require_once $chatbotFile;
+        if (\SMSSuite\AI\ChatbotService::shouldAutoReply($gatewayClientId ?: null, $resolvedGatewayId, 'telegram')) {
+            $chatboxId = $result['chatbox_id'] ?? null;
+            $reply = \SMSSuite\AI\ChatbotService::generateReply($text, $chatboxId, $gatewayClientId ?: null);
+            if ($reply && $chatboxId) {
+                // Send reply back via Telegram
+                $baseDir = __DIR__ . '/lib/Gateways/';
+                require_once $baseDir . 'GatewayInterface.php';
+                require_once $baseDir . 'AbstractGateway.php';
+                require_once $baseDir . 'TelegramGateway.php';
+
+                if ($gateway) {
+                    require_once __DIR__ . '/sms_suite.php';
+                    $creds = json_decode(sms_suite_decrypt($gateway->credentials), true) ?: [];
+                    $tg = new \SMSSuite\Gateways\TelegramGateway(0, []);
+                    $tg->setConfig(array_merge($creds, ['gateway_id' => $resolvedGatewayId]));
+
+                    $dto = new \SMSSuite\Gateways\MessageDTO([
+                        'to' => $chatId,
+                        'message' => $reply,
+                        'channel' => 'telegram',
+                    ]);
+                    $sendResult = $tg->send($dto);
+
+                    if ($sendResult->success) {
+                        // Store the AI reply in messages + chatbox
+                        $replyMsgId = Capsule::table('mod_sms_messages')->insertGetId([
+                            'client_id' => $gatewayClientId,
+                            'gateway_id' => $resolvedGatewayId,
+                            'channel' => 'telegram',
+                            'direction' => 'outbound',
+                            'to_number' => $chatId,
+                            'message' => $reply,
+                            'provider_message_id' => $sendResult->messageId,
+                            'status' => 'sent',
+                            'created_at' => date('Y-m-d H:i:s'),
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+
+                        Capsule::table('mod_sms_chatbox_messages')->insert([
+                            'chatbox_id' => $chatboxId,
+                            'message_id' => $replyMsgId,
+                            'direction' => 'outbound',
+                            'created_at' => date('Y-m-d H:i:s'),
+                        ]);
+
+                        Capsule::table('mod_sms_chatbox')
+                            ->where('id', $chatboxId)
+                            ->update([
+                                'last_message' => substr($reply, 0, 255),
+                                'last_message_at' => date('Y-m-d H:i:s'),
+                                'updated_at' => date('Y-m-d H:i:s'),
+                            ]);
+                    }
+                }
+            }
+        }
+    }
+
+    return ['processed' => true, 'type' => 'telegram', 'message_id' => $result['message_id'] ?? null];
+}
+
+/**
+ * Process Facebook Messenger webhook
+ *
+ * Meta sends: { object: "page", entry: [{ messaging: [{ sender, recipient, message, ... }] }] }
+ */
+function processMessengerWebhook(array $payload, int $inboxId, ?int $resolvedGatewayId = null): array
+{
+    $entries = $payload['entry'] ?? [];
+    if (empty($entries)) {
+        return ['processed' => false, 'reason' => 'No entries in Messenger webhook'];
+    }
+
+    $processed = false;
+
+    foreach ($entries as $entry) {
+        $messagingEvents = $entry['messaging'] ?? [];
+        foreach ($messagingEvents as $event) {
+            $senderId = (string)($event['sender']['id'] ?? '');
+
+            if (empty($senderId)) {
+                continue;
+            }
+
+            // Delivery receipts
+            if (isset($event['delivery'])) {
+                $mids = $event['delivery']['mids'] ?? [];
+                foreach ($mids as $mid) {
+                    Capsule::table('mod_sms_messages')
+                        ->where('provider_message_id', $mid)
+                        ->update([
+                            'status' => 'delivered',
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+                }
+                $processed = true;
+                continue;
+            }
+
+            // Read receipts
+            if (isset($event['read'])) {
+                $processed = true;
+                continue;
+            }
+
+            // Inbound messages
+            if (isset($event['message'])) {
+                $text = $event['message']['text'] ?? '';
+                $msgId = $event['message']['mid'] ?? '';
+                $msgType = 'text';
+
+                // Handle attachments
+                if (empty($text) && !empty($event['message']['attachments'])) {
+                    $att = $event['message']['attachments'][0];
+                    $attType = $att['type'] ?? 'fallback';
+                    if ($attType === 'image') {
+                        $msgType = 'image';
+                        $text = '[Image]';
+                    } elseif ($attType === 'video') {
+                        $msgType = 'video';
+                        $text = '[Video]';
+                    } elseif ($attType === 'audio') {
+                        $msgType = 'audio';
+                        $text = '[Audio]';
+                    } elseif ($attType === 'file') {
+                        $msgType = 'document';
+                        $text = '[File]';
+                    } else {
+                        $text = '[Attachment]';
+                    }
+                }
+
+                // Get sender profile name (with session caching)
+                $contactName = 'Messenger User';
+                if ($resolvedGatewayId) {
+                    $session = Capsule::table('mod_sms_messenger_sessions')
+                        ->where('psid', $senderId)
+                        ->where('gateway_id', $resolvedGatewayId)
+                        ->first();
+
+                    if ($session && !empty($session->name)) {
+                        $contactName = $session->name;
+                    } else {
+                        // Fetch profile from Graph API
+                        $gateway = Capsule::table('mod_sms_gateways')->where('id', $resolvedGatewayId)->first();
+                        if ($gateway) {
+                            require_once __DIR__ . '/sms_suite.php';
+                            $creds = json_decode(sms_suite_decrypt($gateway->credentials), true) ?: [];
+                            $token = $creds['page_access_token'] ?? '';
+
+                            if (!empty($token)) {
+                                $profileUrl = 'https://graph.facebook.com/v24.0/' . $senderId . '?fields=name,profile_pic&access_token=' . urlencode($token);
+                                $ch = curl_init($profileUrl);
+                                curl_setopt_array($ch, [
+                                    CURLOPT_RETURNTRANSFER => true,
+                                    CURLOPT_TIMEOUT => 10,
+                                ]);
+                                $profileResp = curl_exec($ch);
+                                curl_close($ch);
+                                $profileData = json_decode($profileResp, true);
+
+                                if (!empty($profileData['name'])) {
+                                    $contactName = $profileData['name'];
+                                }
+
+                                // Store/update session
+                                if ($session) {
+                                    Capsule::table('mod_sms_messenger_sessions')
+                                        ->where('id', $session->id)
+                                        ->update([
+                                            'name' => $contactName,
+                                            'profile_pic' => $profileData['profile_pic'] ?? null,
+                                            'updated_at' => date('Y-m-d H:i:s'),
+                                        ]);
+                                } else {
+                                    Capsule::table('mod_sms_messenger_sessions')->insert([
+                                        'psid' => $senderId,
+                                        'gateway_id' => $resolvedGatewayId,
+                                        'name' => $contactName,
+                                        'profile_pic' => $profileData['profile_pic'] ?? null,
+                                        'created_at' => date('Y-m-d H:i:s'),
+                                        'updated_at' => date('Y-m-d H:i:s'),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Route to WhatsApp-style chatbox handler
+                require_once __DIR__ . '/lib/WhatsApp/WhatsAppService.php';
+
+                $result = \SMSSuite\WhatsApp\WhatsAppService::handleInbound([
+                    'from' => $senderId,
+                    'text' => $text,
+                    'type' => $msgType,
+                    'message_id' => $msgId,
+                    'timestamp' => $event['timestamp'] ?? time(),
+                    'gateway_id' => $resolvedGatewayId,
+                    'channel' => 'messenger',
+                    'contact_name' => $contactName,
+                ]);
+
+                // AI Chatbot auto-reply
+                $chatbotFile = __DIR__ . '/lib/AI/ChatbotService.php';
+                if (file_exists($chatbotFile) && !empty($text)) {
+                    require_once $chatbotFile;
+                    $gateway = $resolvedGatewayId
+                        ? Capsule::table('mod_sms_gateways')->where('id', $resolvedGatewayId)->first()
+                        : null;
+                    $gatewayClientId = $gateway ? ($gateway->client_id ?? 0) : 0;
+
+                    if (\SMSSuite\AI\ChatbotService::shouldAutoReply($gatewayClientId ?: null, $resolvedGatewayId, 'messenger')) {
+                        $chatboxId = $result['chatbox_id'] ?? null;
+                        $reply = \SMSSuite\AI\ChatbotService::generateReply($text, $chatboxId, $gatewayClientId ?: null);
+                        if ($reply && $chatboxId) {
+                            // Send reply via Messenger
+                            $baseDir = __DIR__ . '/lib/Gateways/';
+                            require_once $baseDir . 'GatewayInterface.php';
+                            require_once $baseDir . 'AbstractGateway.php';
+                            require_once $baseDir . 'MessengerGateway.php';
+
+                            if ($gateway) {
+                                require_once __DIR__ . '/sms_suite.php';
+                                $creds = json_decode(sms_suite_decrypt($gateway->credentials), true) ?: [];
+                                $mg = new \SMSSuite\Gateways\MessengerGateway(0, []);
+                                $mg->setConfig(array_merge($creds, ['gateway_id' => $resolvedGatewayId]));
+
+                                $dto = new \SMSSuite\Gateways\MessageDTO([
+                                    'to' => $senderId,
+                                    'message' => $reply,
+                                    'channel' => 'messenger',
+                                ]);
+                                $sendResult = $mg->send($dto);
+
+                                if ($sendResult->success) {
+                                    $replyMsgId = Capsule::table('mod_sms_messages')->insertGetId([
+                                        'client_id' => $gatewayClientId,
+                                        'gateway_id' => $resolvedGatewayId,
+                                        'channel' => 'messenger',
+                                        'direction' => 'outbound',
+                                        'to_number' => $senderId,
+                                        'message' => $reply,
+                                        'provider_message_id' => $sendResult->messageId,
+                                        'status' => 'sent',
+                                        'created_at' => date('Y-m-d H:i:s'),
+                                        'updated_at' => date('Y-m-d H:i:s'),
+                                    ]);
+
+                                    Capsule::table('mod_sms_chatbox_messages')->insert([
+                                        'chatbox_id' => $chatboxId,
+                                        'message_id' => $replyMsgId,
+                                        'direction' => 'outbound',
+                                        'created_at' => date('Y-m-d H:i:s'),
+                                    ]);
+
+                                    Capsule::table('mod_sms_chatbox')
+                                        ->where('id', $chatboxId)
+                                        ->update([
+                                            'last_message' => substr($reply, 0, 255),
+                                            'last_message_at' => date('Y-m-d H:i:s'),
+                                            'updated_at' => date('Y-m-d H:i:s'),
+                                        ]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                $processed = true;
+            }
+
+            // Postback handling (button clicks)
+            if (isset($event['postback'])) {
+                $postbackText = $event['postback']['payload'] ?? '';
+                if (!empty($postbackText)) {
+                    require_once __DIR__ . '/lib/WhatsApp/WhatsAppService.php';
+                    \SMSSuite\WhatsApp\WhatsAppService::handleInbound([
+                        'from' => $senderId,
+                        'text' => $postbackText,
+                        'type' => 'text',
+                        'message_id' => 'postback_' . time(),
+                        'timestamp' => $event['timestamp'] ?? time(),
+                        'gateway_id' => $resolvedGatewayId,
+                        'channel' => 'messenger',
+                        'contact_name' => 'Messenger User',
+                    ]);
+                    $processed = true;
+                }
+            }
+        }
+    }
+
+    return ['processed' => $processed, 'type' => 'messenger'];
 }

@@ -79,6 +79,11 @@ add_hook('ClientAreaPrimaryNavbar', 1, function ($navbar) {
                 'uri' => 'index.php?m=sms_suite&action=contacts',
                 'order' => 40,
             ]);
+            $messaging->addChild('AI Chatbot', [
+                'label' => 'AI Chatbot',
+                'uri' => 'index.php?m=sms_suite&action=chatbot',
+                'order' => 50,
+            ]);
             $messaging->addChild('Preferences', [
                 'label' => 'Preferences',
                 'uri' => 'index.php?m=sms_suite&action=preferences',

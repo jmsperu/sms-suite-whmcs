@@ -100,6 +100,20 @@ function sms_suite_config()
                 'Default' => '1265471198823134',
                 'Description' => 'Embedded Signup Configuration ID',
             ],
+            'ai_provider' => [
+                'FriendlyName' => 'AI Chatbot Provider',
+                'Type' => 'dropdown',
+                'Options' => 'none,claude,openai,gemini,deepseek,mistral,groq,cohere,xai',
+                'Default' => 'none',
+                'Description' => 'Default AI provider for chatbot auto-replies',
+            ],
+            'ai_api_key' => [
+                'FriendlyName' => 'AI API Key',
+                'Type' => 'password',
+                'Size' => '80',
+                'Default' => '',
+                'Description' => 'System API key for the selected AI provider. Clients can optionally use their own keys.',
+            ],
         ],
     ];
 }
@@ -233,6 +247,7 @@ function sms_suite_drop_tables_sql()
         'mod_sms_auto_replies',
         'mod_sms_chatbox_messages',
         'mod_sms_chatbox',
+        'mod_sms_messenger_sessions',
         'mod_sms_whatsapp_templates',
         // Original tables
         'mod_sms_rate_limits',
@@ -1782,6 +1797,83 @@ function sms_suite_create_tables_sql()
         ", "Create mod_sms_chatbox_messages");
     }
 
+    // Add channel index to chatbox if missing
+    $hasChannelIdx = false;
+    try {
+        $idxRows = Capsule::select("SHOW INDEX FROM `mod_sms_chatbox` WHERE Key_name = 'idx_channel'");
+        $hasChannelIdx = !empty($idxRows);
+    } catch (\Exception $e) {}
+    if (!$hasChannelIdx && $tableExists('mod_sms_chatbox')) {
+        $execSql("ALTER TABLE `mod_sms_chatbox` ADD INDEX `idx_channel` (`channel`)", "Add idx_channel to mod_sms_chatbox");
+    }
+
+    // One-time backfill: populate mod_sms_chatbox from existing mod_sms_messages
+    if ($tableExists('mod_sms_chatbox') && $tableExists('mod_sms_messages')) {
+        $chatboxCount = (int)Capsule::table('mod_sms_chatbox')->count();
+        if ($chatboxCount === 0) {
+            // Backfill from messages grouped by client_id + to_number + channel
+            try {
+                $grouped = Capsule::table('mod_sms_messages')
+                    ->selectRaw('client_id, to_number, channel, gateway_id, MAX(message) as last_msg, MAX(created_at) as last_time, COUNT(*) as msg_count')
+                    ->whereNotNull('to_number')
+                    ->where('to_number', '!=', '')
+                    ->groupBy('client_id', 'to_number', 'channel', 'gateway_id')
+                    ->orderBy('last_time', 'desc')
+                    ->limit(500)
+                    ->get();
+
+                foreach ($grouped as $row) {
+                    // Try to find contact name
+                    $contactName = null;
+                    $contact = Capsule::table('mod_sms_contacts')
+                        ->where('phone', $row->to_number)
+                        ->first();
+                    if ($contact) {
+                        $contactName = trim(($contact->first_name ?? '') . ' ' . ($contact->last_name ?? ''));
+                    }
+
+                    $chatboxId = Capsule::table('mod_sms_chatbox')->insertGetId([
+                        'client_id' => $row->client_id ?: null,
+                        'gateway_id' => $row->gateway_id ?: null,
+                        'phone' => $row->to_number,
+                        'contact_name' => $contactName ?: null,
+                        'channel' => $row->channel ?: 'sms',
+                        'last_message' => substr($row->last_msg ?? '', 0, 255),
+                        'last_message_at' => $row->last_time,
+                        'unread_count' => 0,
+                        'status' => 'open',
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+
+                    // Link messages to chatbox
+                    $msgs = Capsule::table('mod_sms_messages')
+                        ->where('to_number', $row->to_number)
+                        ->where('client_id', $row->client_id ?? 0)
+                        ->where('channel', $row->channel ?: 'sms')
+                        ->orderBy('created_at', 'asc')
+                        ->limit(100)
+                        ->get();
+
+                    foreach ($msgs as $msg) {
+                        Capsule::table('mod_sms_chatbox_messages')->insert([
+                            'chatbox_id' => $chatboxId,
+                            'message_id' => $msg->id,
+                            'direction' => $msg->direction ?? 'outbound',
+                            'created_at' => $msg->created_at,
+                        ]);
+                    }
+                }
+
+                if (count($grouped) > 0) {
+                    logActivity("SMS Suite: Backfilled " . count($grouped) . " chatbox conversations from existing messages");
+                }
+            } catch (\Exception $e) {
+                logActivity("SMS Suite: Chatbox backfill error - " . $e->getMessage());
+            }
+        }
+    }
+
     // 38. Auto-replies
     if (!$tableExists('mod_sms_auto_replies')) {
         $execSql("
@@ -2562,6 +2654,69 @@ function sms_suite_create_tables_sql()
         if (!$columnExists('mod_sms_notification_templates', 'wa_enabled')) {
             $execSql("ALTER TABLE `mod_sms_notification_templates` ADD COLUMN `wa_enabled` TINYINT(1) DEFAULT 0 AFTER `status`", "Add wa_enabled to mod_sms_notification_templates");
         }
+    }
+
+    // 45. Telegram sessions (chat_id → client mapping)
+    if (!$tableExists('mod_sms_telegram_sessions')) {
+        $execSql("
+            CREATE TABLE `mod_sms_telegram_sessions` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `chat_id` BIGINT NOT NULL,
+                `client_id` INT UNSIGNED DEFAULT NULL,
+                `gateway_id` INT UNSIGNED DEFAULT NULL,
+                `username` VARCHAR(100) DEFAULT NULL,
+                `first_name` VARCHAR(100) DEFAULT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_chat_gateway` (`chat_id`, `gateway_id`),
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_gateway_id` (`gateway_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_telegram_sessions");
+    }
+
+    // 46b. Messenger sessions (PSID → profile mapping)
+    if (!$tableExists('mod_sms_messenger_sessions')) {
+        $execSql("
+            CREATE TABLE `mod_sms_messenger_sessions` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `psid` VARCHAR(50) NOT NULL,
+                `client_id` INT UNSIGNED DEFAULT NULL,
+                `gateway_id` INT UNSIGNED DEFAULT NULL,
+                `name` VARCHAR(200) DEFAULT NULL,
+                `profile_pic` TEXT DEFAULT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_psid_gateway` (`psid`, `gateway_id`),
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_gateway_id` (`gateway_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_messenger_sessions");
+    }
+
+    // 46. AI Chatbot configuration
+    if (!$tableExists('mod_sms_chatbot_config')) {
+        $execSql("
+            CREATE TABLE `mod_sms_chatbot_config` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `client_id` INT UNSIGNED DEFAULT NULL,
+                `gateway_id` INT UNSIGNED DEFAULT NULL,
+                `enabled` TINYINT(1) DEFAULT 0,
+                `provider` VARCHAR(20) DEFAULT 'claude',
+                `model` VARCHAR(50) DEFAULT NULL,
+                `system_prompt` TEXT,
+                `max_tokens` INT DEFAULT 300,
+                `temperature` DECIMAL(3,2) DEFAULT 0.70,
+                `channels` VARCHAR(100) DEFAULT 'whatsapp,telegram',
+                `business_hours` VARCHAR(500) DEFAULT NULL,
+                `fallback_message` TEXT,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `unique_client_gateway` (`client_id`, `gateway_id`),
+                INDEX `idx_client_id` (`client_id`),
+                INDEX `idx_enabled` (`enabled`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_chatbot_config");
     }
 
     // Log creation result

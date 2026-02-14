@@ -50,6 +50,8 @@
                             <select name="channel" id="channel" class="form-control">
                                 <option value="sms" {if $posted.channel eq 'sms' || !$posted.channel}selected{/if}>SMS</option>
                                 <option value="whatsapp" {if $posted.channel eq 'whatsapp'}selected{/if}>WhatsApp</option>
+                                {if $has_telegram}<option value="telegram" {if $posted.channel eq 'telegram'}selected{/if}>Telegram</option>{/if}
+                                {if $has_messenger}<option value="messenger" {if $posted.channel eq 'messenger'}selected{/if}>Messenger</option>{/if}
                             </select>
                         </div>
 
@@ -285,10 +287,11 @@ if (toField) {
         if (!message || message.length === 0) {
             return { encoding: 'gsm7', length: 0, segments: 0, remaining: 160, perMessage: 160 };
         }
-        if (channel === 'whatsapp') {
+        if (channel === 'whatsapp' || channel === 'telegram' || channel === 'messenger') {
             var len = message.length;
-            var segments = Math.ceil(len / 1000);
-            return { encoding: 'whatsapp', length: len, segments: segments, remaining: (1000 * segments) - len, perMessage: 1000 };
+            var limit = channel === 'telegram' ? 4096 : (channel === 'messenger' ? 2000 : 1000);
+            var segments = Math.ceil(len / limit);
+            return { encoding: channel, length: len, segments: segments, remaining: (limit * segments) - len, perMessage: limit };
         }
         var codePoints = getCodePoints(message);
         var encoding = detectEncoding(codePoints);
@@ -365,12 +368,21 @@ if (toField) {
         var ch = document.getElementById('channel').value;
         var senderGroup = document.getElementById('sender_id_group');
         var segmentInfo = document.getElementById('segmentInfo');
-        if (ch === 'whatsapp') {
+        var recipientLabel = document.querySelector('label[for="to"]');
+        if (ch === 'whatsapp' || ch === 'telegram' || ch === 'messenger') {
             if (senderGroup) senderGroup.style.display = 'none';
             if (segmentInfo) segmentInfo.style.display = 'none';
+            if (ch === 'telegram' && recipientLabel) {
+                recipientLabel.innerHTML = 'Chat ID(s) <span class="text-danger">*</span>';
+            } else if (ch === 'messenger' && recipientLabel) {
+                recipientLabel.innerHTML = 'PSID(s) <span class="text-danger">*</span>';
+            }
         } else {
             if (senderGroup) senderGroup.style.display = '';
             if (segmentInfo) segmentInfo.style.display = '';
+            if (recipientLabel) {
+                recipientLabel.innerHTML = '{$lang.recipient|default:"Recipients"} <span class="text-danger">*</span>';
+            }
         }
     }
 
