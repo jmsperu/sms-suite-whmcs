@@ -24,8 +24,8 @@ add_hook('ClientAreaPrimarySidebar', 1, function ($sidebar) {
 
         if (!is_null($sidebar->getChild('My Account'))) {
             $sidebar->getChild('My Account')
-                ->addChild('SMS Suite', [
-                    'label' => 'SMS Suite',
+                ->addChild('Messaging Suite', [
+                    'label' => 'Messaging Suite',
                     'uri' => 'index.php?m=sms_suite',
                     'icon' => 'fa-comment',
                     'order' => 100,
@@ -310,7 +310,7 @@ add_hook('AdminAreaClientSummaryPage', 1, function ($vars) {
         <div class="panel panel-default" id="sms-suite-client-panel">
             <div class="panel-heading">
                 <h3 class="panel-title">
-                    <i class="fas fa-sms"></i> SMS Suite
+                    <i class="fas fa-comments"></i> Messaging Suite
                     <a href="addonmodules.php?module=sms_suite&action=client_settings&client_id=' . $clientId . '" class="btn btn-xs btn-default pull-right">
                         <i class="fas fa-cog"></i> Settings
                     </a>

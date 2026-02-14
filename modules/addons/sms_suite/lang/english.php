@@ -5,9 +5,9 @@
 
 $_LANG = [
     // General
-    'module_name' => 'SMS Suite',
-    'welcome_title' => 'Welcome to SMS Suite',
-    'welcome_message' => 'SMS Suite is a comprehensive messaging platform for SMS and WhatsApp. Configure your gateways to get started.',
+    'module_name' => 'Messaging Suite',
+    'welcome_title' => 'Welcome to Messaging Suite',
+    'welcome_message' => 'Messaging Suite is a comprehensive platform for SMS, WhatsApp, and more. Configure your gateways to get started.',
     'quick_links' => 'Quick Links',
     'statistics' => 'Statistics',
     'save' => 'Save',

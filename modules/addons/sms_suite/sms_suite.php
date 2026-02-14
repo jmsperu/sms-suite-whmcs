@@ -26,10 +26,10 @@ define('SMS_SUITE_TABLE_PREFIX', 'mod_sms_');
 function sms_suite_config()
 {
     return [
-        'name' => 'SMS Suite',
-        'description' => 'Comprehensive SMS and WhatsApp messaging platform with campaigns, contacts, billing, and API access.',
+        'name' => 'Messaging Suite',
+        'description' => 'Comprehensive messaging platform for SMS, WhatsApp, and more — with campaigns, contacts, billing, and API access.',
         'version' => SMS_SUITE_VERSION,
-        'author' => 'SMS Suite',
+        'author' => 'Messaging Suite',
         'language' => 'english',
         'fields' => [
             'default_sender_id' => [
@@ -448,8 +448,8 @@ function sms_suite_clientarea($vars)
 
     if (!$clientId) {
         return [
-            'pagetitle' => 'SMS Suite',
-            'breadcrumb' => [$modulelink => 'SMS Suite'],
+            'pagetitle' => 'Messaging Suite',
+            'breadcrumb' => [$modulelink => 'Messaging Suite'],
             'templatefile' => 'templates/client/error',
             'vars' => [
                 'error' => 'You must be logged in to access this page.',
@@ -642,8 +642,8 @@ function sms_suite_clientarea($vars)
 
     // Fallback basic output
     return [
-        'pagetitle' => 'SMS Suite',
-        'breadcrumb' => [$modulelink => 'SMS Suite'],
+        'pagetitle' => 'Messaging Suite',
+        'breadcrumb' => [$modulelink => 'Messaging Suite'],
         'templatefile' => 'templates/client/dashboard',
         'requirelogin' => true,
         'forcessl' => false,
