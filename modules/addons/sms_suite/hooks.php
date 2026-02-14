@@ -667,32 +667,29 @@ add_hook('EmailPreSend', 1, function ($vars) {
             $mergeData['error_message'] = 'Please update your payment method or contact support.';
         }
 
-        // Send SMS notification
-        require_once __DIR__ . '/lib/Core/TemplateService.php';
-        require_once __DIR__ . '/lib/Core/MessageService.php';
-
-        $phone = \SMSSuite\Core\NotificationService::getClientPhone($client);
-        if (empty($phone)) {
-            return;
-        }
-
-        $message = \SMSSuite\Core\TemplateService::render($smsTemplate['content'], $mergeData);
-        \SMSSuite\Core\MessageService::send($clientId, $phone, $message, ['context' => 'notification', 'send_now' => true]);
-
-        // Send WhatsApp template notification in parallel
-        try {
-            $notifType = \SMSSuite\Core\NotificationService::EMAIL_TEMPLATE_MAP[$templateName] ?? null;
-            if ($notifType) {
-                \SMSSuite\Core\NotificationService::sendWhatsAppNotification($clientId, $notifType, $mergeData);
-            }
-        } catch (\Throwable $e) {
-            logActivity('SMS Suite WA Hook: ' . $e->getMessage());
+        // Send SMS + WhatsApp via sendClientNotification (handles deduplication)
+        $notifType = \SMSSuite\Core\NotificationService::EMAIL_TEMPLATE_MAP[$templateName] ?? null;
+        if ($notifType) {
+            \SMSSuite\Core\NotificationService::sendClientNotification($clientId, $notifType, $mergeData);
         }
 
     } catch (Exception $e) {
         logActivity('SMS Suite Hook Error (EmailPreSend): ' . $e->getMessage());
     }
 });
+
+/**
+ * Resolve currency prefix for a client (e.g. "KES", "$", "£")
+ */
+function sms_suite_get_currency_prefix($client): string
+{
+    try {
+        $currency = Capsule::table('tblcurrencies')->where('id', $client->currency)->first();
+        return $currency ? ($currency->prefix ?: $currency->code ?: '') : '';
+    } catch (\Exception $e) {
+        return '';
+    }
+}
 
 /**
  * Invoice specific notification hooks
@@ -708,12 +705,13 @@ add_hook('InvoiceCreated', 5, function($vars) {
 
         require_once __DIR__ . '/lib/Core/NotificationService.php';
 
+        $currencyPrefix = sms_suite_get_currency_prefix($client);
         \SMSSuite\Core\NotificationService::sendClientNotification($invoice->userid, 'invoice_created', [
-            'invoice_number' => $invoiceId,
+            'invoice_number' => $invoice->invoicenum ?: $invoiceId,
             'invoice_id' => $invoiceId,
-            'total' => $invoice->total,
+            'total' => $currencyPrefix . number_format($invoice->total, 2),
             'due_date' => date('M d, Y', strtotime($invoice->duedate)),
-            'currency' => $client->currency == 1 ? '$' : '',
+            'currency' => $currencyPrefix,
             'invoice_url' => rtrim(\App::getSystemURL(), '/') . '/viewinvoice.php?id=' . $invoiceId,
         ]);
     } catch (Exception $e) {
@@ -732,18 +730,20 @@ add_hook('InvoicePaidPreEmail', 5, function($vars) {
 
         require_once __DIR__ . '/lib/Core/NotificationService.php';
 
+        $currencyPrefix = sms_suite_get_currency_prefix($client);
         \SMSSuite\Core\NotificationService::sendClientNotification($invoice->userid, 'invoice_paid', [
-            'invoice_number' => $invoiceId,
-            'total' => $invoice->total,
-            'currency' => $client->currency == 1 ? '$' : '',
+            'invoice_number' => $invoice->invoicenum ?: $invoiceId,
+            'invoice_id' => $invoiceId,
+            'total' => $currencyPrefix . number_format($invoice->total, 2),
+            'currency' => $currencyPrefix,
         ]);
 
         // Also notify admins
         \SMSSuite\Core\NotificationService::sendAdminNotification('order_paid', [
-            'order_id' => $invoiceId,
+            'order_id' => $invoice->invoicenum ?: $invoiceId,
             'client_name' => $client->firstname . ' ' . $client->lastname,
-            'total' => $invoice->total,
-            'currency' => '$',
+            'total' => $currencyPrefix . number_format($invoice->total, 2),
+            'currency' => $currencyPrefix,
         ]);
     } catch (Exception $e) {
         logActivity('SMS Suite Hook Error (InvoicePaidPreEmail): ' . $e->getMessage());
@@ -767,19 +767,20 @@ add_hook('AfterShoppingCartCheckout', 5, function($vars) {
         require_once __DIR__ . '/lib/Core/NotificationService.php';
 
         // Send client notification
+        $currencyPrefix = sms_suite_get_currency_prefix($client);
         \SMSSuite\Core\NotificationService::sendClientNotification($order->userid, 'order_confirmation', [
             'order_number' => $order->ordernum,
             'order_id' => $orderId,
-            'total' => $order->amount,
-            'currency' => '$',
+            'total' => $currencyPrefix . number_format($order->amount, 2),
+            'currency' => $currencyPrefix,
         ]);
 
         // Notify admins of new order
         \SMSSuite\Core\NotificationService::sendAdminNotification('new_order', [
             'order_id' => $order->ordernum,
             'client_name' => $client->firstname . ' ' . $client->lastname,
-            'total' => $order->amount,
-            'currency' => '$',
+            'total' => $currencyPrefix . number_format($order->amount, 2),
+            'currency' => $currencyPrefix,
         ]);
 
     } catch (Exception $e) {
@@ -1020,10 +1021,12 @@ add_hook('QuoteCreated', 5, function($vars) {
 
         require_once __DIR__ . '/lib/Core/NotificationService.php';
 
+        $quoteClient = Capsule::table('tblclients')->where('id', $quote->userid)->first();
+        $currencyPrefix = $quoteClient ? sms_suite_get_currency_prefix($quoteClient) : '';
         \SMSSuite\Core\NotificationService::sendClientNotification($quote->userid, 'quote_created', [
             'quote_number' => $quoteId,
-            'total' => $quote->total,
-            'currency' => '$',
+            'total' => $currencyPrefix . number_format($quote->total, 2),
+            'currency' => $currencyPrefix,
             'quote_url' => rtrim(\App::getSystemURL(), '/') . '/viewquote.php?id=' . $quoteId,
         ]);
     } catch (Exception $e) {

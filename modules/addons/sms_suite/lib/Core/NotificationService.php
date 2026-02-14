@@ -108,7 +108,7 @@ class NotificationService
         try {
             $template = Capsule::table('mod_sms_notification_templates')
                 ->where('notification_type', $notificationType)
-                ->where('status', 1)
+                ->where('status', 'active')
                 ->first();
         } catch (Exception $e) {
             // Column may not exist on older installs before migration
@@ -203,6 +203,7 @@ class NotificationService
                         'notification_type' => $type,
                         'name' => $template['name'],
                         'message' => $template['message'],
+                        'content' => $template['message'],
                         'category' => self::getCategoryForType($type),
                         'status' => 'inactive', // Inactive by default, admin enables
                         'created_at' => date('Y-m-d H:i:s'),
@@ -395,6 +396,12 @@ class NotificationService
         string $notificationType,
         array $mergeData = []
     ): array {
+        // Deduplication: prevent duplicate SMS sends within same request
+        $smsDedupKey = $clientId . ':' . $notificationType;
+        if (isset(self::$smsSentThisRequest[$smsDedupKey])) {
+            return ['success' => false, 'error' => 'Already sent this request'];
+        }
+
         // Get client phone number
         $client = Capsule::table('tblclients')
             ->where('id', $clientId)
@@ -414,7 +421,7 @@ class NotificationService
         try {
             $template = Capsule::table('mod_sms_notification_templates')
                 ->where('notification_type', $notificationType)
-                ->where('status', 1)
+                ->where('status', 'active')
                 ->first();
         } catch (Exception $e) {
             // Column may not exist on older installs before migration
@@ -456,6 +463,9 @@ class NotificationService
         // Send via MessageService (SMS) — send immediately for notifications
         require_once __DIR__ . '/MessageService.php';
         $result = MessageService::send($clientId, $phone, $message, ['context' => 'notification', 'send_now' => true]);
+
+        // Mark as sent for deduplication
+        self::$smsSentThisRequest[$smsDedupKey] = true;
 
         // Send WhatsApp notification in parallel (failures never block SMS)
         try {
@@ -688,6 +698,11 @@ class NotificationService
     // ============ WhatsApp Template Notification Methods ============
 
     /**
+     * Track sent SMS notifications this request to prevent duplicates
+     */
+    private static $smsSentThisRequest = [];
+
+    /**
      * Track sent WhatsApp notifications this request to prevent duplicates
      */
     private static $waSentThisRequest = [];
@@ -712,7 +727,7 @@ class NotificationService
         try {
             $template = Capsule::table('mod_sms_notification_templates')
                 ->where('notification_type', $notificationType)
-                ->where('status', 1)
+                ->where('status', 'active')
                 ->first();
         } catch (Exception $e) {
             return ['success' => false, 'error' => 'Template lookup failed'];

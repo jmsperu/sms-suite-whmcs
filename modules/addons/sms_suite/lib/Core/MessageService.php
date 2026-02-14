@@ -481,7 +481,12 @@ class MessageService
             ->orderBy('id')
             ->first();
 
-        return $senderId ? $senderId->sender_id : null;
+        if ($senderId) {
+            return $senderId->sender_id;
+        }
+
+        // Fall back to system default sender ID
+        return self::getSystemDefaultSenderId();
     }
 
     /**

@@ -1512,6 +1512,23 @@ function sms_suite_create_tables_sql()
             $execSql("ALTER TABLE `mod_sms_notification_templates` ADD COLUMN `message` TEXT AFTER `subject`", "Add message to mod_sms_notification_templates");
         }
         // Migrate status from TINYINT to VARCHAR if needed (1→active, 0→inactive)
+        try {
+            $pdo = Capsule::connection()->getPdo();
+            $col = $pdo->query("SHOW COLUMNS FROM `mod_sms_notification_templates` LIKE 'status'")->fetch(\PDO::FETCH_ASSOC);
+            if ($col && stripos($col['Type'], 'tinyint') !== false) {
+                $pdo->exec("ALTER TABLE `mod_sms_notification_templates` MODIFY `status` VARCHAR(20) DEFAULT 'active'");
+                $pdo->exec("UPDATE `mod_sms_notification_templates` SET `status` = 'active' WHERE `status` = '1'");
+                $pdo->exec("UPDATE `mod_sms_notification_templates` SET `status` = 'inactive' WHERE `status` = '0'");
+            }
+        } catch (\Exception $e) {
+            // Migration may already be done
+        }
+        // Sync content column from message where content is NULL
+        try {
+            $pdo = Capsule::connection()->getPdo();
+            $pdo->exec("UPDATE `mod_sms_notification_templates` SET `content` = `message` WHERE `content` IS NULL AND `message` IS NOT NULL");
+            $pdo->exec("UPDATE `mod_sms_notification_templates` SET `message` = `content` WHERE `message` IS NULL AND `content` IS NOT NULL");
+        } catch (\Exception $e) {}
     }
 
     // 27. Admin notifications log

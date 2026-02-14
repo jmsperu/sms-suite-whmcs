@@ -4969,6 +4969,7 @@ function sms_suite_admin_notifications($vars, $lang)
                     ->where('id', $templateId)
                     ->update([
                         'message' => $message,
+                        'content' => $message,
                         'status' => $status,
                         'updated_at' => date('Y-m-d H:i:s'),
                     ]);
@@ -5172,7 +5173,7 @@ function sms_suite_admin_notifications($vars, $lang)
                 }
                 echo '</td>';
                 echo '<td>';
-                echo '<button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->message), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->status), ENT_QUOTES, 'UTF-8') . ')">Edit SMS</button> ';
+                echo '<button class="btn btn-xs btn-default" onclick="editTemplate(' . $t->id . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->content ?: $t->message), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->status), ENT_QUOTES, 'UTF-8') . ')">Edit SMS</button> ';
                 echo '<button class="btn btn-xs btn-info" onclick="editWaMapping(' . htmlspecialchars(json_encode($t->notification_type), ENT_QUOTES, 'UTF-8') . ', ' . htmlspecialchars(json_encode($t->name), ENT_QUOTES, 'UTF-8') . ')"><i class="fab fa-whatsapp"></i> Mapping</button>';
                 echo '</td>';
                 echo '</tr>';
@@ -5324,7 +5325,7 @@ function sms_suite_admin_notifications($vars, $lang)
         document.getElementById("edit_template_id").value = id;
         document.getElementById("edit_modal_title").textContent = "Edit: " + name;
         document.getElementById("edit_message").value = message;
-        document.getElementById("edit_status").checked = (status === "active");
+        document.getElementById("edit_status").checked = (status === "active" || status === 1 || status === "1");
         jQuery("#editModal").modal("show");
     }
 
