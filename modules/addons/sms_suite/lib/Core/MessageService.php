@@ -263,6 +263,26 @@ class MessageService
                     }
                 }
 
+                // Record Meta platform cost for WhatsApp messages
+                if ($message->channel === 'whatsapp') {
+                    try {
+                        require_once dirname(__DIR__) . '/Billing/MetaPricingService.php';
+                        $countryCodeForCost = self::extractCountryCode($message->to_number);
+                        $templateCategory = $message->template_name ? 'marketing' : 'utility';
+                        $platformCost = \SMSSuite\Billing\MetaPricingService::getMetaCost(
+                            $countryCodeForCost ?? 'US',
+                            $templateCategory
+                        );
+                        if ($platformCost !== null) {
+                            Capsule::table('mod_sms_messages')
+                                ->where('id', $messageId)
+                                ->update(['platform_cost' => $platformCost]);
+                        }
+                    } catch (\Exception $costErr) {
+                        // Non-fatal — don't break message delivery
+                    }
+                }
+
                 // Track outbound message in chatbox for unified inbox
                 try {
                     require_once dirname(__DIR__) . '/WhatsApp/WhatsAppService.php';

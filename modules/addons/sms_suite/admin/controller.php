@@ -169,6 +169,10 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
             sms_suite_admin_whatsapp_templates($vars, $lang);
             break;
 
+        case 'meta_wa_rates':
+            sms_suite_admin_meta_wa_rates($vars, $lang);
+            break;
+
         case 'download_doc':
             sms_suite_admin_download_document();
             break;
@@ -247,6 +251,7 @@ function sms_suite_admin_nav($modulelink, $currentAction, $lang)
             'billing_rates' => ['icon' => 'fa-dollar', 'label' => 'Billing Rates'],
             'client_rates' => ['icon' => 'fa-user-circle', 'label' => 'Client Rates'],
             'network_prefixes' => ['icon' => 'fa-globe', 'label' => 'Network Prefixes'],
+            'meta_wa_rates' => ['icon' => 'fa-whatsapp', 'label' => 'WA Platform Rates', 'icon_prefix' => 'fab'],
         ],
         'Analytics' => [
             'reports' => ['icon' => 'fa-bar-chart', 'label' => $lang['menu_reports']],
@@ -10494,6 +10499,381 @@ function sms_suite_admin_chatbot_settings($vars, $lang)
         xhr.send("message=" + encodeURIComponent(msg) + "&csrf_token=' . SecurityHelper::getCsrfToken() . '");
     }
     </script>';
+
+    echo '</div>'; // Close ms-content
+}
+
+/**
+ * Meta WhatsApp Platform Rates admin page
+ */
+function sms_suite_admin_meta_wa_rates($vars, $lang)
+{
+    $modulelink = $vars['modulelink'];
+
+    require_once __DIR__ . '/../lib/Billing/MetaPricingService.php';
+
+    // Handle POST actions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!SecurityHelper::verifyCsrfPost()) {
+            echo '<div class="alert alert-danger">Invalid security token. Please refresh and try again.</div>';
+        } else {
+            $formAction = $_POST['form_action'] ?? '';
+
+            if ($formAction === 'import_base_rates') {
+                $effectiveDate = $_POST['effective_date'] ?? date('Y-m-d');
+                if (!empty($_FILES['base_rates_csv']['tmp_name']) && $_FILES['base_rates_csv']['error'] === UPLOAD_ERR_OK) {
+                    $result = \SMSSuite\Billing\MetaPricingService::importBaseRates($_FILES['base_rates_csv']['tmp_name'], $effectiveDate);
+                    if ($result['success']) {
+                        echo '<div class="alert alert-success">Imported ' . $result['imported'] . ' base rates for ' . htmlspecialchars($effectiveDate) . '.</div>';
+                    } else {
+                        echo '<div class="alert alert-warning">Imported ' . $result['imported'] . ' rates with ' . count($result['errors']) . ' errors:<br>' . htmlspecialchars(implode('<br>', array_slice($result['errors'], 0, 5))) . '</div>';
+                    }
+                } else {
+                    echo '<div class="alert alert-danger">Please select a CSV file to upload.</div>';
+                }
+            } elseif ($formAction === 'import_volume_tiers') {
+                $effectiveDate = $_POST['effective_date'] ?? date('Y-m-d');
+                if (!empty($_FILES['volume_tiers_csv']['tmp_name']) && $_FILES['volume_tiers_csv']['error'] === UPLOAD_ERR_OK) {
+                    $result = \SMSSuite\Billing\MetaPricingService::importVolumeTiers($_FILES['volume_tiers_csv']['tmp_name'], $effectiveDate);
+                    if ($result['success']) {
+                        echo '<div class="alert alert-success">Imported ' . $result['imported'] . ' volume tiers for ' . htmlspecialchars($effectiveDate) . '.</div>';
+                    } else {
+                        echo '<div class="alert alert-warning">Imported ' . $result['imported'] . ' tiers with ' . count($result['errors']) . ' errors:<br>' . htmlspecialchars(implode('<br>', array_slice($result['errors'], 0, 5))) . '</div>';
+                    }
+                } else {
+                    echo '<div class="alert alert-danger">Please select a CSV file to upload.</div>';
+                }
+            } elseif ($formAction === 'seed_markets') {
+                $count = \SMSSuite\Billing\MetaPricingService::seedMarketMapping();
+                echo '<div class="alert alert-success">Seeded ' . $count . ' country-to-market mappings.</div>';
+            } elseif ($formAction === 'save_mapping') {
+                $countryCode = strtoupper(trim($_POST['country_code'] ?? ''));
+                $marketName = trim($_POST['market_name'] ?? '');
+                $countryName = trim($_POST['country_name'] ?? '');
+                if (!empty($countryCode) && !empty($marketName) && !empty($countryName)) {
+                    \SMSSuite\Billing\MetaPricingService::saveMapping($countryCode, $marketName, $countryName);
+                    echo '<div class="alert alert-success">Mapping saved: ' . htmlspecialchars($countryCode) . ' &rarr; ' . htmlspecialchars($marketName) . '</div>';
+                } else {
+                    echo '<div class="alert alert-danger">All fields are required.</div>';
+                }
+            } elseif ($formAction === 'delete_mapping') {
+                $mappingId = (int)($_POST['mapping_id'] ?? 0);
+                if ($mappingId > 0) {
+                    \SMSSuite\Billing\MetaPricingService::deleteMapping($mappingId);
+                    echo '<div class="alert alert-success">Mapping deleted.</div>';
+                }
+            }
+        }
+    }
+
+    $csrfToken = SecurityHelper::getCsrfToken();
+
+    // Get data
+    $effectiveDates = \SMSSuite\Billing\MetaPricingService::getEffectiveDates();
+    $selectedDate = $_GET['rate_date'] ?? ($effectiveDates[0] ?? null);
+    $allRates = \SMSSuite\Billing\MetaPricingService::getAllRates($selectedDate);
+    $mappings = \SMSSuite\Billing\MetaPricingService::getAllMappings();
+
+    // Get our destination rates for margin comparison
+    $destRates = [];
+    try {
+        $destRates = Capsule::table('mod_sms_destination_rates')
+            ->where('status', 1)
+            ->get()
+            ->keyBy('country_code');
+    } catch (\Exception $e) {
+        // Table may not exist
+    }
+
+    // Categories
+    $categories = ['marketing', 'utility', 'authentication', 'authentication_international', 'service'];
+    $categoryLabels = [
+        'marketing' => 'Marketing',
+        'utility' => 'Utility',
+        'authentication' => 'Auth',
+        'authentication_international' => 'Auth Intl',
+        'service' => 'Service',
+    ];
+
+    echo '<div class="ms-content">';
+    echo '<h2><i class="fab fa-whatsapp"></i> WA Platform Rates (Meta Pricing)</h2>';
+    echo '<p class="text-muted">Manage Meta WhatsApp Business Platform costs per market and message category.</p>';
+
+    // ── Import Panel ──
+    echo '<div class="panel panel-default">
+        <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-upload"></i> Import Rates</h3></div>
+        <div class="panel-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <h4>Base Rates CSV</h4>
+                    <p class="text-muted">CSV: Market, Marketing, Utility, Authentication, Auth-International, Service</p>
+                    <form method="post" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="' . $csrfToken . '">
+                        <input type="hidden" name="form_action" value="import_base_rates">
+                        <div class="form-group">
+                            <label>Effective Date</label>
+                            <input type="date" name="effective_date" class="form-control" value="' . date('Y-m-d') . '" required>
+                        </div>
+                        <div class="form-group">
+                            <label>CSV File</label>
+                            <input type="file" name="base_rates_csv" accept=".csv" class="form-control" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="fa fa-upload"></i> Import Base Rates</button>
+                    </form>
+                </div>
+                <div class="col-md-6">
+                    <h4>Volume Tiers CSV</h4>
+                    <p class="text-muted">CSV: Market, Category, Volume From, Volume To, Rate, Discount %</p>
+                    <form method="post" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="' . $csrfToken . '">
+                        <input type="hidden" name="form_action" value="import_volume_tiers">
+                        <div class="form-group">
+                            <label>Effective Date</label>
+                            <input type="date" name="effective_date" class="form-control" value="' . date('Y-m-d') . '" required>
+                        </div>
+                        <div class="form-group">
+                            <label>CSV File</label>
+                            <input type="file" name="volume_tiers_csv" accept=".csv" class="form-control" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="fa fa-upload"></i> Import Volume Tiers</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>';
+
+    // ── Base Rates Table ──
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <div class="row">
+                <div class="col-md-6"><h3 class="panel-title" style="line-height:34px"><i class="fa fa-table"></i> Base Rates (USD per message)</h3></div>
+                <div class="col-md-6 text-right">';
+
+    if (!empty($effectiveDates)) {
+        echo '<form method="get" class="form-inline" style="display:inline">
+            <input type="hidden" name="module" value="sms_suite">
+            <input type="hidden" name="action" value="meta_wa_rates">
+            <select name="rate_date" class="form-control input-sm" onchange="this.form.submit()">';
+        foreach ($effectiveDates as $date) {
+            $sel = ($date === $selectedDate) ? ' selected' : '';
+            echo '<option value="' . htmlspecialchars($date) . '"' . $sel . '>' . htmlspecialchars($date) . '</option>';
+        }
+        echo '</select></form>';
+    }
+
+    echo '    </div>
+            </div>
+        </div>
+        <div class="panel-body">';
+
+    if (empty($allRates)) {
+        echo '<div class="alert alert-info">No rates imported yet. Use the import panel above to upload Meta\'s rate CSV.</div>';
+    } else {
+        echo '<div class="table-responsive"><table class="table table-striped table-condensed table-hover">
+            <thead><tr><th>Market</th>';
+        foreach ($categories as $cat) {
+            echo '<th class="text-right">' . $categoryLabels[$cat] . '</th>';
+        }
+        echo '</tr></thead><tbody>';
+
+        foreach ($allRates as $market => $rates) {
+            echo '<tr><td><strong>' . htmlspecialchars($market) . '</strong></td>';
+            foreach ($categories as $cat) {
+                if (isset($rates[$cat])) {
+                    echo '<td class="text-right">$' . number_format($rates[$cat], 4) . '</td>';
+                } else {
+                    echo '<td class="text-right text-muted">&mdash;</td>';
+                }
+            }
+            echo '</tr>';
+        }
+
+        echo '</tbody></table></div>';
+        echo '<p class="text-muted">' . count($allRates) . ' markets &middot; Effective: ' . htmlspecialchars($selectedDate ?? 'N/A') . '</p>';
+    }
+
+    echo '</div></div>';
+
+    // ── Volume Tiers ──
+    $tiersExist = false;
+    try {
+        $tiersExist = Capsule::table('mod_sms_meta_wa_volume_tiers')->exists();
+    } catch (\Exception $e) {}
+
+    if ($tiersExist) {
+        echo '<div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-list-ol"></i> Volume Discount Tiers</h3></div>
+            <div class="panel-body">';
+
+        $tierMarkets = Capsule::table('mod_sms_meta_wa_volume_tiers')
+            ->select('market_name')
+            ->distinct()
+            ->orderBy('market_name')
+            ->pluck('market_name');
+
+        foreach ($tierMarkets as $tierMarket) {
+            $tiers = Capsule::table('mod_sms_meta_wa_volume_tiers')
+                ->where('market_name', $tierMarket)
+                ->orderBy('category')
+                ->orderBy('volume_from')
+                ->get();
+
+            $divId = 'tiers-' . md5($tierMarket);
+            echo '<h4 style="cursor:pointer" onclick="document.getElementById(\'' . $divId . '\').style.display = document.getElementById(\'' . $divId . '\').style.display === \'none\' ? \'block\' : \'none\'">
+                <i class="fa fa-caret-right"></i> ' . htmlspecialchars($tierMarket) . '
+                <small class="text-muted">(' . count($tiers) . ' tiers)</small>
+            </h4>';
+            echo '<div id="' . $divId . '" style="display:none">
+                <table class="table table-condensed table-striped">
+                <thead><tr><th>Category</th><th>From</th><th>To</th><th class="text-right">Rate</th><th class="text-right">Discount</th></tr></thead>
+                <tbody>';
+
+            foreach ($tiers as $tier) {
+                echo '<tr>
+                    <td>' . htmlspecialchars($tier->category) . '</td>
+                    <td>' . number_format($tier->volume_from) . '</td>
+                    <td>' . ($tier->volume_to ? number_format($tier->volume_to) : 'Unlimited') . '</td>
+                    <td class="text-right">$' . number_format($tier->rate, 4) . '</td>
+                    <td class="text-right">' . number_format($tier->discount_pct, 1) . '%</td>
+                </tr>';
+            }
+
+            echo '</tbody></table></div>';
+        }
+
+        echo '</div></div>';
+    }
+
+    // ── Country Mapping ──
+    echo '<div class="panel panel-default">
+        <div class="panel-heading">
+            <div class="row">
+                <div class="col-md-6"><h3 class="panel-title" style="line-height:34px"><i class="fa fa-globe"></i> Country &rarr; Market Mapping</h3></div>
+                <div class="col-md-6 text-right">
+                    <form method="post" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="' . $csrfToken . '">
+                        <input type="hidden" name="form_action" value="seed_markets">
+                        <button type="submit" class="btn btn-default btn-sm" onclick="return confirm(\'Seed/update default country mappings?\')"><i class="fa fa-database"></i> Seed Default Mappings</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="panel-body">';
+
+    // Add mapping form
+    echo '<form method="post" class="form-inline" style="margin-bottom:15px">
+        <input type="hidden" name="csrf_token" value="' . $csrfToken . '">
+        <input type="hidden" name="form_action" value="save_mapping">
+        <div class="form-group">
+            <input type="text" name="country_code" class="form-control input-sm" placeholder="CC (e.g. KE)" maxlength="5" style="width:80px" required>
+        </div>
+        <div class="form-group">
+            <input type="text" name="country_name" class="form-control input-sm" placeholder="Country Name" style="width:180px" required>
+        </div>
+        <div class="form-group">
+            <input type="text" name="market_name" class="form-control input-sm" placeholder="Market Name" style="width:200px" required>
+        </div>
+        <button type="submit" class="btn btn-success btn-sm"><i class="fa fa-plus"></i> Add</button>
+    </form>';
+
+    if (empty($mappings)) {
+        echo '<div class="alert alert-info">No country mappings yet. Click "Seed Default Mappings" to populate.</div>';
+    } else {
+        // Group by market
+        $grouped = [];
+        foreach ($mappings as $m) {
+            $grouped[$m->market_name][] = $m;
+        }
+        ksort($grouped);
+
+        echo '<div class="table-responsive"><table class="table table-condensed table-striped">
+            <thead><tr><th>Market</th><th>Code</th><th>Country</th><th width="60"></th></tr></thead>
+            <tbody>';
+
+        foreach ($grouped as $marketName => $countries) {
+            $first = true;
+            foreach ($countries as $c) {
+                echo '<tr>';
+                if ($first) {
+                    echo '<td rowspan="' . count($countries) . '"><strong>' . htmlspecialchars($marketName) . '</strong></td>';
+                    $first = false;
+                }
+                echo '<td><code>' . htmlspecialchars($c->country_code) . '</code></td>';
+                echo '<td>' . htmlspecialchars($c->country_name) . '</td>';
+                echo '<td>
+                    <form method="post" style="display:inline" onsubmit="return confirm(\'Delete?\')">
+                        <input type="hidden" name="csrf_token" value="' . $csrfToken . '">
+                        <input type="hidden" name="form_action" value="delete_mapping">
+                        <input type="hidden" name="mapping_id" value="' . $c->id . '">
+                        <button type="submit" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></button>
+                    </form>
+                </td>';
+                echo '</tr>';
+            }
+        }
+
+        echo '</tbody></table></div>';
+        echo '<p class="text-muted">' . count($mappings) . ' countries across ' . count($grouped) . ' markets</p>';
+    }
+
+    echo '</div></div>';
+
+    // ── Margin Overview ──
+    if (!empty($allRates) && !empty($mappings)) {
+        echo '<div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-balance-scale"></i> Margin Overview &mdash; Meta Cost vs Our Rates</h3></div>
+            <div class="panel-body">';
+
+        $marketCountries = [];
+        foreach ($mappings as $m) {
+            $marketCountries[$m->market_name][] = $m;
+        }
+        ksort($marketCountries);
+
+        echo '<div class="table-responsive"><table class="table table-condensed table-striped">
+            <thead><tr>
+                <th>Market</th>
+                <th>Sample</th>
+                <th class="text-right">Meta Cost (Util)</th>
+                <th class="text-right">Our WA Rate</th>
+                <th class="text-right">Margin</th>
+                <th class="text-right">Margin %</th>
+            </tr></thead><tbody>';
+
+        foreach ($marketCountries as $market => $countries) {
+            $metaCost = $allRates[$market]['utility'] ?? null;
+            $sampleCountry = $countries[0] ?? null;
+            $ourRate = null;
+            if ($sampleCountry && isset($destRates[$sampleCountry->country_code])) {
+                $ourRate = (float) $destRates[$sampleCountry->country_code]->whatsapp_rate;
+            }
+
+            echo '<tr>';
+            echo '<td><strong>' . htmlspecialchars($market) . '</strong></td>';
+            echo '<td>' . ($sampleCountry ? htmlspecialchars($sampleCountry->country_code) : '&mdash;') . '</td>';
+            echo '<td class="text-right">' . ($metaCost !== null ? '$' . number_format($metaCost, 4) : '&mdash;') . '</td>';
+
+            if ($ourRate !== null && $ourRate > 0) {
+                echo '<td class="text-right">$' . number_format($ourRate, 4) . '</td>';
+                if ($metaCost !== null && $metaCost > 0) {
+                    $margin = $ourRate - $metaCost;
+                    $marginPct = ($margin / $ourRate) * 100;
+                    $color = $margin >= 0 ? 'success' : 'danger';
+                    echo '<td class="text-right text-' . $color . '">$' . number_format($margin, 4) . '</td>';
+                    echo '<td class="text-right text-' . $color . '">' . number_format($marginPct, 1) . '%</td>';
+                } else {
+                    echo '<td class="text-right text-muted">&mdash;</td><td class="text-right text-muted">&mdash;</td>';
+                }
+            } else {
+                echo '<td class="text-right text-muted">Not set</td>';
+                echo '<td class="text-right text-muted">&mdash;</td><td class="text-right text-muted">&mdash;</td>';
+            }
+            echo '</tr>';
+        }
+
+        echo '</tbody></table></div>';
+        echo '</div></div>';
+    }
 
     echo '</div>'; // Close ms-content
 }

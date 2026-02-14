@@ -11,6 +11,7 @@
         <li><a href="{$modulelink}&action=inbox">Inbox</a></li>
         <li><a href="{$modulelink}&action=sender_ids">{$lang.sender_ids|default:'Sender IDs'}</a></li>
         <li class="active"><a href="{$modulelink}&action=billing">{$lang.billing}</a></li>
+        <li><a href="{$modulelink}&action=wa_rates">WA Rates</a></li>
         <li><a href="{$modulelink}&action=logs">{$lang.menu_messages}</a></li>
         <li><a href="{$modulelink}&action=preferences">{$lang.preferences|default:'Preferences'}</a></li>
     </ul>

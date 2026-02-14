@@ -72,6 +72,9 @@ function sms_suite_client_dispatch($vars, $action, $clientId, $lang)
         case 'billing':
             return sms_suite_client_billing($vars, $clientId, $lang);
 
+        case 'wa_rates':
+            return sms_suite_client_wa_rates($vars, $clientId, $lang);
+
         case 'reports':
             return sms_suite_client_reports($vars, $clientId, $lang);
 
@@ -2932,6 +2935,48 @@ function sms_suite_client_chatbot($vars, $clientId, $lang)
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),
+        ],
+    ];
+}
+
+/**
+ * WhatsApp Platform Rates - Client-facing rate card
+ */
+function sms_suite_client_wa_rates($vars, $clientId, $lang)
+{
+    require_once __DIR__ . '/../lib/Billing/MetaPricingService.php';
+
+    $modulelink = $vars['modulelink'];
+
+    // Get all rates (latest effective date)
+    $allRates = \SMSSuite\Billing\MetaPricingService::getAllRates();
+    $mappings = \SMSSuite\Billing\MetaPricingService::getAllMappings();
+    $effectiveDates = \SMSSuite\Billing\MetaPricingService::getEffectiveDates();
+    $latestDate = $effectiveDates[0] ?? null;
+
+    // Build country lookup for easy searching
+    $countryLookup = [];
+    foreach ($mappings as $m) {
+        $countryLookup[$m->country_code] = [
+            'name' => $m->country_name,
+            'market' => $m->market_name,
+        ];
+    }
+
+    return [
+        'pagetitle' => ($lang['module_name'] ?? 'Messaging Suite') . ' - WhatsApp Rates',
+        'breadcrumb' => [
+            $modulelink => $lang['module_name'] ?? 'Messaging Suite',
+            $modulelink . '&action=wa_rates' => 'WhatsApp Rates',
+        ],
+        'templatefile' => 'templates/client/wa_rates',
+        'vars' => [
+            'modulelink' => $modulelink,
+            'lang' => $lang,
+            'client_id' => $clientId,
+            'all_rates' => $allRates,
+            'country_lookup' => $countryLookup,
+            'effective_date' => $latestDate,
         ],
     ];
 }

@@ -2736,6 +2736,66 @@ function sms_suite_create_tables_sql()
         ", "Create mod_sms_chatbot_config");
     }
 
+    // 47. Meta WhatsApp base rates per market
+    if (!$tableExists('mod_sms_meta_wa_rates')) {
+        $execSql("
+            CREATE TABLE `mod_sms_meta_wa_rates` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `market_name` VARCHAR(100) NOT NULL,
+                `category` VARCHAR(40) NOT NULL,
+                `rate` DECIMAL(10,6) NOT NULL DEFAULT 0,
+                `effective_date` DATE NOT NULL,
+                UNIQUE KEY `unique_market_category_date` (`market_name`, `category`, `effective_date`),
+                INDEX `idx_market` (`market_name`),
+                INDEX `idx_effective_date` (`effective_date`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_meta_wa_rates");
+    }
+
+    // 48. Meta WhatsApp volume discount tiers
+    if (!$tableExists('mod_sms_meta_wa_volume_tiers')) {
+        $execSql("
+            CREATE TABLE `mod_sms_meta_wa_volume_tiers` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `market_name` VARCHAR(100) NOT NULL,
+                `category` VARCHAR(40) NOT NULL,
+                `volume_from` INT UNSIGNED NOT NULL DEFAULT 0,
+                `volume_to` INT UNSIGNED DEFAULT NULL,
+                `rate` DECIMAL(10,6) NOT NULL DEFAULT 0,
+                `discount_pct` DECIMAL(5,2) NOT NULL DEFAULT 0,
+                `effective_date` DATE NOT NULL,
+                INDEX `idx_market_category` (`market_name`, `category`),
+                INDEX `idx_effective_date` (`effective_date`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_meta_wa_volume_tiers");
+    }
+
+    // 49. Meta WhatsApp country→market mapping
+    if (!$tableExists('mod_sms_meta_wa_markets')) {
+        $execSql("
+            CREATE TABLE `mod_sms_meta_wa_markets` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `market_name` VARCHAR(100) NOT NULL,
+                `country_code` VARCHAR(5) NOT NULL,
+                `country_name` VARCHAR(100) NOT NULL,
+                UNIQUE KEY `unique_country_code` (`country_code`),
+                INDEX `idx_market_name` (`market_name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ", "Create mod_sms_meta_wa_markets");
+    }
+
+    // Add platform_cost column to mod_sms_messages
+    if ($tableExists('mod_sms_messages')) {
+        try {
+            $colCheck = Capsule::select("SHOW COLUMNS FROM `mod_sms_messages` LIKE 'platform_cost'");
+            if (empty($colCheck)) {
+                $execSql("ALTER TABLE `mod_sms_messages` ADD `platform_cost` DECIMAL(10,6) NULL AFTER `cost`", "Add platform_cost to mod_sms_messages");
+            }
+        } catch (\Exception $e) {
+            // Column may already exist
+        }
+    }
+
     // Log creation result
     if (empty($errors)) {
         logActivity('SMS Suite: All database tables created/verified successfully');
