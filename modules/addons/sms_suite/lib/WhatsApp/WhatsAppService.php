@@ -341,7 +341,13 @@ class WhatsAppService
     {
         try {
             $to = self::normalizePhone($to);
+            if (empty($to)) {
+                return ['success' => false, 'error' => 'Invalid phone number'];
+            }
             $gatewayId = $options['gateway_id'] ?? self::getWhatsAppGateway($clientId);
+            if (empty($gatewayId)) {
+                return ['success' => false, 'error' => 'No WhatsApp gateway configured'];
+            }
 
             $messagePayload = [
                 'type' => 'location',
@@ -753,6 +759,8 @@ class WhatsAppService
                 CURLOPT_POST => true,
                 CURLOPT_POSTFIELDS => json_encode($payload),
                 CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 15,
                 CURLOPT_HTTPHEADER => [
                     'Authorization: Bearer ' . $accessToken,
                     'Content-Type: application/json',
@@ -805,6 +813,8 @@ class WhatsAppService
             $ch = curl_init($url);
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 15,
                 CURLOPT_HTTPHEADER => [
                     'Authorization: Bearer ' . $accessToken,
                 ],
@@ -853,6 +863,8 @@ class WhatsAppService
             $ch = curl_init($url);
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 15,
                 CURLOPT_HTTPHEADER => [
                     'Authorization: Bearer ' . $accessToken,
                 ],
@@ -913,6 +925,8 @@ class WhatsAppService
             curl_setopt_array($ch, [
                 CURLOPT_CUSTOMREQUEST => 'DELETE',
                 CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 15,
                 CURLOPT_HTTPHEADER => [
                     'Authorization: Bearer ' . $accessToken,
                 ],
@@ -1141,6 +1155,8 @@ class WhatsAppService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => http_build_query($postData),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
             CURLOPT_USERPWD => "{$accountSid}:{$authToken}",
         ]);
 
@@ -1180,6 +1196,8 @@ class WhatsAppService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($body),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $accessToken,
                 'Content-Type: application/json',
@@ -1224,6 +1242,8 @@ class WhatsAppService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($body),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
             CURLOPT_HTTPHEADER => [
                 'Authorization: AccessKey ' . $accessKey,
                 'Content-Type: application/json',
@@ -1275,6 +1295,8 @@ class WhatsAppService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => http_build_query($postData),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
             CURLOPT_HTTPHEADER => [
                 'apikey: ' . $apiKey,
             ],
@@ -1314,6 +1336,8 @@ class WhatsAppService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($body),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Basic ' . $apiKey,
                 'Content-Type: application/json',
@@ -1367,6 +1391,8 @@ class WhatsAppService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => http_build_query($body),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 15,
         ]);
 
         $response = curl_exec($ch);
@@ -1406,6 +1432,8 @@ class WhatsAppService
         }
 
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);

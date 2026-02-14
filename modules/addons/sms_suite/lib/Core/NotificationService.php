@@ -261,6 +261,10 @@ class NotificationService
                 'name' => 'Order Cancelled',
                 'message' => 'Order #{order_number} has been cancelled.',
             ],
+            'order_refund' => [
+                'name' => 'Order Refund',
+                'message' => 'Refund of {currency}{amount} processed for order #{order_number}. Transaction: {transaction_id}',
+            ],
 
             // Invoices
             'invoice_created' => [
@@ -308,6 +312,10 @@ class NotificationService
             'quote_accepted' => [
                 'name' => 'Quote Accepted',
                 'message' => 'Quote #{quote_number} has been accepted. Thank you!',
+            ],
+            'quote_reminder' => [
+                'name' => 'Quote Reminder',
+                'message' => 'Reminder: Quote #{quote_number} for {currency}{total} expires soon. View: {quote_url}',
             ],
 
             // Domains
@@ -402,6 +410,17 @@ class NotificationService
             return ['success' => false, 'error' => 'Already sent this request'];
         }
 
+        // Cross-request dedup: check if same notification was sent in last 60 seconds
+        $recentSms = Capsule::table('mod_sms_messages')
+            ->where('client_id', $clientId)
+            ->where('channel', 'sms')
+            ->where('template_name', $notificationType)
+            ->where('created_at', '>=', date('Y-m-d H:i:s', strtotime('-60 seconds')))
+            ->exists();
+        if ($recentSms) {
+            return ['success' => false, 'error' => 'Duplicate notification (sent within last 60s)'];
+        }
+
         // Get client phone number
         $client = Capsule::table('tblclients')
             ->where('id', $clientId)
@@ -468,7 +487,11 @@ class NotificationService
 
         // Send via MessageService (SMS) — send immediately for notifications
         require_once __DIR__ . '/MessageService.php';
-        $result = MessageService::send($clientId, $phone, $message, ['context' => 'notification', 'send_now' => true]);
+        $result = MessageService::send($clientId, $phone, $message, [
+            'context' => 'notification',
+            'send_now' => true,
+            'template_name' => $notificationType,
+        ]);
 
         // Mark as sent for deduplication
         self::$smsSentThisRequest[$smsDedupKey] = true;
@@ -488,6 +511,8 @@ class NotificationService
      */
     public static function sendAdminNotification(string $event, array $data = []): array
     {
+        require_once __DIR__ . '/MessageService.php';
+
         // Get admins who want this notification
         $admins = Capsule::table('mod_sms_admin_notifications')
             ->where('event', $event)
@@ -638,17 +663,42 @@ class NotificationService
     private static function getCountryPhoneCode(string $countryCode): string
     {
         $codes = [
-            'US' => '+1', 'CA' => '+1', 'GB' => '+44', 'UK' => '+44',
-            'AU' => '+61', 'DE' => '+49', 'FR' => '+33', 'IN' => '+91',
-            'NG' => '+234', 'KE' => '+254', 'ZA' => '+27', 'GH' => '+233',
-            'BR' => '+55', 'MX' => '+52', 'ES' => '+34', 'IT' => '+39',
-            'NL' => '+31', 'BE' => '+32', 'CH' => '+41', 'AT' => '+43',
-            'SE' => '+46', 'NO' => '+47', 'DK' => '+45', 'FI' => '+358',
-            'PL' => '+48', 'PT' => '+351', 'IE' => '+353', 'SG' => '+65',
-            'MY' => '+60', 'PH' => '+63', 'ID' => '+62', 'TH' => '+66',
-            'JP' => '+81', 'KR' => '+82', 'CN' => '+86', 'HK' => '+852',
-            'TW' => '+886', 'NZ' => '+64', 'AE' => '+971', 'SA' => '+966',
-            'EG' => '+20', 'PK' => '+92', 'BD' => '+880', 'RU' => '+7',
+            // North America
+            'US' => '+1', 'CA' => '+1',
+            // Europe
+            'GB' => '+44', 'UK' => '+44', 'DE' => '+49', 'FR' => '+33',
+            'ES' => '+34', 'IT' => '+39', 'NL' => '+31', 'BE' => '+32',
+            'CH' => '+41', 'AT' => '+43', 'SE' => '+46', 'NO' => '+47',
+            'DK' => '+45', 'FI' => '+358', 'PL' => '+48', 'PT' => '+351',
+            'IE' => '+353', 'RO' => '+40', 'GR' => '+30', 'CZ' => '+420',
+            'HU' => '+36', 'UA' => '+380', 'RU' => '+7', 'HR' => '+385',
+            'BG' => '+359', 'RS' => '+381', 'SK' => '+421', 'SI' => '+386',
+            'LT' => '+370', 'LV' => '+371', 'EE' => '+372',
+            // Africa
+            'KE' => '+254', 'NG' => '+234', 'ZA' => '+27', 'GH' => '+233',
+            'EG' => '+20', 'TZ' => '+255', 'UG' => '+256', 'RW' => '+250',
+            'ET' => '+251', 'CM' => '+237', 'CI' => '+225', 'SN' => '+221',
+            'ZW' => '+263', 'BW' => '+267', 'MZ' => '+258', 'ZM' => '+260',
+            'MW' => '+265', 'AO' => '+244', 'CD' => '+243', 'MG' => '+261',
+            'SD' => '+249', 'SO' => '+252', 'TN' => '+216', 'MA' => '+212',
+            'DZ' => '+213', 'LY' => '+218', 'ML' => '+223', 'BF' => '+226',
+            'NE' => '+227', 'TD' => '+235', 'NA' => '+264', 'SS' => '+211',
+            // Asia & Oceania
+            'IN' => '+91', 'PK' => '+92', 'BD' => '+880', 'LK' => '+94',
+            'CN' => '+86', 'JP' => '+81', 'KR' => '+82', 'HK' => '+852',
+            'TW' => '+886', 'SG' => '+65', 'MY' => '+60', 'PH' => '+63',
+            'ID' => '+62', 'TH' => '+66', 'VN' => '+84', 'MM' => '+95',
+            'KH' => '+855', 'NP' => '+977', 'AU' => '+61', 'NZ' => '+64',
+            'FJ' => '+679',
+            // Middle East
+            'AE' => '+971', 'SA' => '+966', 'QA' => '+974', 'KW' => '+965',
+            'BH' => '+973', 'OM' => '+968', 'JO' => '+962', 'LB' => '+961',
+            'IL' => '+972', 'IQ' => '+964', 'IR' => '+98', 'TR' => '+90',
+            // Americas
+            'BR' => '+55', 'MX' => '+52', 'AR' => '+54', 'CO' => '+57',
+            'CL' => '+56', 'PE' => '+51', 'VE' => '+58', 'EC' => '+593',
+            'GT' => '+502', 'CR' => '+506', 'PA' => '+507', 'DO' => '+1',
+            'JM' => '+1', 'TT' => '+1', 'PR' => '+1',
         ];
 
         return $codes[strtoupper($countryCode)] ?? '';
@@ -783,6 +833,17 @@ class NotificationService
 
         if (!$mapping) {
             return ['success' => false, 'error' => 'No WhatsApp template mapping for: ' . $notificationType];
+        }
+
+        // Cross-request dedup: check if same WA template sent in last 60 seconds
+        $recentWa = Capsule::table('mod_sms_messages')
+            ->where('client_id', $clientId)
+            ->where('channel', 'whatsapp')
+            ->where('template_name', $mapping->wa_template_name)
+            ->where('created_at', '>=', date('Y-m-d H:i:s', strtotime('-60 seconds')))
+            ->exists();
+        if ($recentWa) {
+            return ['success' => false, 'error' => 'Duplicate WA notification (sent within last 60s)'];
         }
 
         // Resolve gateway — client-owned WA gateway takes priority over system

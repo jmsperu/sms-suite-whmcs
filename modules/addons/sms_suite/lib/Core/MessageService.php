@@ -117,6 +117,7 @@ class MessageService
                 'sender_id' => $senderId,
                 'to_number' => $to,
                 'message' => $message,
+                'template_name' => $options['template_name'] ?? null,
                 'media_url' => $options['media_url'] ?? null,
                 'encoding' => $segmentResult->encoding,
                 'segments' => $segmentResult->segments,
@@ -567,6 +568,9 @@ class MessageService
         require_once $baseDir . 'PlivoGateway.php';
         require_once $baseDir . 'VonageGateway.php';
         require_once $baseDir . 'InfobipGateway.php';
+        require_once $baseDir . 'AirtouchGateway.php';
+        require_once $baseDir . 'TelegramGateway.php';
+        require_once $baseDir . 'MessengerGateway.php';
         require_once $baseDir . 'GatewayRegistry.php';
     }
 

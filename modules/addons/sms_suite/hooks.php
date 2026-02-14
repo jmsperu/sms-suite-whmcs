@@ -236,6 +236,9 @@ add_hook('ClientDelete', 1, function ($vars) {
         Capsule::table('mod_sms_client_sender_ids')->where('client_id', $clientId)->delete();
         Capsule::table('mod_sms_sender_id_requests')->where('client_id', $clientId)->delete();
         Capsule::table('mod_sms_sender_id_billing')->where('client_id', $clientId)->delete();
+        // Gateway and chatbox cleanup
+        Capsule::table('mod_sms_gateways')->where('client_id', $clientId)->delete();
+        Capsule::table('mod_sms_chatbox')->where('client_id', $clientId)->delete();
         // Keep messages for audit trail, but could optionally delete
     } catch (Exception $e) {
         logActivity('SMS Suite Hook Error (ClientDelete): ' . $e->getMessage());
@@ -491,6 +494,11 @@ add_hook('DailyCronJob', 1, function ($vars) {
             Capsule::table('mod_sms_api_rate_limits')
                 ->where('window_start', '<', $cutoffDate)
                 ->delete();
+
+            // Delete old sent/received messages
+            Capsule::table('mod_sms_messages')
+                ->where('created_at', '<', $cutoffDate)
+                ->delete();
         }
 
         // Update cron status
@@ -602,18 +610,30 @@ add_hook('EmailPreSend', 1, function ($vars) {
             return;
         }
 
-        // Resolve the actual client ID — relid can be invoice ID for invoice emails
+        // Resolve the actual client ID — relid can be invoice/ticket/service/domain ID
         $mergeFields = $vars['mergefields'] ?? [];
         $clientId = !empty($mergeFields['client_id']) ? (int) $mergeFields['client_id'] : 0;
         if (!$clientId) {
-            // Fallback: check if relid is a client
-            $isClient = Capsule::table('tblclients')->where('id', $relId)->exists();
-            if ($isClient) {
-                $clientId = (int) $relId;
-            } else {
-                // Try as invoice ID
-                $inv = Capsule::table('tblinvoices')->where('id', $relId)->first();
-                $clientId = $inv ? (int) $inv->userid : 0;
+            // Try relid as different entity types
+            $clientId = (int) $relId;
+            if (!Capsule::table('tblclients')->where('id', $clientId)->exists()) {
+                $clientId = 0;
+                // Try entity tables in order of likelihood
+                $entityTables = [
+                    'tblinvoices' => 'userid',
+                    'tbltickets' => 'userid',
+                    'tblhosting' => 'userid',
+                    'tbldomains' => 'userid',
+                    'tblorders' => 'userid',
+                    'tblquotes' => 'userid',
+                ];
+                foreach ($entityTables as $table => $userCol) {
+                    $entity = Capsule::table($table)->where('id', $relId)->first();
+                    if ($entity && !empty($entity->$userCol)) {
+                        $clientId = (int) $entity->$userCol;
+                        break;
+                    }
+                }
             }
         }
         if (!$clientId) {
@@ -755,7 +775,7 @@ add_hook('InvoicePaidPreEmail', 5, function($vars) {
 
         // Also notify admins
         \SMSSuite\Core\NotificationService::sendAdminNotification('order_paid', [
-            'order_id' => $invoice->invoicenum ?: $invoiceId,
+            'order_id' => 'INV-' . ($invoice->invoicenum ?: $invoiceId),
             'client_name' => $client->firstname . ' ' . $client->lastname,
             'total' => $currencyPrefix . number_format($invoice->total, 2),
             'currency' => $currencyPrefix,

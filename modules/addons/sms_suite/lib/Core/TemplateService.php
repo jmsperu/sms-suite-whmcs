@@ -109,8 +109,9 @@ class TemplateService
     public static function render(string $template, array $data = []): string
     {
         // Support both {tag} and {{tag}} syntax
-        $template = preg_replace_callback('/\{\{?([^}]+)\}?\}/', function ($matches) use ($data) {
-            $tag = trim($matches[1]);
+        $template = preg_replace_callback('/\{\{([^}]+)\}\}|\{([^}]+)\}/', function ($matches) use ($data) {
+            // $matches[1] for {{tag}}, $matches[2] for {tag}
+            $tag = trim($matches[1] ?: $matches[2]);
             $value = self::resolveTag($tag, $data);
             return $value !== null ? $value : $matches[0];
         }, $template);
