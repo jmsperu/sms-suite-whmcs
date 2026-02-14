@@ -622,6 +622,7 @@ add_hook('EmailPreSend', 1, function ($vars) {
             $mergeData['last_name'] = $client->lastname;
             $mergeData['company'] = $client->companyname;
             $mergeData['email'] = $client->email;
+            $mergeData['currency'] = sms_suite_get_currency_prefix($client);
         } else {
             return; // No client found, skip notification
         }
@@ -709,7 +710,7 @@ add_hook('InvoiceCreated', 5, function($vars) {
         \SMSSuite\Core\NotificationService::sendClientNotification($invoice->userid, 'invoice_created', [
             'invoice_number' => $invoice->invoicenum ?: $invoiceId,
             'invoice_id' => $invoiceId,
-            'total' => $currencyPrefix . number_format($invoice->total, 2),
+            'total' => number_format($invoice->total, 2),
             'due_date' => date('M d, Y', strtotime($invoice->duedate)),
             'currency' => $currencyPrefix,
             'invoice_url' => rtrim(\App::getSystemURL(), '/') . '/viewinvoice.php?id=' . $invoiceId,
@@ -734,7 +735,7 @@ add_hook('InvoicePaidPreEmail', 5, function($vars) {
         \SMSSuite\Core\NotificationService::sendClientNotification($invoice->userid, 'invoice_paid', [
             'invoice_number' => $invoice->invoicenum ?: $invoiceId,
             'invoice_id' => $invoiceId,
-            'total' => $currencyPrefix . number_format($invoice->total, 2),
+            'total' => number_format($invoice->total, 2),
             'currency' => $currencyPrefix,
         ]);
 
@@ -771,7 +772,7 @@ add_hook('AfterShoppingCartCheckout', 5, function($vars) {
         \SMSSuite\Core\NotificationService::sendClientNotification($order->userid, 'order_confirmation', [
             'order_number' => $order->ordernum,
             'order_id' => $orderId,
-            'total' => $currencyPrefix . number_format($order->amount, 2),
+            'total' => number_format($order->amount, 2),
             'currency' => $currencyPrefix,
         ]);
 
@@ -1025,7 +1026,7 @@ add_hook('QuoteCreated', 5, function($vars) {
         $currencyPrefix = $quoteClient ? sms_suite_get_currency_prefix($quoteClient) : '';
         \SMSSuite\Core\NotificationService::sendClientNotification($quote->userid, 'quote_created', [
             'quote_number' => $quoteId,
-            'total' => $currencyPrefix . number_format($quote->total, 2),
+            'total' => number_format($quote->total, 2),
             'currency' => $currencyPrefix,
             'quote_url' => rtrim(\App::getSystemURL(), '/') . '/viewquote.php?id=' . $quoteId,
         ]);

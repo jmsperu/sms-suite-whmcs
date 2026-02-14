@@ -456,6 +456,12 @@ class NotificationService
             'email' => $client->email,
         ], $mergeData);
 
+        // Compute formatted_total for WA templates that combine currency+amount in one param
+        if (isset($mergeData['total'])) {
+            $currency = isset($mergeData['currency']) ? trim($mergeData['currency']) : '';
+            $mergeData['formatted_total'] = $currency ? ($currency . ' ' . $mergeData['total']) : $mergeData['total'];
+        }
+
         // Process template
         require_once __DIR__ . '/TemplateService.php';
         $message = TemplateService::render($template->content, $mergeData);
@@ -821,6 +827,12 @@ class NotificationService
             return ['success' => false, 'error' => 'WhatsApp template not approved: ' . $mapping->wa_template_name];
         }
 
+        // Compute formatted_total if not already set
+        if (!isset($mergeData['formatted_total']) && isset($mergeData['total'])) {
+            $currency = isset($mergeData['currency']) ? trim($mergeData['currency']) : '';
+            $mergeData['formatted_total'] = $currency ? ($currency . ' ' . $mergeData['total']) : $mergeData['total'];
+        }
+
         // Resolve param mapping
         $paramMapping = json_decode($mapping->param_mapping, true);
         if (!is_array($paramMapping)) {
@@ -909,7 +921,7 @@ class NotificationService
                 'content' => 'Dear {{1}}, your payment of {{2}} for Invoice #{{3}} was not successful. {{4}} Please try again or contact support.',
                 'param_mapping' => [
                     'body_1' => 'first_name',
-                    'body_2' => 'total',
+                    'body_2' => 'formatted_total',
                     'body_3' => 'invoice_number',
                     'body_4' => 'error_message',
                 ],
@@ -920,7 +932,7 @@ class NotificationService
                 'content' => 'Dear {{1}}, your payment of {{2}} for Invoice #{{3}} has been received. Receipt: {{4}}. Thank you!',
                 'param_mapping' => [
                     'body_1' => 'first_name',
-                    'body_2' => 'total',
+                    'body_2' => 'formatted_total',
                     'body_3' => 'invoice_number',
                     'body_4' => 'transaction_id',
                 ],
@@ -931,7 +943,7 @@ class NotificationService
                 'content' => 'Dear {{1}}, your payment of {{2}} for Invoice #{{3}} has been received. Receipt: {{4}}. Thank you!',
                 'param_mapping' => [
                     'body_1' => 'first_name',
-                    'body_2' => 'total',
+                    'body_2' => 'formatted_total',
                     'body_3' => 'invoice_number',
                     'body_4' => 'transaction_id',
                 ],
