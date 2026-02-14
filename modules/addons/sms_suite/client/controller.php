@@ -25,6 +25,12 @@ function sms_suite_client_dispatch($vars, $action, $clientId, $lang)
     // Ensure client has settings record
     sms_suite_ensure_client_settings($clientId);
 
+    // Handle AJAX routes (return JSON and exit)
+    if ($action === 'ajax_meta_token_exchange') {
+        sms_suite_client_ajax_meta_token_exchange($clientId);
+        return [];
+    }
+
     // Route to appropriate action
     switch ($action) {
         case 'send':
@@ -2228,6 +2234,7 @@ function sms_suite_client_reports($vars, $clientId, $lang)
  */
 function sms_suite_client_preferences($vars, $clientId, $lang)
 {
+    require_once __DIR__ . '/../sms_suite.php';
     $modulelink = $vars['modulelink'];
     $success = '';
     $error = '';
@@ -2475,7 +2482,7 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
                         $error = $lang['wa_invalid_creds'] ?? 'Saved credentials are invalid. Please re-enter them.';
                     } else {
                         // Call Meta Graph API to verify phone_number_id + access_token
-                        $testUrl = 'https://graph.facebook.com/v21.0/' . urlencode($creds['phone_number_id'])
+                        $testUrl = 'https://graph.facebook.com/v24.0/' . urlencode($creds['phone_number_id'])
                             . '?fields=verified_name,display_phone_number,quality_rating&access_token=' . urlencode($creds['access_token']);
 
                         $ch = curl_init($testUrl);
@@ -2571,6 +2578,69 @@ function sms_suite_client_preferences($vars, $clientId, $lang)
             'success' => $success,
             'error' => $error,
             'csrf_token' => SecurityHelper::getCsrfToken(),
+            'meta_app_id' => sms_suite_get_module_setting('meta_app_id'),
+            'meta_config_id' => sms_suite_get_module_setting('meta_config_id'),
+            'meta_configured' => !empty(sms_suite_get_module_setting('meta_app_id')) && !empty(sms_suite_get_module_setting('meta_app_secret')) && !empty(sms_suite_get_module_setting('meta_config_id')),
         ],
     ];
+}
+
+/**
+ * AJAX: Exchange Meta OAuth code for access token (client area)
+ */
+function sms_suite_client_ajax_meta_token_exchange($clientId)
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    if (!SecurityHelper::verifyCsrfPost()) {
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit;
+    }
+
+    $code = trim($_POST['code'] ?? '');
+    if (empty($code)) {
+        echo json_encode(['success' => false, 'error' => 'No authorization code provided']);
+        exit;
+    }
+
+    require_once __DIR__ . '/../sms_suite.php';
+    $appId = sms_suite_get_module_setting('meta_app_id');
+    $appSecret = sms_suite_get_module_setting('meta_app_secret');
+
+    if (empty($appId) || empty($appSecret)) {
+        echo json_encode(['success' => false, 'error' => 'Meta App not configured']);
+        exit;
+    }
+
+    $url = 'https://graph.facebook.com/v24.0/oauth/access_token?' . http_build_query([
+        'client_id' => $appId,
+        'client_secret' => $appSecret,
+        'code' => $code,
+    ]);
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlError) {
+        echo json_encode(['success' => false, 'error' => 'Connection error: ' . $curlError]);
+        exit;
+    }
+
+    $data = json_decode($response, true);
+    if ($httpCode !== 200 || empty($data['access_token'])) {
+        $errorMsg = $data['error']['message'] ?? 'Unknown error (HTTP ' . $httpCode . ')';
+        echo json_encode(['success' => false, 'error' => 'Token exchange failed: ' . $errorMsg]);
+        exit;
+    }
+
+    echo json_encode(['success' => true, 'access_token' => $data['access_token']]);
+    exit;
 }

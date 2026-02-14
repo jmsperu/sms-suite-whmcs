@@ -1368,7 +1368,7 @@ class Fast2SmsGateway extends AbstractGateway
  */
 class MetaWhatsAppGateway extends AbstractGateway
 {
-    const API_VERSION = 'v21.0';
+    const API_VERSION = 'v24.0';
 
     public function getType(): string { return 'meta_whatsapp'; }
     public function getName(): string { return 'Meta WhatsApp Business'; }

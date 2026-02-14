@@ -201,18 +201,31 @@
                         {$lang.wa_config_help|default:'Connect your own Meta WhatsApp Business account to send messages using your own number. Credentials require admin approval before activation.'}
                     </p>
 
+                    {if $meta_configured}
+                    <div style="background: #e3f2fd; border-radius: 8px; padding: 16px; margin-bottom: 20px; text-align: center;">
+                        <p style="margin-bottom: 12px; color: #1565c0; font-weight: 600;">
+                            <i class="fab fa-facebook"></i> Connect with one click — no need to copy credentials manually
+                        </p>
+                        <button type="button" onclick="launchWhatsAppSignup()" class="btn btn-primary btn-lg">
+                            <i class="fab fa-facebook"></i> Connect WhatsApp Account
+                        </button>
+                        <div id="es_status" style="margin-top: 10px;"></div>
+                    </div>
+                    <p class="text-muted text-center" style="margin-bottom: 16px; font-size: .85rem;">— or enter credentials manually below —</p>
+                    {/if}
+
                     <form method="post" action="{$modulelink}&action=preferences">
                         <input type="hidden" name="csrf_token" value="{$csrf_token}">
 
                         <div class="form-group">
                             <label>{$lang.wa_phone_number_id|default:'Phone Number ID'}</label>
-                            <input type="text" name="wa_phone_number_id" class="form-control" value="{$wa_config.phone_number_id}" placeholder="e.g. 123456789012345">
+                            <input type="text" name="wa_phone_number_id" id="wa_phone_number_id" class="form-control" value="{$wa_config.phone_number_id}" placeholder="e.g. 123456789012345">
                             <span class="form-text text-muted">{$lang.wa_phone_number_id_help|default:'From Meta Business Suite > WhatsApp > API Setup'}</span>
                         </div>
 
                         <div class="form-group">
                             <label>{$lang.wa_access_token|default:'Access Token'}</label>
-                            <input type="password" name="wa_access_token" class="form-control" placeholder="{if $wa_config.access_token_masked}{$wa_config.access_token_masked}{else}Enter your permanent access token{/if}">
+                            <input type="password" name="wa_access_token" id="wa_access_token" class="form-control" placeholder="{if $wa_config.access_token_masked}{$wa_config.access_token_masked}{else}Enter your permanent access token{/if}">
                             {if $wa_config.access_token_masked}
                             <span class="form-text text-muted">{$lang.wa_token_current|default:'Current token:'} {$wa_config.access_token_masked}</span>
                             {/if}
@@ -220,7 +233,7 @@
 
                         <div class="form-group">
                             <label>{$lang.wa_waba_id|default:'WABA ID'}</label>
-                            <input type="text" name="wa_waba_id" class="form-control" value="{$wa_config.waba_id}" placeholder="e.g. 123456789012345">
+                            <input type="text" name="wa_waba_id" id="wa_waba_id" class="form-control" value="{$wa_config.waba_id}" placeholder="e.g. 123456789012345">
                             <span class="form-text text-muted">{$lang.wa_waba_id_help|default:'WhatsApp Business Account ID from Meta Business Settings'}</span>
                         </div>
 
@@ -337,3 +350,85 @@ document.getElementById('accept_whatsapp').addEventListener('change', function()
     }
 });
 </script>
+
+{if $meta_configured}
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+<script>
+window.fbAsyncInit = function() {
+    FB.init({
+        appId: '{$meta_app_id}',
+        autoLogAppEvents: true,
+        xfbml: true,
+        version: 'v24.0'
+    });
+};
+
+window.addEventListener('message', function(event) {
+    if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return;
+    try {
+        var data = JSON.parse(event.data);
+        if (data.type === 'WA_EMBEDDED_SIGNUP') {
+            var d = data.data;
+            if (d.phone_number_id) {
+                var f = document.getElementById('wa_phone_number_id');
+                if (f) f.value = d.phone_number_id;
+                esStatus('<i class="fas fa-check text-success"></i> Phone Number ID captured');
+            }
+            if (d.waba_id) {
+                var f = document.getElementById('wa_waba_id');
+                if (f) f.value = d.waba_id;
+            }
+        }
+    } catch(e) {}
+});
+
+function launchWhatsAppSignup() {
+    esStatus('<i class="fas fa-spinner fa-spin"></i> Opening Meta signup...');
+    FB.login(function(response) {
+        if (response.authResponse) {
+            esStatus('<i class="fas fa-spinner fa-spin"></i> Exchanging token...');
+            exchangeCodeForToken(response.authResponse.code);
+        } else {
+            esStatus('<i class="fas fa-times text-danger"></i> Signup cancelled or failed');
+        }
+    }, {
+        config_id: '{$meta_config_id}',
+        response_type: 'code',
+        override_default_response_type: true,
+        extras: {
+            setup: {},
+            featureType: '',
+            sessionInfoVersion: 3
+        }
+    });
+}
+
+function exchangeCodeForToken(code) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '{$modulelink}&action=ajax_meta_token_exchange', true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            try {
+                var resp = JSON.parse(xhr.responseText);
+                if (resp.success && resp.access_token) {
+                    var f = document.getElementById('wa_access_token');
+                    if (f) { f.value = resp.access_token; f.type = 'text'; }
+                    esStatus('<i class="fas fa-check-circle text-success"></i> <strong>Connected!</strong> Credentials populated. Click <strong>Save Configuration</strong> to finish.');
+                } else {
+                    esStatus('<i class="fas fa-times text-danger"></i> ' + (resp.error || 'Token exchange failed'));
+                }
+            } catch(e) {
+                esStatus('<i class="fas fa-times text-danger"></i> Unexpected response from server');
+            }
+        }
+    };
+    xhr.send('code=' + encodeURIComponent(code) + '&csrf_token={$csrf_token}');
+}
+
+function esStatus(html) {
+    var el = document.getElementById('es_status');
+    if (el) el.innerHTML = html;
+}
+</script>
+{/if}

@@ -713,7 +713,7 @@ class WhatsAppService
             $wabaId = $credentials['waba_id'];
             $accessToken = $credentials['access_token'];
 
-            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates";
+            $url = "https://graph.facebook.com/v24.0/{$wabaId}/message_templates";
 
             $payload = [
                 'name' => $data['name'],
@@ -775,7 +775,7 @@ class WhatsAppService
             $accessToken = $credentials['access_token'];
 
             // Note: waba_id must be the WhatsApp Business Account ID, NOT the Phone Number ID
-            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+            $url = "https://graph.facebook.com/v24.0/{$wabaId}/message_templates?"
                  . http_build_query(['limit' => 250, 'fields' => 'name,status,category,language,components,id']);
 
             $ch = curl_init($url);
@@ -823,7 +823,7 @@ class WhatsAppService
             $wabaId = $credentials['waba_id'];
             $accessToken = $credentials['access_token'];
 
-            $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+            $url = "https://graph.facebook.com/v24.0/{$wabaId}/message_templates?"
                  . http_build_query(['name' => $templateName]);
 
             $ch = curl_init($url);
@@ -878,10 +878,10 @@ class WhatsAppService
 
             // Try deleting by template ID (preferred) or by name on WABA
             if ($templateId) {
-                $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+                $url = "https://graph.facebook.com/v24.0/{$wabaId}/message_templates?"
                      . http_build_query(['hsm_id' => $templateId, 'name' => $templateName]);
             } else {
-                $url = "https://graph.facebook.com/v21.0/{$wabaId}/message_templates?"
+                $url = "https://graph.facebook.com/v24.0/{$wabaId}/message_templates?"
                      . http_build_query(['name' => $templateName]);
             }
 
@@ -1138,7 +1138,7 @@ class WhatsAppService
         $phoneNumberId = $credentials['phone_number_id'];
         $accessToken = $credentials['access_token'];
 
-        $url = "https://graph.facebook.com/v21.0/{$phoneNumberId}/messages";
+        $url = "https://graph.facebook.com/v24.0/{$phoneNumberId}/messages";
 
         $body = [
             'messaging_product' => 'whatsapp',

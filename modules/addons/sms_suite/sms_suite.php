@@ -79,8 +79,40 @@ function sms_suite_config()
                 'Default' => 'no',
                 'Description' => 'WARNING: Delete all module data when deactivating',
             ],
+            'meta_app_id' => [
+                'FriendlyName' => 'Meta App ID',
+                'Type' => 'text',
+                'Size' => '30',
+                'Default' => '598024678497863',
+                'Description' => 'Facebook App ID for Embedded Signup',
+            ],
+            'meta_app_secret' => [
+                'FriendlyName' => 'Meta App Secret',
+                'Type' => 'password',
+                'Size' => '50',
+                'Default' => '',
+                'Description' => 'Facebook App Secret (from Meta Developer Dashboard)',
+            ],
+            'meta_config_id' => [
+                'FriendlyName' => 'Meta Config ID',
+                'Type' => 'text',
+                'Size' => '30',
+                'Default' => '1265471198823134',
+                'Description' => 'Embedded Signup Configuration ID',
+            ],
         ],
     ];
+}
+
+/**
+ * Retrieve a module setting from tbladdonmodules
+ */
+function sms_suite_get_module_setting($key)
+{
+    return Capsule::table('tbladdonmodules')
+        ->where('module', 'sms_suite')
+        ->where('setting', $key)
+        ->value('value');
 }
 
 /**

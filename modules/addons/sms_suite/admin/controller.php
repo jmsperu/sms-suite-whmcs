@@ -30,6 +30,9 @@ function sms_suite_admin_dispatch($vars, $action, $lang)
         case 'ajax_search_sender_ids':
             sms_suite_ajax_search_sender_ids();
             return;
+        case 'ajax_meta_token_exchange':
+            sms_suite_ajax_meta_token_exchange();
+            return;
     }
 
     // Build navigation
@@ -783,6 +786,35 @@ function sms_suite_admin_gateway_edit($vars, $lang)
 
     echo '</div>';
 
+    // Embedded Signup section (Meta WhatsApp only)
+    require_once __DIR__ . '/../sms_suite.php';
+    $metaAppId = sms_suite_get_module_setting('meta_app_id');
+    $metaConfigId = sms_suite_get_module_setting('meta_config_id');
+    $metaAppSecret = sms_suite_get_module_setting('meta_app_secret');
+    $esDisplay = ($currentType === 'meta_whatsapp') ? 'block' : 'none';
+
+    echo '<div id="embedded_signup_section" style="display:' . $esDisplay . '">';
+    echo '<hr><h4><i class="fa fa-facebook-square text-primary"></i> Quick Setup — Embedded Signup</h4>';
+    if (empty($metaAppId) || empty($metaAppSecret) || empty($metaConfigId)) {
+        echo '<div class="alert alert-warning">';
+        echo '<i class="fa fa-exclamation-triangle"></i> To enable one-click WhatsApp setup, configure <strong>Meta App ID</strong>, <strong>App Secret</strong>, and <strong>Config ID</strong> in ';
+        echo '<a href="configaddonmods.php#sms_suite">Setup &rarr; Addon Modules &rarr; SMS Suite</a>.';
+        echo '</div>';
+    } else {
+        echo '<div class="alert alert-info">';
+        echo '<i class="fa fa-info-circle"></i> Click the button below to connect a WhatsApp Business account. The credentials will be filled in automatically. You can also enter them manually.';
+        echo '</div>';
+        echo '<div class="form-group">';
+        echo '<div class="col-sm-offset-3 col-sm-6">';
+        echo '<button type="button" onclick="launchWhatsAppSignup()" class="btn btn-primary btn-lg">';
+        echo '<i class="fa fa-facebook"></i> Connect WhatsApp Account';
+        echo '</button>';
+        echo '<div id="es_status" style="margin-top:10px"></div>';
+        echo '</div>';
+        echo '</div>';
+    }
+    echo '</div>';
+
     // Rate limiting
     echo '<hr><h4>Rate Limiting</h4>';
     echo '<div class="form-group">';
@@ -880,8 +912,100 @@ function sms_suite_admin_gateway_edit($vars, $lang)
         });
 
         container.innerHTML = html;
+
+        // Toggle Embedded Signup section visibility
+        var esSection = document.getElementById("embedded_signup_section");
+        if (esSection) {
+            esSection.style.display = (type === "meta_whatsapp") ? "block" : "none";
+        }
     }
     </script>';
+
+    // Facebook JS SDK + Embedded Signup handlers (only if configured)
+    if (!empty($metaAppId) && !empty($metaConfigId) && !empty($metaAppSecret)) {
+        $csrfToken = SecurityHelper::getCsrfToken();
+        echo '<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>';
+        echo '<script>
+        window.fbAsyncInit = function() {
+            FB.init({
+                appId: "' . htmlspecialchars($metaAppId) . '",
+                autoLogAppEvents: true,
+                xfbml: true,
+                version: "v24.0"
+            });
+        };
+
+        // Listen for Embedded Signup events (phone_number_id and waba_id)
+        window.addEventListener("message", function(event) {
+            if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") return;
+            try {
+                var data = JSON.parse(event.data);
+                if (data.type === "WA_EMBEDDED_SIGNUP") {
+                    var d = data.data;
+                    if (d.phone_number_id) {
+                        var field = document.querySelector("input[name=\'credentials[phone_number_id]\']");
+                        if (field) { field.value = d.phone_number_id; field.type = "text"; }
+                        esStatus("<i class=\"fa fa-check text-success\"></i> Phone Number ID captured");
+                    }
+                    if (d.waba_id) {
+                        var field = document.querySelector("input[name=\'credentials[waba_id]\']");
+                        if (field) { field.value = d.waba_id; field.type = "text"; }
+                    }
+                }
+            } catch(e) {}
+        });
+
+        function launchWhatsAppSignup() {
+            esStatus("<i class=\"fa fa-spinner fa-spin\"></i> Opening Meta signup...");
+            FB.login(function(response) {
+                if (response.authResponse) {
+                    var code = response.authResponse.code;
+                    esStatus("<i class=\"fa fa-spinner fa-spin\"></i> Exchanging token...");
+                    exchangeCodeForToken(code);
+                } else {
+                    esStatus("<i class=\"fa fa-times text-danger\"></i> Signup cancelled or failed");
+                }
+            }, {
+                config_id: "' . htmlspecialchars($metaConfigId) . '",
+                response_type: "code",
+                override_default_response_type: true,
+                extras: {
+                    setup: {},
+                    featureType: "",
+                    sessionInfoVersion: 3
+                }
+            });
+        }
+
+        function exchangeCodeForToken(code) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "' . htmlspecialchars($modulelink) . '&action=ajax_meta_token_exchange", true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    try {
+                        var resp = JSON.parse(xhr.responseText);
+                        if (resp.success && resp.access_token) {
+                            var field = document.querySelector("input[name=\'credentials[access_token]\']");
+                            if (field) { field.value = resp.access_token; field.type = "text"; }
+                            esStatus("<i class=\"fa fa-check-circle text-success\"></i> <strong>Connected!</strong> Credentials populated. Click Save to finish.");
+                        } else {
+                            esStatus("<i class=\"fa fa-times text-danger\"></i> " + (resp.error || "Token exchange failed"));
+                        }
+                    } catch(e) {
+                        esStatus("<i class=\"fa fa-times text-danger\"></i> Unexpected response from server");
+                    }
+                }
+            };
+            xhr.send("code=" + encodeURIComponent(code) + "&csrf_token=' . $csrfToken . '");
+        }
+
+        function esStatus(html) {
+            var el = document.getElementById("es_status");
+            if (el) el.innerHTML = html;
+        }
+        </script>';
+    }
 }
 
 /**
@@ -6935,6 +7059,67 @@ function sms_suite_ajax_search_sender_ids()
     }
 
     echo json_encode(['results' => $results]);
+    exit;
+}
+
+/**
+ * AJAX: Exchange Meta OAuth code for a long-lived access token
+ */
+function sms_suite_ajax_meta_token_exchange()
+{
+    header('Content-Type: application/json; charset=utf-8');
+
+    if (!SecurityHelper::verifyCsrfPost()) {
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit;
+    }
+
+    $code = trim($_POST['code'] ?? '');
+    if (empty($code)) {
+        echo json_encode(['success' => false, 'error' => 'No authorization code provided']);
+        exit;
+    }
+
+    require_once __DIR__ . '/../sms_suite.php';
+    $appId = sms_suite_get_module_setting('meta_app_id');
+    $appSecret = sms_suite_get_module_setting('meta_app_secret');
+
+    if (empty($appId) || empty($appSecret)) {
+        echo json_encode(['success' => false, 'error' => 'Meta App ID or Secret not configured']);
+        exit;
+    }
+
+    // Exchange code for short-lived token
+    $url = 'https://graph.facebook.com/v24.0/oauth/access_token?' . http_build_query([
+        'client_id' => $appId,
+        'client_secret' => $appSecret,
+        'code' => $code,
+    ]);
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlError) {
+        echo json_encode(['success' => false, 'error' => 'Connection error: ' . $curlError]);
+        exit;
+    }
+
+    $data = json_decode($response, true);
+    if ($httpCode !== 200 || empty($data['access_token'])) {
+        $errorMsg = $data['error']['message'] ?? 'Unknown error (HTTP ' . $httpCode . ')';
+        echo json_encode(['success' => false, 'error' => 'Token exchange failed: ' . $errorMsg]);
+        exit;
+    }
+
+    echo json_encode(['success' => true, 'access_token' => $data['access_token']]);
     exit;
 }
 
