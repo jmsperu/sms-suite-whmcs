@@ -108,7 +108,7 @@ class NotificationService
         try {
             $template = Capsule::table('mod_sms_notification_templates')
                 ->where('notification_type', $notificationType)
-                ->where('status', 'active')
+                ->where('status', 1)
                 ->first();
         } catch (Exception $e) {
             // Column may not exist on older installs before migration
@@ -414,7 +414,7 @@ class NotificationService
         try {
             $template = Capsule::table('mod_sms_notification_templates')
                 ->where('notification_type', $notificationType)
-                ->where('status', 'active')
+                ->where('status', 1)
                 ->first();
         } catch (Exception $e) {
             // Column may not exist on older installs before migration
@@ -449,7 +449,7 @@ class NotificationService
         ], $mergeData);
 
         // Process template
-        $message = TemplateService::processTemplate($template->message, $mergeData);
+        $message = TemplateService::render($template->content, $mergeData);
 
         // Send via MessageService (SMS)
         $result = MessageService::send($clientId, $phone, $message, ['context' => 'notification']);
@@ -849,7 +849,7 @@ class NotificationService
                 $resolved[$paramKey] = (string) $mergeData[$mergeField];
             } else {
                 // Try processing as a template tag via TemplateService
-                $processed = TemplateService::processTemplate('{' . $mergeField . '}', $mergeData);
+                $processed = TemplateService::render('{' . $mergeField . '}', $mergeData);
                 // If still unresolved (tag remains), use empty string
                 if ($processed === '{' . $mergeField . '}') {
                     $resolved[$paramKey] = '';

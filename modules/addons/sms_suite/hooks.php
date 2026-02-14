@@ -634,7 +634,7 @@ add_hook('EmailPreSend', 1, function ($vars) {
             return;
         }
 
-        $message = \SMSSuite\Core\TemplateService::processTemplate($smsTemplate['message'], $mergeData);
+        $message = \SMSSuite\Core\TemplateService::render($smsTemplate['content'], $mergeData);
         \SMSSuite\Core\MessageService::send($clientId, $phone, $message, ['context' => 'notification']);
 
         // Send WhatsApp template notification in parallel
